@@ -16,7 +16,9 @@ function apiBase(p) { return p.engine === 'ffmpeg' ? '/api/profiles/ffmpeg/' : '
 function editorUrl(p) { return `${p.engine === 'ffmpeg' ? '/ffmpeg-edit.html' : '/profile-edit.html'}?name=${encodeURIComponent(p.name)}`; }
 
 function profileRow(p, index) {
-  const lock = p.builtIn ? `<span class="prof-lock" title="Built-in - ships with Compressarr and can't be changed or deleted">${LOCK_ICON}built-in</span>` : '';
+  const lock = p.builtIn
+    ? `<span class="prof-lock" title="Built-in - ships with Compressarr and can't be changed or deleted">${LOCK_ICON}built-in</span>`
+    : `<span class="prof-lock" title="Created by you - you can edit, duplicate or delete it">user</span>`;
   const engine = p.engine === 'ffmpeg' ? 'ffmpeg' : 'HandBrake';
   const sub = [p.container, p.builtIn ? '' : 'saved in Compressarr\'s own file'].filter(Boolean).join(' · ');
   const missing = p.engine === 'ffmpeg' ? warnings[p.name] : null;

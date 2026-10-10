@@ -29,6 +29,7 @@ for that full history.
   you choose to switch. The download is still checked against the checksum GitHub publishes for it.
 
 ### Changed
+- **Your own profiles are tagged "user" on the Profiles page**, the way the shipped ones are tagged "built-in", so the two are easy to tell apart.
 - **The destructive Maintenance buttons on Settings are under Advanced.** Clear Logs, Clear History, Purge Logs & Reports,
   Clear All, Reset Lanes and Clear Configuration are hidden until Advanced is on. Reset Resume File and Clean Up Now stay
   visible. Each of the six keeps its confirmation prompt.
