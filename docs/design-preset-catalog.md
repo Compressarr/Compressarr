@@ -255,9 +255,16 @@ The HEVC sibling of the shipped UHD AV1 profile: the two differ by codec.
 - To verify before publishing: that a real Dolby Vision file keeps its DV on the output, including a dual-layer profile 7 rip
   (not sure how HandBrake treats those), and the size and time on a UHD sample.
 
-### 10.2 Compressarr HD Quality v1 - HandBrake - IN DISCUSSION
+### 10.2 Compressarr HD Quality v1 - HandBrake - SETTLED
 
-### 10.3 Compressarr HD AV1 (fast) v1 - HandBrake - NOT YET DISCUSSED
+The "keep the movies I care about" counterpart to the shipped SD-HD profile (which is deliberately fast and small).
+
+- Video: x265 10-bit, profile main10, **RF 20**, **preset fast**; source resolution, no scaling.
+- Audio: **the same as SD-HD** - the first matching English track encoded to E-AC3 (up to 7.1, 512 kbps), copying a track that is
+  already E-AC3/AC3 where HandBrake can.
+- Aimed at 1080p and below; UHD sources are what 10.1 is for.
+
+### 10.3 Compressarr HD AV1 (fast) v1 - HandBrake - IN DISCUSSION
 
 ### 10.4 Compressarr Compatibility (H.264) v1 - HandBrake, optional - NOT YET DISCUSSED
 
