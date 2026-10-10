@@ -107,7 +107,8 @@ and an `ffmpeg-presets.json`-style profile object. No new profile format is inve
       "author": "MrWizardCT",
       "sourceUrl": null,
       "deprecated": null,
-      "requires": ["libx265"]
+      "requires": ["libx265"],
+      "dependsOn": []
     }
   ]
 }
@@ -122,6 +123,10 @@ and an `ffmpeg-presets.json`-style profile object. No new profile format is inve
 - `minAppVersion` is per profile: an app older than that lists the profile greyed out ("needs Compressarr 2.3").
 - `requires` lists encoders/capabilities (`libsvtav1`, `av1_nvenc`, an NVENC GPU session...) so the dialog can warn before
   install, as the Profiles page already does for ffmpeg builds.
+- `dependsOn` lists other catalog profiles this one needs (family and version), for example an ffmpeg profile whose
+  `FallbackHandBrakePreset` is another catalog profile. The dialog shows the dependency, and installing the profile offers to install
+  it too (ticked, but the user can untick it). If it is skipped, the profile still installs and the Profiles page flags the
+  missing fallback the way it flags other unusable profiles. A dependency must be in the same source.
 - `sha256` is of the profile file. The app verifies it on download.
 - Possible later: `license`, `tags`, `previewImage`. Not needed now.
 
@@ -281,12 +286,20 @@ so it deliberately differs from SD-HD (MP4, a 30 fps cap and AAC audio are what 
 - No subtitles, no chapter markers.
 - Description states that the output is SDR and larger than HEVC, and is meant for devices that need H.264.
 
-### 10.5 Compressarr AV1 (NVENC) v1 - ffmpeg - IN DISCUSSION
+### 10.5 Compressarr AV1 (NVENC) v1 - ffmpeg - SETTLED
 
-`av1_nvenc`, 10-bit; needs an RTX 40-series GPU and the AV1-specific GPU check. Neither engine keeps Dolby Vision / HDR10+
-with it, so its fallback should be the UHD HEVC (HDR) HandBrake profile (10.1).
+Based on the owner's existing, tested ffmpeg profile (`av1_nvenc`).
 
-### 10.6 Compressarr HEVC NVENC (quality) v1 - ffmpeg - NOT YET DISCUSSED
+- Video: `av1_nvenc`, 10-bit (`p010le`), **preset p5, cq 30**, MKV.
+- Audio: pass through every English track ffmpeg can copy, E-AC3 640 kbps for the rest. English subtitles and chapters.
+- Requires `av1_nvenc` and a working NVENC **AV1** session (an RTX 40-series GPU or newer). The app's GPU check currently tests
+  `hevc_nvenc` only, so it needs an AV1-specific test before this profile can be offered or run.
+- Dolby Vision / HDR10+ files cannot stay in this encode on either engine, so the profile's fallback is the HandBrake profile
+  **Compressarr UHD HEVC (HDR) v1** (10.1), which keeps them. That fallback is itself a catalog profile, hence `dependsOn`
+  (section 5): installing this profile offers to install that one too. (To confirm: the fallback choice was proposed, not
+  explicitly picked.)
+
+### 10.6 Compressarr HEVC NVENC (quality) v1 - ffmpeg - IN DISCUSSION
 
 ## 11. Work breakdown
 
