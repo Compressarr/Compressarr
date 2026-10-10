@@ -268,9 +268,20 @@ The "keep the movies I care about" counterpart to the shipped SD-HD profile (whi
 
 Not needed: the shipped SD-HD profile already covers HD content, and the UHD AV1 profile covers AV1.
 
-### 10.4 Compressarr Compatibility (H.264) v1 - HandBrake, optional - IN DISCUSSION
+### 10.4 Compressarr Compatibility (H.264) v1 - HandBrake - SETTLED
 
-### 10.5 Compressarr AV1 (NVENC) v1 - ffmpeg - NOT YET DISCUSSED
+For clients that cannot play HEVC. It is the owner's original H.264 standard, "VeryFastDDtoAAC", used before the move to x265,
+so it deliberately differs from SD-HD (MP4, a 30 fps cap and AAC audio are what made it play on old hardware):
+
+- Video: x264 8-bit, profile main, level 4.0, **RF 24, preset veryfast**; frame rate peak-capped at 30 fps (variable below
+  that); picture crop auto; deinterlace (decomb) only when interlaced; PAR auto.
+- Container: **MP4**.
+- Audio: the first English track (English, undetermined, then any), copied when it is AAC, AC3, E-AC3, DTS, DTS-HD, TrueHD, FLAC
+  or MP3 and the container can hold it, otherwise AAC 5.1 at 384 kbps.
+- No subtitles, no chapter markers.
+- Description states that the output is SDR and larger than HEVC, and is meant for devices that need H.264.
+
+### 10.5 Compressarr AV1 (NVENC) v1 - ffmpeg - IN DISCUSSION
 
 `av1_nvenc`, 10-bit; needs an RTX 40-series GPU and the AV1-specific GPU check. Neither engine keeps Dolby Vision / HDR10+
 with it, so its fallback should be the UHD HEVC (HDR) HandBrake profile (10.1).
