@@ -349,29 +349,29 @@
             <label>Clean up old logs &amp; reports<span class="help-tag" tabindex="0" title="Runs the same retention cleanup a normal pass already does automatically (using the Log/report retention setting above) right now, instead of waiting for the next one. Removed files go to the Recycle Bin, not a permanent delete.">?<span class="help-tip">Runs the same retention cleanup a normal pass already does automatically (using the Log/report retention setting above) right now, instead of waiting for the next one. Removed files go to the Recycle Bin, not a permanent delete.</span></span></label>
             <button id="cleanupNowBtn">Clean Up Now</button>
           </div>
-          <div class="maintenance-divider"></div>
-          <div class="field-row">
+          <div class="maintenance-divider adv-only"></div>
+          <div class="field-row adv-only">
             <label>Clear logs<span class="help-tag" tabindex="0" title="Deletes every log file (Summary/HBdetails .log and .txt files) right now, regardless of age - unlike Clean Up Now above, which only removes files past the retention setting. Removed files go to the Recycle Bin, not a permanent delete.">?<span class="help-tip">Deletes every log file (Summary/HBdetails .log and .txt files) right now, regardless of age - unlike Clean Up Now above, which only removes files past the retention setting. Removed files go to the Recycle Bin, not a permanent delete.</span></span></label>
             <button id="clearLogsBtn" class="danger">Clear Logs</button>
           </div>
-          <div class="field-row">
+          <div class="field-row adv-only">
             <label>Clear history<span class="help-tag" tabindex="0" title="Deletes every HTML report and the run-history CSV - everything the History page shows. Leaves the run counter untouched. Removed files go to the Recycle Bin, not a permanent delete.">?<span class="help-tip">Deletes every HTML report and the run-history CSV - everything the History page shows. Leaves the run counter untouched. Removed files go to the Recycle Bin, not a permanent delete.</span></span></label>
             <button id="clearHistoryBtn" class="danger">Clear History</button>
           </div>
-          <div class="field-row">
+          <div class="field-row adv-only">
             <label>Purge logs &amp; reports<span class="help-tag" tabindex="0" title="Same as Clear Logs and Clear History combined - deletes every log file, every HTML report, and the run-history CSV - but permanently, not to the Recycle Bin. Faster for a large accumulated backlog, since recycling happens one file at a time, but cannot be undone.">?<span class="help-tip">Same as Clear Logs and Clear History combined - deletes every log file, every HTML report, and the run-history CSV - but permanently, not to the Recycle Bin. Faster for a large accumulated backlog, since recycling happens one file at a time, but cannot be undone.</span></span></label>
             <button id="purgeLogsReportsBtn" class="danger">Purge Logs &amp; Reports</button>
           </div>
-          <div class="field-row">
+          <div class="field-row adv-only">
             <label>Clear all<span class="help-tag" tabindex="0" title="Deletes everything except Settings and Lanes: every report, every log, and all tracked resume state - a full reset for starting genuinely fresh. Leaves the run counter untouched (a lifetime stat, not test data). Removed files go to the Recycle Bin, not a permanent delete.">?<span class="help-tip">Deletes everything except Settings and Lanes: every report, every log, and all tracked resume state - a full reset for starting genuinely fresh. Leaves the run counter untouched (a lifetime stat, not test data). Removed files go to the Recycle Bin, not a permanent delete.</span></span></label>
             <button id="clearAllBtn" class="danger">Clear All</button>
           </div>
-          <div class="maintenance-divider"></div>
-          <div class="field-row">
+          <div class="maintenance-divider adv-only"></div>
+          <div class="field-row adv-only">
             <label>Reset lanes<span class="help-tag" tabindex="0" title="Deletes every configured lane and replaces them with a single new, blank lane block. Every other setting (HandBrake path, Sonarr/Radarr, processing options, etc.) is left untouched. Cannot be undone unless you've exported a backup first.">?<span class="help-tip">Deletes every configured lane and replaces them with a single new, blank lane block. Every other setting (HandBrake path, Sonarr/Radarr, processing options, etc.) is left untouched. Cannot be undone unless you've exported a backup first.</span></span></label>
             <button id="resetLanesBtn" class="danger">Reset Lanes</button>
           </div>
-          <div class="field-row">
+          <div class="field-row adv-only">
             <label>Clear configuration<span class="help-tag" tabindex="0" title="Resets every setting and every lane back to Compressarr's built-in defaults. Cannot be undone unless you've exported a backup first.">?<span class="help-tip">Resets every setting and every lane back to Compressarr's built-in defaults. Cannot be undone unless you've exported a backup first.</span></span></label>
             <button id="clearConfigBtn" class="danger">Clear Configuration</button>
           </div>

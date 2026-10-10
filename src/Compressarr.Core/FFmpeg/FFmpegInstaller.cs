@@ -1,11 +1,14 @@
 using System.IO.Compression;
+using System.Text.RegularExpressions;
+using Compressarr.Core.Config;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 
 namespace Compressarr.Core.FFmpeg;
 
-public sealed record FFmpegReleaseInfo(string Name, string AssetName, string DownloadUrl, long SizeBytes, string ReleaseUrl, string? Sha256);
+/// <param name="Branch">The numbered release branch a Stable build is from ("9.0"); null for a Latest (master) build.</param>
+public sealed record FFmpegReleaseInfo(string Name, string AssetName, string DownloadUrl, long SizeBytes, string ReleaseUrl, string? Sha256, string? Branch = null);
 
 /// <summary>
 /// Finds and installs a managed copy of ffmpeg (Windows: the GPL build from BtbN's FFmpeg-Builds on
@@ -16,9 +19,9 @@ public sealed record FFmpegReleaseInfo(string Name, string AssetName, string Dow
 /// </summary>
 public interface IFFmpegInstaller
 {
-    /// <summary>The latest build for this OS/architecture, or null (Linux/macOS: use your package
-    /// manager; or nothing suitable was published).</summary>
-    Task<FFmpegReleaseInfo?> GetLatestReleaseAsync();
+    /// <summary>The newest build on <paramref name="channel"/> for this OS/architecture, or null (Linux/macOS: use
+    /// your package manager; or nothing suitable was published).</summary>
+    Task<FFmpegReleaseInfo?> GetLatestReleaseAsync(FFmpegChannel channel);
 
     /// <summary>Downloads, verifies and unpacks the release into <paramref name="installDir"/>;
     /// returns the path to ffmpeg.exe. Throws InvalidDataException when the checksum doesn't match.</summary>
@@ -32,7 +35,7 @@ public sealed class FFmpegInstaller : IFFmpegInstaller
 
     public FFmpegInstaller(IHttpClientFactory httpClientFactory) => _httpClientFactory = httpClientFactory;
 
-    public async Task<FFmpegReleaseInfo?> GetLatestReleaseAsync()
+    public async Task<FFmpegReleaseInfo?> GetLatestReleaseAsync(FFmpegChannel channel)
     {
         if (!OperatingSystem.IsWindows()) return null;
 
@@ -42,34 +45,57 @@ public sealed class FFmpegInstaller : IFFmpegInstaller
         var response = await client.GetAsync(ReleaseApiUrl);
         response.EnsureSuccessStatusCode();
         var release = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
-        return SelectAsset(release, RuntimeInformation.ProcessArchitecture);
+        return SelectAsset(release, RuntimeInformation.ProcessArchitecture, channel);
     }
 
-    /// <summary>Picks the GPL build for the architecture out of a GitHub release document. Pure, so
-    /// it is tested against a real-shaped release without the network.</summary>
-    internal static FFmpegReleaseInfo? SelectAsset(JsonObject release, Architecture architecture)
+    /// <summary>Picks the GPL build for the architecture and channel out of a GitHub release document. Latest is the
+    /// master asset; Stable is the numbered release branch with the highest version (BtbN keeps a few, e.g. 8.1 and
+    /// 9.0, so "newest" is chosen by number, not by whatever the list happens to order first). Pure, so it is tested
+    /// against a real-shaped release without the network.</summary>
+    internal static FFmpegReleaseInfo? SelectAsset(JsonObject release, Architecture architecture, FFmpegChannel channel)
     {
-        var wanted = architecture == Architecture.Arm64 ? "ffmpeg-master-latest-winarm64-gpl.zip" : "ffmpeg-master-latest-win64-gpl.zip";
+        var platform = architecture == Architecture.Arm64 ? "winarm64" : "win64";
         if (release["assets"] is not JsonArray assets) return null;
 
-        foreach (var node in assets)
+        JsonObject? chosen = null;
+        string? branch = null;
+        if (channel == FFmpegChannel.Latest)
         {
-            if (node is not JsonObject asset || asset["name"]?.GetValue<string>() != wanted) continue;
+            var master = $"ffmpeg-master-latest-{platform}-gpl.zip";
+            chosen = assets.OfType<JsonObject>().FirstOrDefault(a => a["name"]?.GetValue<string>() == master);
+        }
+        else
+        {
+            var pattern = new Regex($@"^ffmpeg-n(\d+)\.(\d+)-latest-{platform}-gpl-\d+\.\d+\.zip$", RegexOptions.CultureInvariant);
+            (int Major, int Minor) best = (-1, -1);
+            foreach (var node in assets)
+            {
+                if (node is not JsonObject candidate) continue;
+                var match = pattern.Match(candidate["name"]?.GetValue<string>() ?? "");
+                if (!match.Success) continue;
 
-            // GitHub publishes each asset's checksum as "sha256:<hex>".
-            var digest = asset["digest"]?.GetValue<string>();
-            var sha = digest is not null && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) ? digest[7..] : null;
-
-            return new FFmpegReleaseInfo(
-                Name: release["name"]?.GetValue<string>() ?? release["tag_name"]?.GetValue<string>() ?? "latest build",
-                AssetName: wanted,
-                DownloadUrl: asset["browser_download_url"]!.GetValue<string>(),
-                SizeBytes: asset["size"]?.GetValue<long>() ?? 0,
-                ReleaseUrl: release["html_url"]?.GetValue<string>() ?? "https://github.com/BtbN/FFmpeg-Builds/releases",
-                Sha256: sha);
+                var version = (Major: int.Parse(match.Groups[1].Value), Minor: int.Parse(match.Groups[2].Value));
+                if (version.CompareTo(best) <= 0) continue;
+                best = version;
+                chosen = candidate;
+                branch = $"{version.Major}.{version.Minor}";
+            }
         }
 
-        return null;
+        if (chosen is null) return null;
+
+        // GitHub publishes each asset's checksum as "sha256:<hex>".
+        var digest = chosen["digest"]?.GetValue<string>();
+        var sha = digest is not null && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) ? digest[7..] : null;
+
+        return new FFmpegReleaseInfo(
+            Name: release["name"]?.GetValue<string>() ?? release["tag_name"]?.GetValue<string>() ?? "latest build",
+            AssetName: chosen["name"]!.GetValue<string>(),
+            DownloadUrl: chosen["browser_download_url"]!.GetValue<string>(),
+            SizeBytes: chosen["size"]?.GetValue<long>() ?? 0,
+            ReleaseUrl: release["html_url"]?.GetValue<string>() ?? "https://github.com/BtbN/FFmpeg-Builds/releases",
+            Sha256: sha,
+            Branch: branch);
     }
 
     public async Task<string> InstallAsync(FFmpegReleaseInfo release, string installDir, IProgress<string>? progress = null, CancellationToken cancellationToken = default)

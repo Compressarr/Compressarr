@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
+using Compressarr.Core.Config;
 using Compressarr.Core.FFmpeg;
 
 namespace Compressarr.Core.Tests.FFmpeg;
@@ -113,18 +114,23 @@ public class FFmpegToolingTests : IDisposable
           "assets": [
             { "name": "ffmpeg-master-latest-linux64-gpl.tar.xz", "size": 1, "browser_download_url": "https://x/linux", "digest": "sha256:aa" },
             { "name": "ffmpeg-master-latest-win64-gpl.zip", "size": 192500000, "browser_download_url": "https://x/win64", "digest": "sha256:ABCDEF01" },
-            { "name": "ffmpeg-master-latest-winarm64-gpl.zip", "size": 180000000, "browser_download_url": "https://x/arm64" }
+            { "name": "ffmpeg-master-latest-winarm64-gpl.zip", "size": 180000000, "browser_download_url": "https://x/arm64" },
+            { "name": "ffmpeg-n9.0-latest-win64-gpl-9.0.zip", "size": 194000000, "browser_download_url": "https://x/n9.0-win64", "digest": "sha256:90AA" },
+            { "name": "ffmpeg-n9.0-latest-win64-lgpl-9.0.zip", "size": 171000000, "browser_download_url": "https://x/n9.0-lgpl", "digest": "sha256:90BB" },
+            { "name": "ffmpeg-n9.0-latest-winarm64-gpl-9.0.zip", "size": 136000000, "browser_download_url": "https://x/n9.0-arm64", "digest": "sha256:90CC" },
+            { "name": "ffmpeg-n8.1-latest-win64-gpl-8.1.zip", "size": 193000000, "browser_download_url": "https://x/n8.1-win64", "digest": "sha256:81AA" },
+            { "name": "ffmpeg-n10.0-latest-win64-gpl-10.0.zip", "size": 195000000, "browser_download_url": "https://x/n10.0-win64", "digest": "sha256:100AA" }
           ]
         }
         """;
 
     [Fact]
-    public void SelectAsset_PicksTheGplBuildForTheArchitecture_WithItsChecksum()
+    public void SelectAsset_Latest_PicksTheMasterGplBuildForTheArchitecture_WithItsChecksum()
     {
         var release = JsonNode.Parse(ReleaseJson)!.AsObject();
 
-        var x64 = FFmpegInstaller.SelectAsset(release, Architecture.X64)!;
-        var arm = FFmpegInstaller.SelectAsset(release, Architecture.Arm64)!;
+        var x64 = FFmpegInstaller.SelectAsset(release, Architecture.X64, FFmpegChannel.Latest)!;
+        var arm = FFmpegInstaller.SelectAsset(release, Architecture.Arm64, FFmpegChannel.Latest)!;
 
         Assert.Equal("ffmpeg-master-latest-win64-gpl.zip", x64.AssetName);
         Assert.Equal("https://x/win64", x64.DownloadUrl);
@@ -133,13 +139,71 @@ public class FFmpegToolingTests : IDisposable
         Assert.Equal("Latest Auto-Build (2026-10-06 13:07)", x64.Name);
         Assert.Equal("ffmpeg-master-latest-winarm64-gpl.zip", arm.AssetName);
         Assert.Null(arm.Sha256); // no checksum published for this one
+        Assert.Null(x64.Branch);
+    }
+
+    [Fact]
+    public void SelectAsset_Stable_PicksTheHighestNumberedReleaseBranch_NotTheMasterBuild_AndNotLgpl()
+    {
+        var release = JsonNode.Parse(ReleaseJson)!.AsObject();
+
+        var x64 = FFmpegInstaller.SelectAsset(release, Architecture.X64, FFmpegChannel.Stable)!;
+
+        // 10.0 beats 9.0 and 8.1 by number (a text sort would put "n9.0" above "n10.0").
+        Assert.Equal("ffmpeg-n10.0-latest-win64-gpl-10.0.zip", x64.AssetName);
+        Assert.Equal("10.0", x64.Branch);
+        Assert.Equal("100AA", x64.Sha256);
+        Assert.Equal("https://x/n10.0-win64", x64.DownloadUrl);
+    }
+
+    [Fact]
+    public void SelectAsset_Stable_FollowsTheBranchesActuallyPublished()
+    {
+        var release = JsonNode.Parse(ReleaseJson)!.AsObject();
+        foreach (var asset in release["assets"]!.AsArray().ToList())
+        {
+            if (asset!["name"]!.GetValue<string>().Contains("n10.0")) release["assets"]!.AsArray().Remove(asset);
+        }
+
+        var x64 = FFmpegInstaller.SelectAsset(release, Architecture.X64, FFmpegChannel.Stable)!;
+        var arm = FFmpegInstaller.SelectAsset(release, Architecture.Arm64, FFmpegChannel.Stable)!;
+
+        Assert.Equal("ffmpeg-n9.0-latest-win64-gpl-9.0.zip", x64.AssetName);
+        Assert.Equal("9.0", x64.Branch);
+        Assert.Equal("90AA", x64.Sha256);
+        Assert.Equal("ffmpeg-n9.0-latest-winarm64-gpl-9.0.zip", arm.AssetName);
+    }
+
+    [Fact]
+    public void SelectAsset_Stable_WithNoReleaseBranchPublished_IsNull_RatherThanQuietlyFallingBackToMaster()
+    {
+        var release = JsonNode.Parse("""{ "assets": [ { "name": "ffmpeg-master-latest-win64-gpl.zip", "size": 1, "browser_download_url": "https://x/m", "digest": "sha256:aa" } ] }""")!.AsObject();
+
+        Assert.Null(FFmpegInstaller.SelectAsset(release, Architecture.X64, FFmpegChannel.Stable));
     }
 
     [Fact]
     public void SelectAsset_NothingSuitable_IsNull()
     {
-        Assert.Null(FFmpegInstaller.SelectAsset(JsonNode.Parse("""{ "assets": [ { "name": "other.zip" } ] }""")!.AsObject(), Architecture.X64));
-        Assert.Null(FFmpegInstaller.SelectAsset(JsonNode.Parse("""{ }""")!.AsObject(), Architecture.X64));
+        foreach (var channel in new[] { FFmpegChannel.Stable, FFmpegChannel.Latest })
+        {
+            Assert.Null(FFmpegInstaller.SelectAsset(JsonNode.Parse("""{ "assets": [ { "name": "other.zip" } ] }""")!.AsObject(), Architecture.X64, channel));
+            Assert.Null(FFmpegInstaller.SelectAsset(JsonNode.Parse("""{ }""")!.AsObject(), Architecture.X64, channel));
+        }
+    }
+
+    [Fact]
+    public void TheChannel_DefaultsToStable_AndIsSavedAsText()
+    {
+        Assert.Equal(FFmpegChannel.Stable, new FFmpegSettings().Channel);
+
+        var json = System.Text.Json.JsonSerializer.Serialize(new FFmpegSettings { Channel = FFmpegChannel.Latest });
+        var back = System.Text.Json.JsonSerializer.Deserialize<FFmpegSettings>(json)!;
+
+        Assert.Contains("\"Latest\"", json);
+        Assert.Equal(FFmpegChannel.Latest, back.Channel);
+        // A settings file from before the channel existed has no such field: it must read as Stable.
+        Assert.Equal(FFmpegChannel.Stable, System.Text.Json.JsonSerializer.Deserialize<FFmpegSettings>("""{ "Path": "x" }""")!.Channel);
     }
 
     private string MakeZip(bool withProbe = true, bool withLicense = true)

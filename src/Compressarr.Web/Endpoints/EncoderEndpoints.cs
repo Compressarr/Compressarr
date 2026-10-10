@@ -29,7 +29,8 @@ public static class EncoderEndpoints
             FfmpegProbePath: config.FFmpeg.ProbePath,
             FfmpegOptions: config.FFmpeg.Options,
             FfmpegProfileCount: ffmpegProfiles.GetAll().Count,
-            FfmpegLanes: config.Lanes.Where(l => l.Enabled && l.Engine == EncoderEngine.FFmpeg).Select(l => l.DisplayName).ToList());
+            FfmpegLanes: config.Lanes.Where(l => l.Enabled && l.Engine == EncoderEngine.FFmpeg).Select(l => l.DisplayName).ToList(),
+            FfmpegChannel: config.FFmpeg.Channel.ToString().ToLowerInvariant());
     }
 
     public static void MapEncoderEndpoints(this IEndpointRouteBuilder app)
@@ -49,6 +50,7 @@ public static class EncoderEndpoints
                 if (dto.FfmpegPath is not null) config.FFmpeg.Path = dto.FfmpegPath;
                 if (dto.FfmpegProbePath is not null) config.FFmpeg.ProbePath = dto.FfmpegProbePath;
                 if (dto.FfmpegOptions is not null) config.FFmpeg.Options = dto.FfmpegOptions;
+                if (Enum.TryParse<FFmpegChannel>(dto.FfmpegChannel, ignoreCase: true, out var channel)) config.FFmpeg.Channel = channel;
                 return ToDto(config, profiles, ffmpegProfiles, pathExpander);
             });
             return Results.Json(result);

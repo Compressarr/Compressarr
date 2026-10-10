@@ -68,6 +68,20 @@ public sealed class FFmpegSettings
     public string Path { get; set; } = "%CompressarrAppData%\\tools\\ffmpeg\\ffmpeg.exe";
     public string ProbePath { get; set; } = "%CompressarrAppData%\\tools\\ffmpeg\\ffprobe.exe";
     public string Options { get; set; } = "";
+
+    /// <summary>Which ffmpeg build Check/Install downloads: Stable (default) or Latest. See <see cref="FFmpegChannel"/>.</summary>
+    public FFmpegChannel Channel { get; set; } = FFmpegChannel.Stable;
+}
+
+/// <summary>Which of BtbN's ffmpeg builds the managed download comes from. Stable is the newest numbered release
+/// branch (9.0 today, 9.1/10.0 when they appear): bug fixes only, so encodes behave the same from week to week.
+/// Latest is the master (development) build, rebuilt daily, with the newest encoders and options but nothing
+/// promised about behaviour. Shown under Advanced on the Encoder page.</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+public enum FFmpegChannel
+{
+    Stable,
+    Latest
 }
 
 public sealed class HandBrakeSettings

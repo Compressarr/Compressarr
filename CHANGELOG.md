@@ -9,6 +9,30 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
+## [2.2.0-beta.6] - Unreleased
+
+> [!NOTE]
+> Changes since [2.2.0-beta.5](https://github.com/MrWizardCT/Compressarr/releases/tag/v2.2.0-beta.5)
+> only - everything else is in the entries below.
+
+### Added
+- **An Advanced button in the top bar** (on Settings and Encoder, the pages that have something to reveal). It shows
+  options that are tucked away by default and is remembered per browser: it changes what that browser shows, not any
+  setting. For now it holds the two things below.
+- **ffmpeg download channel: Stable or Latest.** Check/Install used to download whatever the newest development (master)
+  build was. It now defaults to **Stable**, the newest numbered release (ffmpeg 9.0 today; it follows 9.1, 10.0 and so on as
+  BtbN publishes them): bug fixes only, so encodes behave the same from one update to the next. **Latest** is the
+  development build, as before. The choice is under Advanced on the Encoder page. Check/Install, the About page's
+  Check for Updates and the download prompt all follow it, and an ffmpeg that Compressarr installed from the other
+  channel is reported as that (not "newer") with an offer to switch, and Check/Install now also offers to download a newer build
+  of the same channel instead of just saying ffmpeg was found. Nothing changes for an ffmpeg you already have until
+  you choose to switch. The download is still checked against the checksum GitHub publishes for it.
+
+### Changed
+- **The destructive Maintenance buttons on Settings are under Advanced.** Clear Logs, Clear History, Purge Logs & Reports,
+  Clear All, Reset Lanes and Clear Configuration are hidden until Advanced is on. Reset Resume File and Clean Up Now stay
+  visible. Each of the six keeps its confirmation prompt.
+
 ## [2.2.0-beta.5] - 2026-10-10
 
 > [!NOTE]

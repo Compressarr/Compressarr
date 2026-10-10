@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Compressarr.Core.Config;
 
 namespace Compressarr.Core.FFmpeg;
 
@@ -45,6 +46,9 @@ public enum FFmpegUpdateStatus
     UpToDate,
     /// <summary>Compressarr installed it and a newer build has been published.</summary>
     Newer,
+    /// <summary>Compressarr installed it from the other channel than the one selected (Stable vs Latest), so "newer" has
+    /// no meaning: installing from the selected channel switches over.</summary>
+    OtherChannel,
     /// <summary>ffmpeg works, but Compressarr did not install it (or did so before builds were recorded), so there is
     /// nothing to compare the latest build with.</summary>
     Unknown
@@ -52,10 +56,17 @@ public enum FFmpegUpdateStatus
 
 public static class FFmpegUpdateCheck
 {
-    public static FFmpegUpdateStatus Compare(bool installed, FFmpegInstallMarker? marker, FFmpegReleaseInfo latest)
+    /// <summary>The channel a recorded install came from, read off its asset name: BtbN names the master build
+    /// ffmpeg-master-latest-..., a release branch ffmpeg-n9.0-latest-.... Beta 4 and 5 recorded no channel, and all
+    /// of those installs were master builds, so this also classifies them correctly.</summary>
+    public static FFmpegChannel ChannelOf(string assetName) =>
+        assetName.StartsWith("ffmpeg-master", StringComparison.OrdinalIgnoreCase) ? FFmpegChannel.Latest : FFmpegChannel.Stable;
+
+    public static FFmpegUpdateStatus Compare(bool installed, FFmpegInstallMarker? marker, FFmpegReleaseInfo latest, FFmpegChannel selected)
     {
         if (!installed) return FFmpegUpdateStatus.NotInstalled;
         if (marker is null) return FFmpegUpdateStatus.Unknown;
+        if (ChannelOf(marker.AssetName) != selected) return FFmpegUpdateStatus.OtherChannel;
 
         // The checksum GitHub publishes identifies the exact build; fall back to the release's name when there is none.
         var same = !string.IsNullOrWhiteSpace(marker.Sha256) && !string.IsNullOrWhiteSpace(latest.Sha256)

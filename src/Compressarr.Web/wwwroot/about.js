@@ -36,6 +36,10 @@ async function loadHandBrakeVersion() {
   hbVersionText.textContent = dto.version || 'Not found';
 }
 
+function ffChannelLabel(channel, branch) {
+  return channel === 'latest' ? 'Latest (development)' : `Stable${branch ? ' ' + branch : ''}`;
+}
+
 async function loadFfmpegVersion() {
   const res = await fetch('/api/ffmpeg/installed-version');
   const dto = await res.json();
@@ -65,7 +69,9 @@ ffCheckUpdateBtn.addEventListener('click', async () => {
       ffUpdateStatusClearTimer = setTimeout(() => { ffUpdateStatus.textContent = ''; }, 4000);
     } else {
       ffUpdateStatus.textContent = dto.status === 'newer'
-        ? `A newer build is available: ${dto.latestBuild}.`
+        ? `A newer build is available: ${dto.latestBuild}. Check/Install on the Encoder page updates it.`
+        : dto.status === 'otherchannel'
+          ? `This ffmpeg came from the ${ffChannelLabel(dto.installedChannel)} channel; ${ffChannelLabel(dto.channel, dto.branch)} is selected. Check/Install on the Encoder page switches it.`
         : dto.status === 'notinstalled'
           ? `ffmpeg isn't installed. Latest available: ${dto.latestBuild}.`
           : `Latest build: ${dto.latestBuild}. This ffmpeg wasn't installed by Compressarr, so it can't be compared.`;

@@ -14,6 +14,11 @@ public static class FFmpegEndpoints
     // The encoders worth showing as chips, in the order a reader looks for them.
     private static readonly string[] ChipEncoders = { "libx265", "libx264", "libsvtav1", "eac3", "aac", "ac3", "libopus", "hevc_nvenc" };
 
+    /// <summary>The channel a call asks for (?channel=stable|latest - the Encoder page passes its not-yet-saved choice), else
+    /// the saved one.</summary>
+    private static FFmpegChannel ResolveChannel(string? requested, CompressarrConfig config) =>
+        Enum.TryParse<FFmpegChannel>(requested, ignoreCase: true, out var channel) ? channel : config.FFmpeg.Channel;
+
     public static void MapFFmpegEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/api/ffmpeg/status", (IConfigStore configStore, IPathExpander pathExpander) =>
@@ -52,16 +57,19 @@ public static class FFmpegEndpoints
             return Results.Json(found is { } f ? new { found = true, path = f.FFmpeg, probePath = f.FFprobe } : new { found = false, path = (string?)null, probePath = (string?)null });
         });
 
-        app.MapGet("/api/ffmpeg/latest-release", async (IFFmpegInstaller installer) =>
+        app.MapGet("/api/ffmpeg/latest-release", async (IConfigStore configStore, IFFmpegInstaller installer, string? channel) =>
         {
             try
             {
-                var release = await installer.GetLatestReleaseAsync();
+                var selected = ResolveChannel(channel, configStore.Load(AppPaths.GetConfigFilePath()));
+                var release = await installer.GetLatestReleaseAsync(selected);
                 if (release is null) return Results.Json(new { available = false });
 
                 return Results.Json(new
                 {
                     available = true,
+                    channel = selected.ToString().ToLowerInvariant(),
+                    release.Branch,
                     release.Name,
                     release.AssetName,
                     release.ReleaseUrl,
@@ -86,16 +94,18 @@ public static class FFmpegEndpoints
         // "Check for Updates" on the About page. ffmpeg's own version string is a commit id and BtbN publishes every
         // build under the same file name, so a newer build is recognised from the build Compressarr recorded when it
         // installed ffmpeg (see FFmpegInstallMarkerFile). An ffmpeg Compressarr did not install can't be compared.
-        app.MapGet("/api/ffmpeg/update-check", async (IConfigStore configStore, IPathExpander pathExpander, IFFmpegCapabilityProbe probe, IFFmpegInstaller installer, CancellationToken ct) =>
+        app.MapGet("/api/ffmpeg/update-check", async (IConfigStore configStore, IPathExpander pathExpander, IFFmpegCapabilityProbe probe, IFFmpegInstaller installer, string? channel, CancellationToken ct) =>
         {
-            var path = pathExpander.Expand(configStore.Load(AppPaths.GetConfigFilePath()).FFmpeg.Path);
+            var config = configStore.Load(AppPaths.GetConfigFilePath());
+            var path = pathExpander.Expand(config.FFmpeg.Path);
             var installed = await probe.ReadVersionAsync(path, ct);
             var marker = FFmpegInstallMarkerFile.Read(path);
+            var selected = ResolveChannel(channel, config);
 
             FFmpegReleaseInfo? latest;
             try
             {
-                latest = await installer.GetLatestReleaseAsync();
+                latest = await installer.GetLatestReleaseAsync(selected);
             }
             catch (HttpRequestException ex)
             {
@@ -106,7 +116,10 @@ public static class FFmpegEndpoints
 
             return Results.Json(new
             {
-                status = FFmpegUpdateCheck.Compare(installed is not null, marker, latest).ToString().ToLowerInvariant(),
+                status = FFmpegUpdateCheck.Compare(installed is not null, marker, latest, selected).ToString().ToLowerInvariant(),
+                channel = selected.ToString().ToLowerInvariant(),
+                installedChannel = marker is null ? null : FFmpegUpdateCheck.ChannelOf(marker.AssetName).ToString().ToLowerInvariant(),
+                branch = latest.Branch,
                 installedVersion = installed?.Version,
                 installedBuild = marker?.Name,
                 latestBuild = latest.Name,
@@ -114,11 +127,12 @@ public static class FFmpegEndpoints
             });
         });
 
-        app.MapPost("/api/ffmpeg/install", async (IFFmpegInstaller installer, IConfigStore configStore, CancellationToken ct) =>
+        app.MapPost("/api/ffmpeg/install", async (IFFmpegInstaller installer, IConfigStore configStore, string? channel, CancellationToken ct) =>
         {
             try
             {
-                var release = await installer.GetLatestReleaseAsync();
+                var selected = ResolveChannel(channel, configStore.Load(AppPaths.GetConfigFilePath()));
+                var release = await installer.GetLatestReleaseAsync(selected);
                 if (release is null)
                 {
                     return Results.BadRequest(new { message = "No downloadable ffmpeg build was found for this platform. Install ffmpeg with your package manager and set its path here." });
@@ -131,10 +145,11 @@ public static class FFmpegEndpoints
                 {
                     config.FFmpeg.Path = installedPath;
                     config.FFmpeg.ProbePath = Path.Combine(installDir, OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe");
+                    config.FFmpeg.Channel = selected; // the channel just installed from is the one selected from now on
                     return true;
                 });
 
-                return Results.Json(new { installedPath, name = release.Name });
+                return Results.Json(new { installedPath, name = release.Name, channel = selected.ToString().ToLowerInvariant(), branch = release.Branch });
             }
             catch (InvalidDataException ex)
             {

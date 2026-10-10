@@ -367,6 +367,9 @@ body {
 .toolbar .page-actions button.danger .btn-icon { color: #ff9d9d; }
 .toolbar .page-actions button:disabled { opacity: 0.4; cursor: default; }
 .toolbar .page-actions { gap: 2px; }
+/* Advanced: lit while the tucked-away options are showing. */
+.toolbar .toolbar-advanced button[aria-pressed="true"] { color: #ffffff; background: rgba(255, 255, 255, 0.1); }
+.toolbar .toolbar-advanced button[aria-pressed="true"] .btn-icon { color: #8fb0ff; }
 .toolbar .tb-sep { width: 1px; height: 36px; margin: 0 6px; background: rgba(255, 255, 255, 0.16); flex-shrink: 0; }
 
 /* Monitoring status (with a live/idle dot), the countdown, and CPU - visible in the toolbar on
@@ -794,6 +797,10 @@ a.primary {
 a.primary:hover { opacity: 0.9; }
 
 .hidden { display: none !important; }
+
+/* Options tucked away until the toolbar's Advanced button is on (see nav.js). */
+html:not([data-advanced="on"]) .adv-only { display: none !important; }
+html[data-advanced="on"] .adv-off-only { display: none !important; }
 
 /* Only used in the toolbar's global status cluster now (see nav.js) - inherits color from
    .toolbar-global-status by default, but had its own stale color override from before that

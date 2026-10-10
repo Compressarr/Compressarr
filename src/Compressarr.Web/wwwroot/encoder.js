@@ -31,7 +31,23 @@ function fillForm(dto) {
   document.getElementById('ffPath').value = dto.ffmpegPath || '';
   document.getElementById('ffProbePath').value = dto.ffmpegProbePath || '';
   document.getElementById('ffOptions').value = dto.ffmpegOptions || '';
+  document.getElementById('ffChannel').value = dto.ffmpegChannel || 'stable';
+  updateChannelNote();
   renderGlance(dto);
+}
+
+// Stable is the default and needs no mention. A non-default channel is stated plainly where Advanced is off, so a hidden
+// setting is never silently in effect (with Advanced on, the select itself shows it).
+function updateChannelNote() {
+  const note = document.getElementById('ffChannelNote');
+  const latest = document.getElementById('ffChannel').value === 'latest';
+  note.classList.toggle('hidden', !latest);
+  note.textContent = latest ? 'Download channel: Latest (development build).' : '';
+}
+document.getElementById('ffChannel').addEventListener('change', updateChannelNote);
+
+function channelLabel(channel, branch) {
+  return channel === 'latest' ? 'Latest (development)' : `Stable${branch ? ' ' + branch : ''}`;
 }
 
 function readForm() {
@@ -45,7 +61,8 @@ function readForm() {
     validationIssues: [],
     ffmpegPath: document.getElementById('ffPath').value,
     ffmpegProbePath: document.getElementById('ffProbePath').value,
-    ffmpegOptions: document.getElementById('ffOptions').value
+    ffmpegOptions: document.getElementById('ffOptions').value,
+    ffmpegChannel: document.getElementById('ffChannel').value
   };
 }
 
@@ -208,20 +225,39 @@ document.getElementById('checkHandBrakeBtn').addEventListener('click', async () 
 // managed download (after saying exactly what it is) - never a download without asking.
 document.getElementById('checkFfmpegBtn').addEventListener('click', async () => {
   setStatus('Checking ffmpeg...');
+  const channel = document.getElementById('ffChannel').value;
   const status = await (await fetch('/api/ffmpeg/status')).json();
+  let switching = false;
   if (status.exists && status.probeExists) {
     // A file being there is not enough - ask it, so a wrong program (notepad.exe...) isn't called ffmpeg.
     const caps = await (await fetch('/api/ffmpeg/capabilities')).json().catch(() => ({ found: false }));
-    if (caps.found) {
-      setStatus(`ffmpeg ${caps.version || ''} found at the configured path.`, true);
-    } else {
+    if (!caps.found) {
       setStatus('There is a file at the configured ffmpeg path, but it did not answer like ffmpeg - check the path.');
+      loadFfmpegCapabilities(lastDto || { ffmpegProfileCount: 0, ffmpegLanes: [] });
+      return;
     }
-    loadFfmpegCapabilities(lastDto || { ffmpegProfileCount: 0, ffmpegLanes: [] });
-    return;
+
+    // One Compressarr installed that is on the other channel than the one selected, or has a newer build published:
+    // offer the download, rather than just saying "found" and leaving the selection (or the update) with no effect.
+    const upd = await (await fetch(`/api/ffmpeg/update-check?channel=${channel}`)).json().catch(() => ({}));
+    if (upd.status !== 'otherchannel' && upd.status !== 'newer') {
+      setStatus(`ffmpeg ${caps.version || ''} found at the configured path.`, true);
+      loadFfmpegCapabilities(lastDto || { ffmpegProfileCount: 0, ffmpegLanes: [] });
+      return;
+    }
+    const to = channelLabel(upd.channel, upd.branch);
+    const question = upd.status === 'newer'
+      ? `ffmpeg ${caps.version || ''} is installed, and a newer ${to} build is available (${upd.latestBuild}).\n\nDownload it and update?`
+      : `The ffmpeg Compressarr installed came from the ${channelLabel(upd.installedChannel)} channel, but ${to} is selected.\n\nDownload the ${to} build and switch to it?`;
+    if (!confirm(question)) {
+      setStatus(`ffmpeg ${caps.version || ''} found at the configured path.`, true);
+      loadFfmpegCapabilities(lastDto || { ffmpegProfileCount: 0, ffmpegLanes: [] });
+      return;
+    }
+    switching = true;
   }
 
-  const existing = await (await fetch('/api/ffmpeg/find')).json();
+  const existing = switching ? { found: false } : await (await fetch('/api/ffmpeg/find')).json();
   if (existing.found) {
     if (confirm(`ffmpeg is already on this computer:\n\n${existing.path}\n${existing.probePath}\n\nUse it?`)) {
       document.getElementById('ffPath').value = existing.path;
@@ -232,21 +268,21 @@ document.getElementById('checkFfmpegBtn').addEventListener('click', async () => 
     }
   }
 
-  const release = await (await fetch('/api/ffmpeg/latest-release')).json();
+  const release = await (await fetch(`/api/ffmpeg/latest-release?channel=${channel}`)).json();
   if (!release.available) {
     setStatus(release.error || 'No downloadable ffmpeg build for this platform - install ffmpeg with your package manager and set its path here.');
     return;
   }
 
   const confirmed = confirm(
-    `Download ffmpeg?\n\nBuild: ${release.name}\nFile: ${release.assetName}\nSize: about ${release.sizeMb} MB\nSource: ${release.releaseUrl}\n\n` +
+    `Download ffmpeg?\n\nChannel: ${channelLabel(release.channel, release.branch)}\nBuild: ${release.name}\nFile: ${release.assetName}\nSize: about ${release.sizeMb} MB\nSource: ${release.releaseUrl}\n\n` +
     `${release.verified ? 'The download is checked against the checksum GitHub publishes for it.' : 'GitHub published no checksum for this file, so it cannot be verified and will not be installed.'}\n` +
     `It is installed into Compressarr's own folder (no administrator rights) - only ffmpeg, ffprobe and the license are kept. ffmpeg is licensed under the GPL.`
   );
   if (!confirmed) return;
 
   setStatus('Downloading ffmpeg - this can take a few minutes...');
-  const res = await fetch('/api/ffmpeg/install', { method: 'POST' });
+  const res = await fetch(`/api/ffmpeg/install?channel=${channel}`, { method: 'POST' });
   const body = await res.json().catch(() => ({}));
   if (res.ok) {
     await loadEncoder();

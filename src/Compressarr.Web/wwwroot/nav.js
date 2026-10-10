@@ -15,6 +15,33 @@ function setTheme(theme) {
   applyTheme(theme);
 }
 
+// "Advanced" shows the options that are tucked away by default (anything marked class="adv-only": the destructive
+// Maintenance buttons on Settings, the ffmpeg download channel on Encoder). It is a per-browser preference, not a
+// setting: it only changes what this browser shows, and is set on <html> before the page is drawn so nothing flashes.
+const ADVANCED_STORAGE_KEY = 'compressarr.advanced';
+
+function isAdvancedOn() {
+  try { return localStorage.getItem(ADVANCED_STORAGE_KEY) === '1'; } catch { return false; }
+}
+
+function applyAdvanced(on) {
+  if (on) document.documentElement.setAttribute('data-advanced', 'on');
+  else document.documentElement.removeAttribute('data-advanced');
+  const btn = document.getElementById('advancedBtn');
+  if (btn) {
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = on ? 'Hide advanced options' : 'Show advanced options';
+  }
+  document.dispatchEvent(new CustomEvent('compressarr:advanced', { detail: { on } }));
+}
+
+function setAdvanced(on) {
+  try { localStorage.setItem(ADVANCED_STORAGE_KEY, on ? '1' : '0'); } catch { /* the choice just won't be remembered */ }
+  applyAdvanced(on);
+}
+
+if (isAdvancedOn()) document.documentElement.setAttribute('data-advanced', 'on');
+
 // Line-style icons matching the approved sidebar mockup - kept as plain shape primitives
 // (circles/rects/polylines), not hand-authored illustration paths.
 const NAV_ICONS = {
@@ -37,6 +64,7 @@ function navIcon(name) {
 }
 
 const CPU_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"></rect><line x1="6" y1="10" x2="3" y2="10"></line><line x1="6" y1="14" x2="3" y2="14"></line><line x1="18" y1="10" x2="21" y2="10"></line><line x1="18" y1="14" x2="21" y2="14"></line><line x1="10" y1="6" x2="10" y2="3"></line><line x1="14" y1="6" x2="14" y2="3"></line><line x1="10" y1="18" x2="10" y2="21"></line><line x1="14" y1="18" x2="14" y2="21"></line></svg>';
+const ADVANCED_ICON = '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>';
 const UPDATE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><polyline points="16 12 12 8 8 12"></polyline><line x1="12" y1="16" x2="12" y2="8"></line></svg>';
 
 function renderNav(activePage) {
@@ -96,6 +124,9 @@ function renderNav(activePage) {
   // the title - pages without one (About) just get a title with no actions.
   const actionsEl = existingMain ? existingMain.querySelector('.page-actions') : null;
 
+  // The Advanced button only appears on a page that has something to reveal.
+  const hasAdvanced = !!(existingMain && existingMain.querySelector('.adv-only'));
+
   const currentTheme = getPreferredTheme();
   const toolbar = document.createElement('div');
   toolbar.className = 'toolbar';
@@ -103,6 +134,7 @@ function renderNav(activePage) {
     <button type="button" class="hamburger-btn" id="hamburgerBtn" aria-label="Open menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg></button>
     <h1>${titleText}</h1>
     <span class="toolbar-spacer"></span>
+    ${hasAdvanced ? `<div class="page-actions toolbar-advanced"><span class="tb-sep"></span><button type="button" id="advancedBtn" aria-pressed="false" title="Show advanced options">${ADVANCED_ICON}Advanced</button></div>` : ''}
     <div class="toolbar-global-status">
       <a id="updateLink" class="toolbar-update hidden" target="_blank" rel="noopener" title="Update available">${UPDATE_ICON}</a>
       <span class="status-dot" id="statusDot"></span>
@@ -150,6 +182,13 @@ function renderNav(activePage) {
     contentInner.className = 'content-inner';
     while (existingMain.firstChild) contentInner.appendChild(existingMain.firstChild);
     existingMain.appendChild(contentInner);
+  }
+
+  const advancedBtn = toolbar.querySelector('#advancedBtn');
+  if (advancedBtn) {
+    advancedBtn.addEventListener('click', () => setAdvanced(!isAdvancedOn()));
+    advancedBtn.setAttribute('aria-pressed', isAdvancedOn() ? 'true' : 'false');
+    advancedBtn.title = isAdvancedOn() ? 'Hide advanced options' : 'Show advanced options';
   }
 
   mainCol.appendChild(toolbar);

@@ -69,6 +69,26 @@ public class EncoderEndpointTests
     }
 
     [Fact]
+    public async Task TheFfmpegChannel_DefaultsToStable_IsSaved_AndAnOlderPageThatSendsNoChannelLeavesItAlone()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var dto = (await host.Client.GetFromJsonAsync<JsonObject>("/api/encoder"))!;
+        Assert.Equal("stable", dto["ffmpegChannel"]!.GetValue<string>());
+
+        dto["ffmpegChannel"] = "latest";
+        (await host.Client.PutAsJsonAsync("/api/encoder", dto)).EnsureSuccessStatusCode();
+        Assert.Equal("latest", (await host.Client.GetFromJsonAsync<JsonObject>("/api/encoder"))!["ffmpegChannel"]!.GetValue<string>());
+
+        dto.Remove("ffmpegChannel"); // a cached older page
+        (await host.Client.PutAsJsonAsync("/api/encoder", dto)).EnsureSuccessStatusCode();
+        Assert.Equal("latest", (await host.Client.GetFromJsonAsync<JsonObject>("/api/encoder"))!["ffmpegChannel"]!.GetValue<string>());
+
+        dto["ffmpegChannel"] = "nonsense"; // an unknown value is ignored, not an error
+        (await host.Client.PutAsJsonAsync("/api/encoder", dto)).EnsureSuccessStatusCode();
+        Assert.Equal("latest", (await host.Client.GetFromJsonAsync<JsonObject>("/api/encoder"))!["ffmpegChannel"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task Settings_NoLongerCarriesTheHandBrakeFields_AndSavingItLeavesThemAlone()
     {
         await using var host = await QueueHost.StartAsync(Lane1);

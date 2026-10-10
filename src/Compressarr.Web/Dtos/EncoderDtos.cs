@@ -18,7 +18,8 @@ public sealed record EncoderSettingsDto(
     string? FfmpegProbePath = null,
     string? FfmpegOptions = null,
     int FfmpegProfileCount = 0,
-    List<string>? FfmpegLanes = null);
+    List<string>? FfmpegLanes = null,
+    string? FfmpegChannel = null);
 
 /// <summary>One row of the Profiles page. Engine is "handbrake" or "ffmpeg". UsedBy lists the lanes
 /// (of that engine) whose TV or Movie preset is this profile.</summary>

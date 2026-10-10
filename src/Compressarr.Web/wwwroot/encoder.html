@@ -79,9 +79,17 @@
           <label for="ffProbePath">ffprobe path<span class="help-tag" tabindex="0" title="Full path to ffprobe.exe - it reads each file's tracks, length and HDR information. It comes in the same download as ffmpeg.">?<span class="help-tip">Full path to ffprobe.exe - it reads each file's tracks, length and HDR information. It comes in the same download as ffmpeg.</span></span></label>
           <div class="field-with-btn"><input type="text" id="ffProbePath" /><button class="browse-btn" data-target="ffProbePath">Browse...</button></div>
         </div>
+        <div class="field-block adv-only">
+          <label for="ffChannel">Download channel<span class="help-tag" tabindex="0" title="Which ffmpeg Check/Install downloads. Stable follows ffmpeg's newest numbered release (9.0 today): bug fixes only, so encodes behave the same from one update to the next. Latest is the daily development build: the newest encoders and options, but behaviour can change without notice. Changing this does not touch the ffmpeg you already have - use Check/Install to switch.">?<span class="help-tip">Which ffmpeg Check/Install downloads. Stable follows ffmpeg's newest numbered release (9.0 today): bug fixes only, so encodes behave the same from one update to the next. Latest is the daily development build: the newest encoders and options, but behaviour can change without notice. Changing this does not touch the ffmpeg you already have - use Check/Install to switch.</span></span></label>
+          <select id="ffChannel">
+            <option value="stable">Stable - the newest numbered release (recommended)</option>
+            <option value="latest">Latest - the newest development build</option>
+          </select>
+        </div>
         <div class="field-block">
           <label>Detected</label>
           <div id="ffDetected" class="enc-note" style="margin-top:0">Checking&hellip;</div>
+          <div id="ffChannelNote" class="enc-note adv-off-only hidden"></div>
           <div class="enc-chips" id="ffChips"></div>
           <p class="enc-note">Profiles that need an encoder your build lacks are flagged on the Profiles page instead of failing in the middle of a run.</p>
         </div>
