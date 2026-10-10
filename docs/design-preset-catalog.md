@@ -241,7 +241,7 @@ The first version has exactly one source, but the code treats it as one entry in
 
 All values are starting points to be checked on real DV and SDR samples (size, quality, time) before publishing. Every profile
 keeps the shipped profiles' common choices unless noted: MKV, crop auto, deinterlace only when interlaced, variable frame rate,
-English subtitles, chapters, and HDR dynamic metadata  (the same  setting the shipped
+English subtitles, chapters, and HDR dynamic metadata `all` (the same `VideoPasshtruHDRDynamicMetadata` setting the shipped
 HandBrake profiles already use).
 
 ### 10.1 Compressarr UHD HEVC (HDR) v1 - HandBrake - SETTLED
@@ -249,7 +249,7 @@ HandBrake profiles already use).
 The HEVC sibling of the shipped UHD AV1 profile: the two differ by codec.
 
 - Video: x265 10-bit, profile main10, **RF 22**, **preset fast**; source resolution, no scaling.
-- HDR: static HDR10 metadata kept; dynamic metadata  (Dolby Vision and HDR10+ where x265 can carry them).
+- HDR: static HDR10 metadata kept; dynamic metadata `all` (Dolby Vision and HDR10+ where x265 can carry them).
 - Audio: **pass through** every English track HandBrake can copy (AAC, AC3, E-AC3, DTS, DTS-HD, TrueHD, FLAC, MP3), E-AC3 640 kbps
   for anything else.
 - To verify before publishing: that a real Dolby Vision file keeps its DV on the output, including a dual-layer profile 7 rip
@@ -263,7 +263,7 @@ The HEVC sibling of the shipped UHD AV1 profile: the two differ by codec.
 
 ### 10.5 Compressarr AV1 (NVENC) v1 - ffmpeg - NOT YET DISCUSSED
 
-, 10-bit; needs an RTX 40-series GPU and the AV1-specific GPU check. Neither engine keeps Dolby Vision / HDR10+
+`av1_nvenc`, 10-bit; needs an RTX 40-series GPU and the AV1-specific GPU check. Neither engine keeps Dolby Vision / HDR10+
 with it, so its fallback should be the UHD HEVC (HDR) HandBrake profile (10.1).
 
 ### 10.6 Compressarr HEVC NVENC (quality) v1 - ffmpeg - NOT YET DISCUSSED
