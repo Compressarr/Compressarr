@@ -264,9 +264,11 @@ The "keep the movies I care about" counterpart to the shipped SD-HD profile (whi
   already E-AC3/AC3 where HandBrake can.
 - Aimed at 1080p and below; UHD sources are what 10.1 is for.
 
-### 10.3 Compressarr HD AV1 (fast) v1 - HandBrake - IN DISCUSSION
+### 10.3 Compressarr HD AV1 (fast) v1 - DROPPED
 
-### 10.4 Compressarr Compatibility (H.264) v1 - HandBrake, optional - NOT YET DISCUSSED
+Not needed: the shipped SD-HD profile already covers HD content, and the UHD AV1 profile covers AV1.
+
+### 10.4 Compressarr Compatibility (H.264) v1 - HandBrake, optional - IN DISCUSSION
 
 ### 10.5 Compressarr AV1 (NVENC) v1 - ffmpeg - NOT YET DISCUSSED
 
