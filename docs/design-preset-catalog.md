@@ -299,7 +299,60 @@ Based on the owner's existing, tested ffmpeg profile (`av1_nvenc`).
   (section 5): installing this profile offers to install that one too. (To confirm: the fallback choice was proposed, not
   explicitly picked.)
 
-### 10.6 Compressarr HEVC NVENC (quality) v1 - ffmpeg - IN DISCUSSION
+### 10.6 Compressarr HEVC NVENC (quality) v1 - ffmpeg - SETTLED (worth keeping is still open, see 10.7)
+
+The slower, tighter counterpart to the shipped HEVC NVENC (fast).
+
+- Video: `hevc_nvenc`, 10-bit (`p010le`), main10, **preset p7, cq 24**, MKV.
+- Extra arguments (the profile's existing `ExtraArgs` field): `-multipass fullres -rc-lookahead 32 -spatial-aq 1`.
+- Audio: pass through every English track ffmpeg can copy, E-AC3 640 kbps for the rest. English subtitles and chapters.
+- Fallback for Dolby Vision / HDR10+: **Compressarr UHD HEVC (HDR) v1** (`dependsOn`).
+- Requires `hevc_nvenc` and a working NVENC session (already checked today).
+
+### 10.7 Side-by-side (shipped plus proposed)
+
+Rows 1-5 ship today; rows 6-10 are the proposed catalog profiles. "Speed" and "size" are relative estimates to be measured
+on real clips (this machine has an RTX 4070 and a CPU to test with) before anything is published.
+
+**Specifications**
+
+| # | Profile | Engine | Video | Audio | Container | HDR10 / HDR10+ / Dolby Vision | Needs |
+|---|---|---|---|---|---|---|---|
+| 1 | Compressarr SD-HD | HandBrake | x265 10-bit, RF 24, veryfast | First English track: copied if possible, else E-AC3 up to 7.1 at 512 | MKV | Kept | CPU |
+| 2 | Compressarr UHD AV1 | HandBrake | SVT-AV1 10-bit, CRF 30, preset 4 | All English tracks copied, else E-AC3 | MKV | Kept | CPU (slow) |
+| 3 | Compressarr SD-HD | ffmpeg | libx265 10-bit, CRF 24, veryfast | E-AC3 up to 7.1 at 512 | MKV | DV/HDR10+ handed to row 1 | ffmpeg with libx265 |
+| 4 | Compressarr UHD AV1 | ffmpeg | libsvtav1 10-bit, CRF 30, preset 4 | All English tracks copied | MKV | DV/HDR10+ handed to row 2 | ffmpeg with libsvtav1 |
+| 5 | HEVC NVENC (fast) | ffmpeg | hevc_nvenc 10-bit, cq 28, p5 | All English tracks copied | MKV | DV/HDR10+ handed to row 1 | NVIDIA GPU |
+| 6 | **Compressarr UHD HEVC (HDR) v1** | HandBrake | x265 10-bit, RF 22, fast | All English tracks copied, else E-AC3 640 | MKV | Kept | CPU |
+| 7 | **Compressarr HD Quality v1** | HandBrake | x265 10-bit, RF 20, fast | First English track: copied if possible, else E-AC3 up to 7.1 at 512 | MKV | Kept | CPU |
+| 8 | **Compressarr Compatibility (H.264) v1** | HandBrake | x264 8-bit main@4.0, RF 24, veryfast, 30 fps cap | First English track: copied if possible, else AAC 5.1 at 384 | MP4 | SDR only | CPU |
+| 9 | **Compressarr AV1 (NVENC) v1** | ffmpeg | av1_nvenc 10-bit, cq 30, p5 | All English tracks copied, else E-AC3 640 | MKV | DV/HDR10+ handed to row 6 | RTX 40-series or newer |
+| 10 | **Compressarr HEVC NVENC (quality) v1** | ffmpeg | hevc_nvenc 10-bit, cq 24, p7, multipass + lookahead + spatial AQ | All English tracks copied, else E-AC3 640 | MKV | DV/HDR10+ handed to row 6 | NVIDIA GPU |
+
+**What the user sees, and who it is for**
+
+| # | Profile | Speed | Size | Description (shown to the user) | Ideal for |
+|---|---|---|---|---|---|
+| 1 | SD-HD (HB) | Fast | Small | Everyday H.265 10-bit with E-AC3 audio up to 7.1. Crops black bars and keeps English subtitles and chapters. | TV episodes, DVD and 720p/1080p content, large libraries where speed and size matter more than the last bit of quality |
+| 2 | UHD AV1 (HB) | Slow | Smallest | AV1 10-bit for UHD, keeping every English audio track untouched. Smallest files, slowest encode. | 4K archives where disk space matters most and every player you use can decode AV1 |
+| 3 | SD-HD (ffmpeg) | Fast | Small | The ffmpeg version of SD-HD. Dolby Vision and HDR10+ files go to the HandBrake profile of the same name. | Lanes that use ffmpeg but want the SD-HD result |
+| 4 | UHD AV1 (ffmpeg) | Slow | Smallest | The ffmpeg version of UHD AV1. Dolby Vision and HDR10+ files go to the HandBrake profile. | Lanes that use ffmpeg for AV1 on the CPU |
+| 5 | HEVC NVENC (fast) | Very fast | Large | H.265 10-bit on an NVIDIA GPU: much faster than software, with larger files. | Large backlogs where finishing quickly matters most |
+| 6 | UHD HEVC (HDR) | Medium | Medium | H.265 10-bit for 4K HDR. Keeps HDR10, HDR10+ and Dolby Vision, and every English audio track untouched. | 4K UHD Blu-ray rips and remuxes with HDR or Dolby Vision, for players that handle HEVC (nearly every 4K TV and box) |
+| 7 | HD Quality | Medium | Medium (larger than SD-HD) | A higher-quality H.265 10-bit than SD-HD, with the same E-AC3 audio. More detail kept, bigger files. | 1080p Blu-ray movies and favourite shows you do not want to re-encode later |
+| 8 | Compatibility (H.264) | Very fast | Largest | H.264 in MP4 with AAC audio and a 30 fps cap, for older TVs, boxes and phones that cannot play H.265. SDR only; files are larger than H.265. | SDR 1080p and SD content for older or shared devices, Plex/Jellyfin clients that would otherwise transcode. Not for HDR sources |
+| 9 | AV1 (NVENC) | Fast | Small | AV1 10-bit on an NVIDIA RTX 40-series (or newer) GPU: AV1 savings at GPU speed. Dolby Vision and HDR10+ files are handed to the UHD HEVC (HDR) profile. | RTX 40-series owners who want AV1 file sizes without the CPU time, with players that decode AV1 |
+| 10 | HEVC NVENC (quality) | Fast | Medium | H.265 10-bit on an NVIDIA GPU at its best-quality setting: noticeably tighter than the fast profile, still much faster than the CPU. | GPU users who want a better result than HEVC NVENC (fast); backlogs of 1080p or 4K SDR/HDR10 |
+
+**Overlap check** (for the final decision)
+
+- Rows 6 and 7 are the two x265 quality tiers next to SD-HD (row 1): 7 sits between 1 and 6 on quality. The tiers differ only
+  by RF, and by audio (7 uses E-AC3 like 1; 6 copies).
+- Rows 9 and 10 sit next to 5 (NVENC fast) and 2 (UHD AV1). 9 is the only AV1 you can run on the GPU, so it is distinct; 10 is
+  the closest to something that could be "just a different setting of row 5", so it is the easiest to defer.
+- Row 8 is the only one that differs in kind (H.264, MP4, SDR), so it does not overlap with anything.
+- Rows 6, 9 and 10 depend on each other (9 and 10 fall back to 6), so dropping 6 would mean choosing another fallback for 9
+  and 10.
 
 ## 11. Work breakdown
 
