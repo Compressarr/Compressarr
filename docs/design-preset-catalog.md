@@ -1,6 +1,6 @@
 # Design: the Compressarr Presets catalog
 
-Status: draft v2 for review (decisions from the first review are folded in; see section 12). Nothing here is built.
+Status: draft v2 (the first catalog, four profiles, is published at https://github.com/MrWizardCT/Compressarr-Presets) (decisions from the first review are folded in; see section 12). Nothing here is built.
 Target: 2.2 beta.6 (decided 2026-10-10). The AV1 NVENC GPU check, a prerequisite, is done (beta.6). The public repo and profile files can be created any time before beta.6 ships.
 
 ## 1. Goal
@@ -294,15 +294,10 @@ Based on the owner's existing, tested ffmpeg profile (`av1_nvenc`).
   and reported as ERROR 112, never re-encoded with a profile the user did not choose. To encode those files the user picks a
   HandBrake fallback on a duplicate of the profile, or uses a HandBrake lane (for example with 10.1).
 
-### 10.6 Compressarr HEVC NVENC (quality) v1 - ffmpeg - SETTLED (worth keeping is still open, see 10.7)
+### 10.6 Compressarr HEVC NVENC (quality) v1 - DROPPED (2026-10-11)
 
-The slower, tighter counterpart to the shipped HEVC NVENC (fast).
-
-- Video: `hevc_nvenc`, 10-bit (`p010le`), main10, **preset p5, cq 26**, MKV, no extra arguments. (The first choice, p7 + cq 24 + multipass,
-  lookahead and spatial AQ, measured 3-10 times larger than fast for a small quality gain; p7 itself gave no gain over p5. See 10.8.)
-- Audio: pass through every English track ffmpeg can copy, E-AC3 640 kbps for the rest. English subtitles and chapters.
-- **Fallback: None** (Dolby Vision / HDR10+ files are refused and reported, as in 10.5).
-- Requires `hevc_nvenc` and a working NVENC session (already checked today).
+Measured (10.8): p7 gave no gain over p5 and the extra arguments only added bits, so this was the shipped HEVC NVENC (fast) profile with a lower cq
+(cq 26: about 1.3-1.4 times the size for roughly +1 VMAF). A user can duplicate the built-in and change one number, so it is not in the catalog.
 
 ### 10.7 Side-by-side (shipped plus proposed)
 
@@ -322,7 +317,7 @@ on real clips (this machine has an RTX 4070 and a CPU to test with) before anyth
 | 7 | **Compressarr HD Quality v1** | HandBrake | x265 10-bit, RF 20, fast | First English track: copied if possible, else E-AC3 up to 7.1 at 512 | MKV | Kept | CPU |
 | 8 | **Compressarr Compatibility (H.264) v1** | HandBrake | x264 8-bit main@4.0, RF 24, veryfast, 30 fps cap | First English track: copied if possible, else AAC 5.1 at 384 | MP4 | SDR only | CPU |
 | 9 | **Compressarr AV1 (NVENC) v1** | ffmpeg | av1_nvenc 10-bit, cq 34, p5 | All English tracks copied, else E-AC3 640 | MKV | DV/HDR10+ refused (fallback None) | RTX 40-series or newer |
-| 10 | **Compressarr HEVC NVENC (quality) v1** | ffmpeg | hevc_nvenc 10-bit, cq 26, p5 | All English tracks copied, else E-AC3 640 | MKV | DV/HDR10+ refused (fallback None) | NVIDIA GPU |
+| 10 | ~~Compressarr HEVC NVENC (quality) v1~~ (dropped, see 10.6) | ffmpeg | hevc_nvenc 10-bit, cq 26, p5 | All English tracks copied, else E-AC3 640 | MKV | DV/HDR10+ refused (fallback None) | NVIDIA GPU |
 
 **What the user sees, and who it is for**
 
