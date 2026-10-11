@@ -70,7 +70,7 @@ public static class HandBrakeHdrGuard
         if (support == HandBrakeHdrSupport.SdrOnly)
         {
             var what = dynamic ? probe.DynamicHdrName : "HDR";
-            return $"this is a {what} file, but the profile's video encoder ({traits.Encoder}) can only produce SDR, so the picture would come out with washed-out colours";
+            return $"this file is {what}, but the profile's video encoder ({traits.Encoder}) can only produce SDR, so the picture would come out with washed-out colours";
         }
 
         // HDR10 alone is carried by every other encoder; what a hardware encoder can't carry is the dynamic metadata, and a
