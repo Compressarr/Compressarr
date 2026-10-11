@@ -216,6 +216,21 @@ public class FFmpegRunnerTests : Presets.AppDataTestBase, IDisposable
     }
 
     [Fact]
+    public async Task AFileFfprobeCannotRead_WhenFfprobeIsPresent_BlamesTheFileNotTheTool()
+    {
+        WriteFakeFfmpeg();
+        var probe = Path.Combine(_dir, "ffprobe.exe");
+        File.WriteAllText(probe, "");
+
+        var request = Request("No crop") with { ProbePath = probe };
+        var result = await Runner(StoreWithNoCrop()).RunAsync(request, null, CancellationToken.None);
+
+        Assert.Equal(EncodeFailureKind.NotStarted, result.Failure);
+        Assert.Contains("may be damaged or not a video", result.FailureMessage);
+        Assert.DoesNotContain("is ffprobe at", result.FailureMessage);
+    }
+
+    [Fact]
     public async Task AFileFfprobeCannotRead_NeverStartsFfmpeg()
     {
         WriteFakeFfmpeg();

@@ -60,7 +60,9 @@ public sealed class FFmpegRunner : IEncoderRunner
         if (cancellationToken.IsCancellationRequested) return Finish(false, cancelled: true);
         if (probe is null)
         {
-            return Finish(false, EncodeFailureKind.NotStarted, $"ffprobe could not read '{request.SourcePath}' (is ffprobe at '{probePath}'?).");
+            return Finish(false, EncodeFailureKind.NotStarted, File.Exists(probePath)
+                ? $"ffprobe could not read '{request.SourcePath}' - the file may be damaged or not a video."
+                : $"ffprobe could not read '{request.SourcePath}' (is ffprobe at '{probePath}'?).");
         }
 
         var plan = FFmpegPlanner.Plan(profile, probe);
