@@ -444,6 +444,22 @@ public class EncoderEngineTests : IDisposable
     }
 
     [Fact]
+    public async Task ARefusedDolbyVisionFile_IsHeldInTheQueue_SoItIsNotReportedAgainOnEveryPass()
+    {
+        var rig = BuildRig(EncoderEngine.FFmpeg, "FF Preset");
+        rig.Resolver.Probe = DvRip(8, 1);
+        var resume = new List<ResumeEntry>();
+        var context = await rig.Orchestrator.PrepareLaneAsync(rig.Lane, rig.Config, resume, rig.ResumePath);
+        var entry = resume.Single(e => e.LaneId == rig.Lane.Id);
+
+        var result = await rig.Orchestrator.ProcessOneFileAsync(context!, entry, rig.ResumePath.Replace("resume.json", ""), "20260101_000000", resume, rig.ResumePath, CancellationToken.None);
+
+        Assert.Equal(ReportErrorCode.DynamicHdrNeedsHandBrake, result.ErrorCode);
+        Assert.Equal(ResumeStatus.Error, entry.Status);
+        Assert.True(entry.HeldAfterFailure);
+    }
+
+    [Fact]
     public async Task ADolbyVisionFile_WhenHandBrakeIsMissing_IsRefusedWithThatReason()
     {
         var rig = BuildRig(EncoderEngine.FFmpeg, "FF Preset");

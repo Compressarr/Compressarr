@@ -447,6 +447,9 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
                     var message = $"{probe.DynamicHdrName} dynamic metadata would be lost by ffmpeg, and {why} - the file was left alone.";
                     _logger.Log($"  {message}", LogSeverity.Error);
                     resumeEntry.Status = ResumeStatus.Error;
+                    // Held, like a failed encode: nothing about the file changes by itself, so retrying it every pass would only
+                    // repeat the same refusal (and a new error report each time) until the profile is changed.
+                    resumeEntry.HeldAfterFailure = true;
                     SaveEntryResult(resumeEntry, resumeFilePath);
 
                     return new ConversionResult
