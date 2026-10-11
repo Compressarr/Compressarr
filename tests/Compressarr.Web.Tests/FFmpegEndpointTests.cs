@@ -69,6 +69,26 @@ public class FFmpegEndpointTests
     }
 
     [Fact]
+    public async Task ANewLane_StartsWithTheDefaultProfileForBothContentTypes_SoANoviceHasAWorkingChoice()
+    {
+        await using var host = await QueueHost.StartAsync();
+
+        using var added = await host.Client.PostAsync("/api/lanes", null);
+        var lane = (await added.Content.ReadFromJsonAsync<JsonObject>())!;
+
+        Assert.Equal("Compressarr SD-HD", lane["tvPreset"]!.GetValue<string>());
+        Assert.Equal("Compressarr SD-HD", lane["moviePreset"]!.GetValue<string>());
+        Assert.DoesNotContain(lane["validationIssues"]!.AsArray(), i => i!["field"]!.GetValue<string>() is "tvPreset" or "moviePreset");
+        Assert.Equal("HandBrake", lane["engine"]!.GetValue<string>());
+        Assert.False(lane["allowHdrLoss"]!.GetValue<bool>());
+
+        // "Reset lanes" starts over with the same kind of lane.
+        (await host.Client.PostAsync("/api/maintenance/reset-lanes", null)).EnsureSuccessStatusCode();
+        var lanes = (await host.Client.GetFromJsonAsync<JsonArray>("/api/lanes"))!;
+        Assert.Equal("Compressarr SD-HD", Assert.Single(lanes)!["tvPreset"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task TheLanesHdrChoice_DefaultsOff_IsSaved_AndAClientThatDoesNotSendItLeavesItAlone()
     {
         await using var host = await QueueHost.StartAsync(HbLane);

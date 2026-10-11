@@ -51,7 +51,7 @@ public static class MaintenanceEndpoints
             configStore.Update(AppPaths.GetConfigFilePath(), config =>
             {
                 config.Lanes.Clear();
-                config.Lanes.Add(new LaneConfig { DisplayName = "New Lane 1", Enabled = true });
+                config.Lanes.Add(LaneConfig.CreateNew("New Lane 1"));
                 return true;
             });
             return Results.Ok();

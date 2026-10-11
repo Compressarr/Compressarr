@@ -20,6 +20,15 @@ public class HandBrakeProfileStoreTests : AppDataTestBase
     private static string UserPath => AppPaths.GetHandBrakeProfilesFilePath();
 
     [Fact]
+    public void TheProfileANewLaneStartsWith_IsABuiltInThatAlwaysExists()
+    {
+        var profile = new HandBrakeProfileStore().Find(LaneConfig.DefaultProfileName);
+
+        Assert.NotNull(profile);
+        Assert.True(profile!.IsBuiltIn);
+    }
+
+    [Fact]
     public void GetAll_FreshInstall_IsJustTheLockedBuiltIns()
     {
         var all = new HandBrakeProfileStore().GetAll();

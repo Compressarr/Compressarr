@@ -144,6 +144,20 @@ public sealed class LaneConfig
     public string TvShowBasePath { get; set; } = "";
     public string MovieBasePath { get; set; } = "";
 
+    /// <summary>The profile a brand-new lane starts with for both Movies and TV: the built-in, always-present
+    /// general-purpose HandBrake profile, so a new user has a working choice without having to pick one first.</summary>
+    public const string DefaultProfileName = "Compressarr SD-HD";
+
+    /// <summary>A lane as the Lanes page's "Add lane" (and "Reset lanes") creates it: enabled, with the default profile for both
+    /// content types. Input, Output and the library folders are still the user's to fill in.</summary>
+    public static LaneConfig CreateNew(string displayName) => new()
+    {
+        DisplayName = displayName,
+        Enabled = true,
+        TvPreset = DefaultProfileName,
+        MoviePreset = DefaultProfileName
+    };
+
     /// <summary>Which encoder this lane uses (2.2). HandBrake unless chosen otherwise. A 2.1.x install
     /// ignores the field; it would then look for a HandBrake preset by an ffmpeg profile's name, find
     /// none, and skip the lane with the usual "preset not found" message - never encoding with the

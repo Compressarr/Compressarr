@@ -47,6 +47,7 @@ for that full history.
 > only - everything else is in the entries below.
 
 ### Changed
+- **A new lane starts with a working profile.** Add lane (and Reset lanes) now pre-fill both the Movie and the TV profile with **Compressarr SD-HD**, the built-in general-purpose profile, instead of leaving them blank. A new user only has to choose the Input and Output folders and the library folders. Existing lanes are not changed.
 - **Run Now runs the queue without starting monitoring.** On the Monitor page, Run Now now works whether monitoring is on or off. With monitoring on it still skips the countdown; with monitoring off it runs one pass and stops, leaving monitoring off. Abort works on it like on any pass. It is unavailable only while a pass is already running.
 - **The Start/Stop button says just "Start" or "Stop".** The word "monitoring" was implied; it stays in the tooltip.
 - **The top bar's buttons are icon-over-label.** On every page the action buttons (Save, Clear changes, Run once, Add lane, Start/Stop monitoring, Pause, Run now, Abort, the Profiles buttons, Back and Duplicate in the profile editors...) now show an icon above a short label, in groups split by thin dividers, instead of boxed text buttons. The full name is the tooltip. The bar is slightly taller (62 px instead of 56).

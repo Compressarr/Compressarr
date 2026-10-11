@@ -28,11 +28,7 @@ public static class LaneEndpoints
         {
             var dto = configStore.Update(AppPaths.GetConfigFilePath(), config =>
             {
-                var lane = new LaneConfig
-                {
-                    DisplayName = $"New Lane {config.Lanes.Count + 1}",
-                    Enabled = true
-                };
+                var lane = LaneConfig.CreateNew($"New Lane {config.Lanes.Count + 1}");
                 config.Lanes.Add(lane);
                 return ConfigMapping.ToLaneDto(lane, Validate(lane, config, pathExpander, encoders));
             });
