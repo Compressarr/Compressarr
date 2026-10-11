@@ -42,6 +42,15 @@ public static class LaneValidator
             issues.Add(new ValidationIssue("output", "Output folder is required, unless 'write output to same folder as input' is enabled in Settings."));
         }
 
+        // Where finished files are moved to (only when Settings > Move converted files is on). Compressarr never creates a missing
+        // library folder - the move fails instead - so a destination that is not there is flagged, the way a missing Input is.
+        // This only marks the field on the Lanes page; a run is not stopped by it.
+        if (config.Processing.MoveFiles)
+        {
+            FlagMissingDestination(issues, "tvShowBasePath", "TV destination path", lane.TvShowBasePath, pathExpander);
+            FlagMissingDestination(issues, "movieBasePath", "Movie destination path", lane.MovieBasePath, pathExpander);
+        }
+
         if (string.IsNullOrWhiteSpace(lane.TvPreset) && string.IsNullOrWhiteSpace(lane.MoviePreset))
         {
             // Either field resolves this - both are flagged so the fix is obvious regardless of
@@ -62,5 +71,12 @@ public static class LaneValidator
         }
 
         return issues;
+    }
+
+    private static void FlagMissingDestination(List<ValidationIssue> issues, string field, string label, string path, IPathExpander pathExpander)
+    {
+        var expanded = pathExpander.Expand(path);
+        if (string.IsNullOrWhiteSpace(expanded) || Directory.Exists(expanded)) return;
+        issues.Add(new ValidationIssue(field, $"{label}: that folder does not exist. Compressarr does not create it - create it, or pick another folder."));
     }
 }

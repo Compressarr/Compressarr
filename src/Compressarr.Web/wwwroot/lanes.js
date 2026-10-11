@@ -19,6 +19,8 @@ function setStatus(text, success) { setStatusMessage(text, success === 'error' ?
 const LANE_FIELD_MAP = {
   input: '.f-input',
   output: '.f-output',
+  tvShowBasePath: '.f-tvShowBasePath',
+  movieBasePath: '.f-movieBasePath',
   tvPreset: '.f-tvPreset',
   moviePreset: '.f-moviePreset',
   engine: '.f-engine'

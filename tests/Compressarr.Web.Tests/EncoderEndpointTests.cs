@@ -294,6 +294,29 @@ public class EncoderEndpointTests
         Assert.NotEqual(host.Root, JsonNode.Parse(await host.Client.GetStringAsync("/api/lanes"))!.AsArray()[0]!["input"]!.GetValue<string>());
     }
 
+    [Fact]
+    public async Task ValidateLane_FlagsADestinationFolderThatIsNotThere_AndClearsItOnceItExists()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var lane = JsonNode.Parse(await host.Client.GetStringAsync("/api/lanes"))!.AsArray()[0]!.AsObject();
+        lane["input"] = host.Root;
+        lane["output"] = host.Root;
+        lane["tvShowBasePath"] = Path.Combine(host.Root, "no-tv");
+        lane["movieBasePath"] = Path.Combine(host.Root, "no-movies");
+
+        var bad = await PostValidate(host, lane);
+        lane["tvShowBasePath"] = host.Root;
+        var oneFixed = await PostValidate(host, lane);
+        lane["movieBasePath"] = "";
+        var blank = await PostValidate(host, lane);
+
+        Assert.Contains("tvShowBasePath", bad);
+        Assert.Contains("movieBasePath", bad);
+        Assert.DoesNotContain("tvShowBasePath", oneFixed);
+        Assert.Contains("movieBasePath", oneFixed);
+        Assert.DoesNotContain("movieBasePath", blank); // an empty destination is not flagged
+    }
+
     private static async Task<List<string>> PostValidate(QueueHost host, JsonObject lane)
     {
         using var response = await host.Client.PostAsync("/api/lanes/validate", new StringContent(lane.ToJsonString(), Encoding.UTF8, "application/json"));
