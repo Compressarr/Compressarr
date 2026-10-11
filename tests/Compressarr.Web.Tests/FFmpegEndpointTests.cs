@@ -395,6 +395,29 @@ public class FFmpegEndpointTests
         Assert.False(without["video"]!["hasFallback"]!.GetValue<bool>());
     }
 
+    [Theory]
+    [InlineData(8, 1, true)]    // an HDR10 base layer: can be dropped
+    [InlineData(5, 0, false)]   // profile 5: no usable base layer, still refused
+    public async Task PreviewDecisions_SaysWhetherEncodeAnywayWouldDropTheDolbyVision_OrStillRefuse(int dvProfile, int compatibility, bool canDrop)
+    {
+        await using var host = await QueueHost.StartAsync(HbLane);
+        var dv = UhdProbe.Replace("\"tags\": {} },", $"\"tags\": {{}}, \"side_data_list\": [ {{ \"side_data_type\": \"DOVI configuration record\", \"dv_profile\": {dvProfile}, \"dv_bl_signal_compatibility_id\": {compatibility} }} ] }},");
+        var probe = FakeFfprobe(host, dv, """{ "frames": [] }""");
+        host.Services.GetRequiredService<IConfigStore>().Update(AppPaths.GetConfigFilePath(), c => { c.FFmpeg.ProbePath = probe; return true; });
+        var movie = host.Drop("hb", "Some Movie (2020).mkv");
+        var profile = (JsonObject)(await GetProfileAsync(host, "Compressarr SD-HD"))["profile"]!.DeepClone();
+        profile["crop"] = "off";
+
+        var refuses = await PreviewAsync(host, profile, movie);
+        profile["allowDroppingDynamicHdr"] = true;
+        var encodeAnyway = await PreviewAsync(host, profile, movie);
+
+        Assert.False(refuses["video"]!["dropsDynamicHdr"]!.GetValue<bool>());
+        Assert.True(encodeAnyway["video"]!["dropsDynamicHdr"]!.GetValue<bool>());
+        Assert.Equal(canDrop, encodeAnyway["video"]!["canDropDynamicHdr"]!.GetValue<bool>());
+        Assert.Equal($"profile {dvProfile}", encodeAnyway["video"]!["dolbyVisionProfile"]!.GetValue<string>());
+    }
+
     [Fact]
     public async Task PreviewDecisions_ReportsProblemsPlainly()
     {

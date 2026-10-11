@@ -187,7 +187,10 @@ public static class FFmpegProfileEndpoints
                     pixFmt = plan.Video.PixFmt,
                     hdr = plan.Video.IsHdr,
                     dynamicHdr = result.HasDynamicHdrMetadata ? result.DynamicHdrName : null,
-                    hasFallback = !string.IsNullOrWhiteSpace(profile.FallbackHandBrakePreset)
+                    hasFallback = !string.IsNullOrWhiteSpace(profile.FallbackHandBrakePreset),
+                    dropsDynamicHdr = string.IsNullOrWhiteSpace(profile.FallbackHandBrakePreset) && profile.AllowDroppingDynamicHdr,
+                    canDropDynamicHdr = result.DynamicHdrCanBeDropped,
+                    dolbyVisionProfile = result.DolbyVisionProfileLabel
                 },
                 deinterlace = new { apply = plan.Deinterlace, reason = plan.DeinterlaceReason },
                 crop = new { rect = plan.Crop?.ToString(), reason = plan.CropReason },

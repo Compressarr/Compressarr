@@ -150,6 +150,8 @@ internal sealed class EngResolver : IEncoderResolver
     }
 
     public string? FallbackHandBrakePreset(string ffmpegProfileName) => Fallbacks.GetValueOrDefault(ffmpegProfileName);
+    public HashSet<string> DropsDynamicHdr { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public bool AllowsDroppingDynamicHdr(string ffmpegProfileName) => DropsDynamicHdr.Contains(ffmpegProfileName);
 }
 
 /// <summary>The orchestrator choosing the encoder per lane: the lane's engine decides the runner, the
@@ -322,6 +324,123 @@ public class EncoderEngineTests : IDisposable
         Assert.Empty(rig.Resolver.FFmpeg.Requests);
         Assert.Empty(rig.Resolver.HandBrake.Requests);
         Assert.True(File.Exists(rig.Source));
+    }
+
+    // ---- "encode anyway": a profile that allows dropping the dynamic metadata ------------------------
+
+    private static MediaProbeResult DvRip(int profile, int? compatibility)
+    {
+        var record = compatibility is { } c ? $"\"dv_profile\": {profile}, \"dv_bl_signal_compatibility_id\": {c}, \"dv_level\": 6" : $"\"dv_profile\": {profile}, \"dv_level\": 6";
+        return Probe(FFmpegFixtures.DolbyVisionRip.Replace("\"dv_profile\": 8, \"dv_level\": 6", record));
+    }
+
+    [Fact]
+    public async Task ADolbyVisionFile_WithEncodeAnywayOn_IsEncodedByFfmpeg_AndTheReportTagSaysItWasDropped()
+    {
+        var rig = BuildRig(EncoderEngine.FFmpeg, "FF Preset");
+        rig.Resolver.Probe = DvRip(8, 1); // profile 8.1: an HDR10 base layer
+        rig.Resolver.DropsDynamicHdr.Add("FF Preset");
+
+        var result = await RunAsync(rig);
+
+        Assert.True(result.Success);
+        Assert.Single(rig.Resolver.FFmpeg.Requests);
+        Assert.Empty(rig.Resolver.HandBrake.Requests);
+        Assert.Equal("ffmpeg (Dolby Vision dropped)", result.EncoderLabel);
+        Assert.Contains(rig.Logger.Logs, l => l.Message.Contains("Dolby Vision detected") && l.Message.Contains("encode anyway"));
+    }
+
+    [Theory]
+    [InlineData(8, 2)]   // SDR base layer
+    [InlineData(8, 4)]   // HLG base layer
+    [InlineData(7, 6)]   // UHD Blu-ray (Blu-ray HDR10 base layer)
+    [InlineData(8, null)] // a profile 8 file whose ffprobe doesn't report the compatibility id: profile 8 always has one
+    [InlineData(7, null)]
+    public async Task EncodeAnyway_AllowsEveryDolbyVisionFileWithAUsableBaseLayer(int profile, int? compatibility)
+    {
+        var rig = BuildRig(EncoderEngine.FFmpeg, "FF Preset");
+        rig.Resolver.Probe = DvRip(profile, compatibility);
+        rig.Resolver.DropsDynamicHdr.Add("FF Preset");
+
+        var result = await RunAsync(rig);
+
+        Assert.True(result.Success);
+        Assert.Single(rig.Resolver.FFmpeg.Requests);
+    }
+
+    [Theory]
+    [InlineData(5, 0)]      // profile 5: no HDR10-compatible base layer
+    [InlineData(5, null)]
+    [InlineData(4, null)]   // anything else we can't vouch for
+    public async Task EncodeAnyway_StillRefusesADolbyVisionFileWithNoUsableBaseLayer(int profile, int? compatibility)
+    {
+        var rig = BuildRig(EncoderEngine.FFmpeg, "FF Preset");
+        rig.Resolver.Probe = DvRip(profile, compatibility);
+        rig.Resolver.DropsDynamicHdr.Add("FF Preset");
+
+        var result = await RunAsync(rig);
+
+        Assert.False(result.Success);
+        Assert.Equal(ReportErrorCode.DynamicHdrNeedsHandBrake, result.ErrorCode);
+        Assert.Contains("no HDR10-compatible base layer", result.FailureReason);
+        Assert.Contains($"profile {profile}", result.FailureReason);
+        Assert.Empty(rig.Resolver.FFmpeg.Requests);
+        Assert.True(File.Exists(rig.Source)); // the original is untouched
+    }
+
+    [Fact]
+    public async Task Hdr10Plus_WithEncodeAnywayOn_IsEncodedByFfmpeg()
+    {
+        var rig = BuildRig(EncoderEngine.FFmpeg, "FF Preset");
+        rig.Resolver.Probe = FFprobeParser.Parse(FFmpegFixtures.UhdHdr10Rip, FFmpegFixtures.Hdr10PlusFrames);
+        rig.Resolver.DropsDynamicHdr.Add("FF Preset");
+
+        var result = await RunAsync(rig);
+
+        Assert.True(result.Success);
+        Assert.Equal("ffmpeg (HDR10+ dropped)", result.EncoderLabel);
+        Assert.Single(rig.Resolver.FFmpeg.Requests);
+    }
+
+    [Fact]
+    public async Task ANamedHandBrakeFallback_WinsOverEncodeAnyway()
+    {
+        var rig = BuildRig(EncoderEngine.FFmpeg, "FF Preset");
+        rig.Resolver.Probe = DvRip(8, 1);
+        rig.Resolver.Fallbacks["FF Preset"] = "Compressarr SD-HD";
+        rig.Resolver.DropsDynamicHdr.Add("FF Preset");
+
+        var result = await RunAsync(rig);
+
+        Assert.Equal("HandBrake (Dolby Vision fallback)", result.EncoderLabel);
+        Assert.Empty(rig.Resolver.FFmpeg.Requests);
+    }
+
+    [Fact]
+    public async Task ABrokenHandBrakeFallback_IsNotQuietlyReplacedByEncodeAnyway()
+    {
+        var rig = BuildRig(EncoderEngine.FFmpeg, "FF Preset");
+        rig.Resolver.Probe = DvRip(8, 1);
+        rig.Resolver.Fallbacks["FF Preset"] = "Deleted Preset";
+        rig.Resolver.DropsDynamicHdr.Add("FF Preset");
+
+        var result = await RunAsync(rig);
+
+        Assert.False(result.Success);
+        Assert.Equal(ReportErrorCode.DynamicHdrNeedsHandBrake, result.ErrorCode);
+        Assert.Empty(rig.Resolver.FFmpeg.Requests);
+    }
+
+    [Fact]
+    public async Task WithEncodeAnywayOff_NothingChanges_ADolbyVisionFileIsStillRefused()
+    {
+        var rig = BuildRig(EncoderEngine.FFmpeg, "FF Preset");
+        rig.Resolver.Probe = DvRip(8, 1);
+
+        var result = await RunAsync(rig);
+
+        Assert.False(result.Success);
+        Assert.Contains("no HandBrake fallback preset", result.FailureReason);
     }
 
     [Fact]

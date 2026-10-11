@@ -84,6 +84,12 @@ public sealed class FFmpegProfile
     /// would silently drop the dynamic metadata). Blank = refuse such files.</summary>
     public string FallbackHandBrakePreset { get; set; } = "";
 
+    /// <summary>Encode a Dolby Vision / HDR10+ file with ffmpeg anyway, dropping that dynamic metadata (the output keeps
+    /// the file's HDR10 base layer). Off by default, and only used when no HandBrake fallback is named. A Dolby Vision file
+    /// with no usable base layer (profile 5) is still refused: without the Dolby Vision data it would show wrong colours.
+    /// The original is replaced by the lesser copy, so the editor asks for confirmation.</summary>
+    public bool AllowDroppingDynamicHdr { get; set; }
+
     /// <summary>Free-form extra output arguments, added just before the output file.</summary>
     public string ExtraArgs { get; set; } = "";
 

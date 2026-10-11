@@ -105,7 +105,7 @@ public static class ReportErrorCodeExtensions
         ReportErrorCode.EncodedLengthMismatch =>
             "The encoded file is much shorter (or longer) than the source, so it was not kept and the original was left alone. This can mean a corrupt source or a full disk. Open the encode details for ffmpeg's own output.",
         ReportErrorCode.DynamicHdrNeedsHandBrake =>
-            "This file has Dolby Vision or HDR10+ dynamic metadata, which ffmpeg would silently drop. The ffmpeg profile has no usable HandBrake fallback profile (or HandBrake is not installed), so the file was left alone and nothing was encoded. To encode such files, name a HandBrake fallback profile on the ffmpeg profile (Profiles page), or put them in a HandBrake lane.",
+            "This file has Dolby Vision or HDR10+ dynamic metadata, which ffmpeg would silently drop. The ffmpeg profile has no usable HandBrake fallback profile (or HandBrake is not installed), so the file was left alone and nothing was encoded. To encode such files, name a HandBrake fallback profile on the ffmpeg profile (Profiles page), or put them in a HandBrake lane. A profile can also be set to encode them anyway without the Dolby Vision / HDR10+ data, but never a Dolby Vision profile 5 file, which would show wrong colours.",
         ReportErrorCode.LaneEncoderNotAvailable =>
             "This lane's encoder (HandBrake or ffmpeg) wasn't found where Compressarr looks for it, so the lane was skipped this pass. Check the Encoder page.",
         _ => "An unspecified error occurred.",

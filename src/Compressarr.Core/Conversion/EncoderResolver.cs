@@ -38,6 +38,10 @@ public interface IEncoderResolver
     /// <summary>The HandBrake profile that should encode a Dolby Vision / HDR10+ file for the named
     /// ffmpeg profile, or null when that profile has none.</summary>
     string? FallbackHandBrakePreset(string ffmpegProfileName);
+
+    /// <summary>True when the named ffmpeg profile allows encoding a Dolby Vision / HDR10+ file with ffmpeg anyway, dropping
+    /// that metadata (only consulted when it has no HandBrake fallback).</summary>
+    bool AllowsDroppingDynamicHdr(string ffmpegProfileName);
 }
 
 public sealed class EncoderResolver : IEncoderResolver
@@ -87,6 +91,9 @@ public sealed class EncoderResolver : IEncoderResolver
         var fallback = _ffmpegProfiles.Find(ffmpegProfileName)?.FallbackHandBrakePreset;
         return string.IsNullOrWhiteSpace(fallback) ? null : fallback;
     }
+
+    public bool AllowsDroppingDynamicHdr(string ffmpegProfileName) =>
+        _ffmpegProfiles.Find(ffmpegProfileName)?.AllowDroppingDynamicHdr ?? false;
 }
 
 /// <summary>"Is this engine's tooling in place" - the same answer for the run, the Lanes page and the

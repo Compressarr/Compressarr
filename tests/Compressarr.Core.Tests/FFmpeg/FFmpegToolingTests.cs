@@ -297,6 +297,53 @@ public class FFmpegToolingTests : IDisposable
         public HttpClient CreateClient(string name) => throw new InvalidOperationException("must not be called");
     }
 
+    // ---- Dolby Vision base layer (for "encode anyway") --------------------------------------------
+
+    private static MediaProbeResult DvProbe(string record) => FFprobeParser.Parse(FFmpegFixtures.DolbyVisionRip.Replace("\"dv_profile\": 8, \"dv_level\": 6", record));
+
+    [Theory]
+    [InlineData("\"dv_profile\": 8, \"dv_bl_signal_compatibility_id\": 1", 8, 1, true)]
+    [InlineData("\"dv_profile\": 8, \"dv_bl_signal_compatibility_id\": 2", 8, 2, true)]
+    [InlineData("\"dv_profile\": 8, \"dv_bl_signal_compatibility_id\": 4", 8, 4, true)]
+    [InlineData("\"dv_profile\": 7, \"dv_bl_signal_compatibility_id\": 6", 7, 6, true)]
+    [InlineData("\"dv_profile\": 5, \"dv_bl_signal_compatibility_id\": 0", 5, 0, false)]
+    [InlineData("\"dv_profile\": 8", 8, null, true)]
+    [InlineData("\"dv_profile\": 5", 5, null, false)]
+    [InlineData("\"dv_level\": 6", null, null, false)]
+    public void TheDolbyVisionRecord_IsReadAndJudged(string record, int? profile, int? compatibility, bool usable)
+    {
+        var video = DvProbe(record).Video!;
+
+        Assert.True(video.HasDolbyVision);
+        Assert.Equal(profile, video.DolbyVisionProfile);
+        Assert.Equal(compatibility, video.DolbyVisionBaseLayerCompatibility);
+        Assert.Equal(usable, video.DolbyVisionHasUsableBaseLayer);
+    }
+
+    [Fact]
+    public void WithoutDolbyVision_TheBaseLayerQuestionDoesNotArise_AndHdr10PlusCanAlwaysBeDropped()
+    {
+        var plain = FFmpegFixtures.Uhd();
+        var hdr10Plus = FFprobeParser.Parse(FFmpegFixtures.UhdHdr10Rip, FFmpegFixtures.Hdr10PlusFrames);
+
+        Assert.False(plain.Video!.HasDolbyVision);
+        Assert.True(plain.Video.DolbyVisionHasUsableBaseLayer);
+        Assert.True(hdr10Plus.HasDynamicHdrMetadata);
+        Assert.True(hdr10Plus.DynamicHdrCanBeDropped);
+    }
+
+    [Fact]
+    public void EncodeAnyway_IsOffByDefault_OnNoBuiltIn_AndRoundTripsThroughJson()
+    {
+        Assert.False(new FFmpegProfile().AllowDroppingDynamicHdr);
+        Assert.All(new FFmpegProfileStore().GetAll(), p => Assert.False(p.AllowDroppingDynamicHdr));
+
+        var json = System.Text.Json.JsonSerializer.Serialize(new FFmpegProfile { Name = "x", AllowDroppingDynamicHdr = true });
+        Assert.True(System.Text.Json.JsonSerializer.Deserialize<FFmpegProfile>(json)!.AllowDroppingDynamicHdr);
+        // A profile saved before the option existed has no such field.
+        Assert.False(System.Text.Json.JsonSerializer.Deserialize<FFmpegProfile>("""{ "name": "old" }""")!.AllowDroppingDynamicHdr);
+    }
+
     // ---- Duplicate as ffmpeg --------------------------------------------------------------------
 
     private static JsonObject BuiltInHandBrake(string name) =>

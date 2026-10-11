@@ -16,6 +16,7 @@ for that full history.
 > only - everything else is in the entries below.
 
 ### Added
+- **An ffmpeg profile can now encode Dolby Vision / HDR10+ files anyway.** The profile editor's Dolby Vision & HDR10+ section is a three-way choice: refuse the file (the default), encode it with a HandBrake profile, or **encode it anyway without Dolby Vision / HDR10+**. The last drops the dynamic metadata, so the output is plain HDR10 (the file's HDR10 base layer) and the original is replaced by that lesser copy; choosing it asks for confirmation, the log says what was dropped, and the report tag reads "ffmpeg (Dolby Vision dropped)" or "ffmpeg (HDR10+ dropped)". A Dolby Vision profile 5 file has no HDR10 base layer and would show wrong colours without the Dolby Vision data, so it is still refused (ERROR 112, with that reason). A named HandBrake profile always wins over "encode anyway", and a broken one is never quietly replaced by it. Preview decisions says which of the three will happen to the file you preview.
 - **An Advanced button in the top bar** (on Settings and Encoder, the pages that have something to reveal). It shows
   options that are tucked away by default and is remembered per browser: it changes what that browser shows, not any
   setting. For now it holds the two things below.

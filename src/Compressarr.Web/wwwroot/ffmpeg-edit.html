@@ -103,9 +103,15 @@
           <div class="check-row" style="margin-top:8px"><input type="checkbox" id="chapters" /><label for="chapters">Keep chapter markers</label></div>
 
           <div class="ed-grp">Dolby Vision &amp; HDR10+</div>
-          <div class="field-block"><label for="fallbackHandBrakePreset">HandBrake profile for Dolby Vision / HDR10+ files</label>
-            <select id="fallbackHandBrakePreset"></select>
-            <div class="ed-hint">ffmpeg would silently drop that dynamic metadata, so such files are encoded by HandBrake with this profile instead. Leave it blank to refuse those files (they are left untouched and reported). Ordinary HDR10 is handled by ffmpeg itself.</div></div>
+          <div class="field-block"><label for="dynamicHdrMode">When a file has Dolby Vision or HDR10+</label>
+            <select id="dynamicHdrMode">
+              <option value="refuse">Refuse it (leave the file untouched)</option>
+              <option value="handbrake">Encode it with a HandBrake profile</option>
+              <option value="drop">Encode it anyway, without Dolby Vision / HDR10+</option>
+            </select>
+            <div class="ed-hint" id="dynamicHdrHint"></div></div>
+          <div class="field-block" id="fallbackBlock"><label for="fallbackHandBrakePreset">HandBrake profile</label>
+            <select id="fallbackHandBrakePreset"></select></div>
 
           <div class="ed-grp">Advanced</div>
           <div class="field-block"><label for="extraArgs">Extra ffmpeg arguments</label><input type="text" id="extraArgs" placeholder="e.g. -metadata comment=&quot;compressed&quot;" />

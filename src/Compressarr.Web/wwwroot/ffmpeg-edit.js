@@ -78,6 +78,27 @@ function syncVisibility() {
 
 let hbPresets = [];
 
+// What to do with a Dolby Vision / HDR10+ file: refuse it, hand it to a HandBrake profile, or encode it anyway and lose that data.
+let lastDynamicHdrMode = 'refuse';
+const DYNAMIC_HDR_HINTS = {
+  refuse: 'Such files are left untouched and reported (ERROR 112), so nothing is re-encoded and the original is never replaced. Ordinary HDR10 is handled by ffmpeg itself.',
+  handbrake: 'HandBrake encodes such files with the profile below, and keeps the Dolby Vision / HDR10+ data where its encoder can carry it.',
+  drop: 'ffmpeg encodes the file and the Dolby Vision / HDR10+ data is lost: the result is plain HDR10 (the file\'s HDR10 base layer). The original is replaced by this lesser copy. Dolby Vision profile 5 files have no HDR10 base layer and would show wrong colours, so they are still refused. The report marks every such file.'
+};
+function syncDynamicHdr() {
+  const mode = $('dynamicHdrMode').value;
+  $('dynamicHdrHint').textContent = DYNAMIC_HDR_HINTS[mode];
+  $('fallbackBlock').classList.toggle('hidden', mode !== 'handbrake');
+}
+$('dynamicHdrMode').addEventListener('change', () => {
+  const mode = $('dynamicHdrMode').value;
+  if (mode === 'drop' && !confirm('Encode Dolby Vision / HDR10+ files anyway?\n\nThe Dolby Vision / HDR10+ data will be lost: the result is plain HDR10, and the original is replaced by this lesser copy.\nDolby Vision profile 5 files are still refused (they would show wrong colours).\n\nChoose this only if you do not need Dolby Vision or HDR10+.')) {
+    $('dynamicHdrMode').value = lastDynamicHdrMode;
+  }
+  lastDynamicHdrMode = $('dynamicHdrMode').value;
+  syncDynamicHdr();
+});
+
 function fillForm(p) {
   $('name').value = p.name;
   $('description').value = p.description;
@@ -109,7 +130,10 @@ function fillForm(p) {
   $('subtitleTracks').value = p.subtitleTracks;
   $('chapters').checked = p.chapters;
 
-  fillSelect($('fallbackHandBrakePreset'), [['', 'None - refuse such files'], ...hbPresets], p.fallbackHandBrakePreset || '');
+  fillSelect($('fallbackHandBrakePreset'), hbPresets, p.fallbackHandBrakePreset || (hbPresets[0] && (Array.isArray(hbPresets[0]) ? hbPresets[0][0] : hbPresets[0])) || '');
+  $('dynamicHdrMode').value = p.fallbackHandBrakePreset ? 'handbrake' : p.allowDroppingDynamicHdr ? 'drop' : 'refuse';
+  lastDynamicHdrMode = $('dynamicHdrMode').value;
+  syncDynamicHdr();
   $('extraArgs').value = p.extraArgs;
 
   syncVisibility();
@@ -143,7 +167,8 @@ function readForm() {
     subtitleLanguages: splitList($('subtitleLanguages').value),
     subtitleTracks: $('subtitleTracks').value,
     chapters: $('chapters').checked,
-    fallbackHandBrakePreset: $('fallbackHandBrakePreset').value,
+    fallbackHandBrakePreset: $('dynamicHdrMode').value === 'handbrake' ? $('fallbackHandBrakePreset').value : '',
+    allowDroppingDynamicHdr: $('dynamicHdrMode').value === 'drop',
     extraArgs: $('extraArgs').value
   };
 }
@@ -279,7 +304,12 @@ $('previewBtn').addEventListener('click', async () => {
   }
 
   const hdr = r.video.dynamicHdr
-    ? `<div class="banner err">${escapeHtml(r.video.dynamicHdr)} found - ffmpeg would drop it. ${r.video.hasFallback ? 'This profile hands such files to HandBrake (see the fallback profile below).' : 'This profile has no HandBrake fallback, so such files are refused and left untouched.'}</div>`
+    ? `<div class="banner err">${escapeHtml(r.video.dynamicHdr)} found - ffmpeg would drop it. ${
+        r.video.hasFallback ? 'This profile hands such files to HandBrake (see the HandBrake profile above).'
+        : r.video.dropsDynamicHdr ? (r.video.canDropDynamicHdr
+            ? 'This profile is set to encode them anyway: the Dolby Vision / HDR10+ data is dropped and the output is plain HDR10.'
+            : `This Dolby Vision file (${escapeHtml(r.video.dolbyVisionProfile || 'profile unknown')}) has no HDR10-compatible base layer, so encoding it without Dolby Vision would give wrong colours - it is refused and left untouched.`)
+        : 'This profile has no HandBrake fallback, so such files are refused and left untouched.'}</div>`
     : (r.video.hdr ? '<div class="ed-hint">HDR10 - colour information (and mastering-display data when present) is carried over.</div>' : '');
 
   out.innerHTML = `

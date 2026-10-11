@@ -47,6 +47,20 @@ public sealed record MediaStream
     public string ColorPrimaries { get; init; } = "";
     public string ColorRange { get; init; } = "";
     public bool HasDolbyVision { get; init; }
+
+    /// <summary>The Dolby Vision profile (5, 7, 8...) from ffprobe's "DOVI configuration record"; null when not reported.</summary>
+    public int? DolbyVisionProfile { get; init; }
+
+    /// <summary>The Dolby Vision base-layer signal compatibility id: 0 none (profile 5), 1 HDR10, 2 SDR, 4 HLG, 6 Blu-ray
+    /// HDR10. Null when not reported.</summary>
+    public int? DolbyVisionBaseLayerCompatibility { get; init; }
+
+    /// <summary>True when the Dolby Vision file's base layer is something a player shows correctly without the Dolby Vision
+    /// data (HDR10, SDR, HLG, Blu-ray HDR10). Profile 5 has no such layer: encoded without Dolby Vision it shows wrong colours.
+    /// When the compatibility id isn't reported, profiles 7 and 8 (which always have one) count; anything else doesn't.</summary>
+    public bool DolbyVisionHasUsableBaseLayer => !HasDolbyVision
+        || (DolbyVisionBaseLayerCompatibility is { } id ? id is 1 or 2 or 4 or 6 : DolbyVisionProfile is 7 or 8);
+
     public MasteringDisplay? Mastering { get; init; }
     public ContentLight? ContentLight { get; init; }
 
@@ -77,6 +91,13 @@ public sealed class MediaProbeResult
     public bool HasDynamicHdrMetadata => (Video?.HasDolbyVision ?? false) || HasHdr10Plus;
 
     /// <summary>"Dolby Vision", "HDR10+" or "Dolby Vision and HDR10+" - for messages.</summary>
+    /// <summary>True when the Dolby Vision (if any) can be dropped without wrecking the picture. HDR10+ alone always can: it
+    /// rides on a normal HDR10 stream.</summary>
+    public bool DynamicHdrCanBeDropped => Video?.DolbyVisionHasUsableBaseLayer ?? true;
+
+    /// <summary>"profile 5" or "" - for messages.</summary>
+    public string DolbyVisionProfileLabel => Video?.DolbyVisionProfile is { } p ? $"profile {p}" : "";
+
     public string DynamicHdrName => (Video?.HasDolbyVision ?? false) && HasHdr10Plus ? "Dolby Vision and HDR10+"
         : (Video?.HasDolbyVision ?? false) ? "Dolby Vision" : HasHdr10Plus ? "HDR10+" : "";
 }
@@ -134,6 +155,8 @@ public static class FFprobeParser
         MasteringDisplay? mastering = null;
         ContentLight? light = null;
         var dolbyVision = false;
+        int? dvProfile = null;
+        int? dvCompatibility = null;
         if (s.TryGetProperty("side_data_list", out var sideData) && sideData.ValueKind == JsonValueKind.Array)
         {
             foreach (var side in sideData.EnumerateArray())
@@ -142,6 +165,8 @@ public static class FFprobeParser
                 if (type.StartsWith("DOVI", StringComparison.OrdinalIgnoreCase) || type.StartsWith("Dolby Vision", StringComparison.OrdinalIgnoreCase))
                 {
                     dolbyVision = true;
+                    dvProfile = IntOrNull(side, "dv_profile");
+                    dvCompatibility = IntOrNull(side, "dv_bl_signal_compatibility_id");
                 }
                 else if (type == "Mastering display metadata")
                 {
@@ -175,10 +200,14 @@ public static class FFprobeParser
             ColorPrimaries = Str(s, "color_primaries"),
             ColorRange = Str(s, "color_range"),
             HasDolbyVision = dolbyVision,
+            DolbyVisionProfile = dvProfile,
+            DolbyVisionBaseLayerCompatibility = dvCompatibility,
             Mastering = mastering,
             ContentLight = light
         };
     }
+
+    private static int? IntOrNull(JsonElement e, string name) => Num(e, name) is { } n ? (int)n : null;
 
     private static MasteringDisplay? ParseMastering(JsonElement side)
     {

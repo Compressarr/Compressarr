@@ -414,7 +414,8 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         {
             // Stock ffmpeg + libx265 silently drops Dolby Vision / HDR10+ dynamic metadata, so such a
             // file goes to HandBrake (which carries it through) using the ffmpeg profile's fallback
-            // preset - or is refused. It is never encoded in a way that quietly loses the HDR.
+            // preset - or is refused. It is never encoded in a way that quietly loses the HDR, except when the
+            // profile explicitly says to drop it (and the file has a base layer that still looks right).
             var probe = await _encoders.ProbeAsync(config, file.FullName, cancellationToken);
             if (probe is { HasDynamicHdrMetadata: true })
             {
@@ -430,9 +431,17 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
                     encoderLabel = "HandBrake (Dolby Vision fallback)";
                     _progress.FileStarted(lane.Id, i, fileCount, file.Name, file.FullName, presetName, beginSizeGb);
                 }
+                else if (fallback is null && _encoders.AllowsDroppingDynamicHdr(presetName) && probe.DynamicHdrCanBeDropped)
+                {
+                    // The user chose this: the output keeps the HDR10 base layer, not the dynamic metadata. The report tag says so.
+                    _logger.Log($"  {probe.DynamicHdrName} detected - this profile is set to encode anyway, so it is dropped (the output keeps the HDR10 base layer).");
+                    encoderLabel = $"ffmpeg ({probe.DynamicHdrName} dropped)";
+                }
                 else
                 {
-                    var why = fallback is null ? "the profile has no HandBrake fallback preset"
+                    var why = fallback is null && _encoders.AllowsDroppingDynamicHdr(presetName)
+                            ? $"this Dolby Vision file ({(probe.DolbyVisionProfileLabel.Length > 0 ? probe.DolbyVisionProfileLabel : "profile unknown")}) has no HDR10-compatible base layer, so encoding without Dolby Vision would give wrong colours"
+                        : fallback is null ? "the profile has no HandBrake fallback preset"
                         : handBrakeProblem is not null ? handBrakeProblem
                         : $"the HandBrake preset '{fallback}' doesn't exist";
                     var message = $"{probe.DynamicHdrName} dynamic metadata would be lost by ffmpeg, and {why} - the file was left alone.";
