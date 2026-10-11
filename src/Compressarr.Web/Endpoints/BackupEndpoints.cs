@@ -22,6 +22,7 @@ public static class BackupEndpoints
 
     private const string ExportProfilesKey = "handBrakeUserProfiles";
     private const string ExportFFmpegProfilesKey = "ffmpegUserProfiles";
+    private const string ExportCatalogKey = "catalogProfiles";
 
     private static readonly JsonSerializerOptions FFmpegProfileJson = new(JsonSerializerDefaults.Web);
 
@@ -38,9 +39,25 @@ public static class BackupEndpoints
         {
             var config = configStore.Load(AppPaths.GetConfigFilePath());
             var node = JsonSerializer.SerializeToNode(config, ExportOptions)!.AsObject();
-            node[ExportProfilesKey] = new JsonArray(profiles.GetAll().Where(p => !p.IsBuiltIn).Select(p => (JsonNode)p.Definition.DeepClone()).ToArray());
-            node[ExportFFmpegProfilesKey] = new JsonArray(ffmpegProfiles.GetAll().Where(p => !p.IsBuiltIn)
+            node[ExportProfilesKey] = new JsonArray(profiles.GetAll().Where(p => !p.IsBuiltIn && !p.IsCatalog).Select(p => (JsonNode)p.Definition.DeepClone()).ToArray());
+            node[ExportFFmpegProfilesKey] = new JsonArray(ffmpegProfiles.GetAll().Where(p => !p.IsBuiltIn && !p.IsCatalog)
                 .Select(p => JsonSerializer.SerializeToNode(p, FFmpegProfileJson)!).ToArray());
+
+            // The profiles added from a catalog, each with its record, so a new machine keeps lanes that use them working with no network.
+            var records = Compressarr.Core.Catalog.CatalogRecordFile.Load();
+            Compressarr.Core.Catalog.InstalledCatalogProfile? RecordOf(string engine, string name) =>
+                records.FirstOrDefault(r => string.Equals(r.Engine, engine, StringComparison.OrdinalIgnoreCase) && string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
+            var catalogHandBrake = new JsonArray();
+            foreach (var p in profiles.GetAll().Where(p => p.IsCatalog))
+            {
+                if (RecordOf("handbrake", p.Name) is { } record) catalogHandBrake.Add(new JsonObject { ["record"] = JsonSerializer.SerializeToNode(record, FFmpegProfileJson), ["definition"] = p.Definition.DeepClone() });
+            }
+            var catalogFFmpeg = new JsonArray();
+            foreach (var p in ffmpegProfiles.GetAll().Where(p => p.IsCatalog))
+            {
+                if (RecordOf("ffmpeg", p.Name) is { } record) catalogFFmpeg.Add(new JsonObject { ["record"] = JsonSerializer.SerializeToNode(record, FFmpegProfileJson), ["definition"] = JsonSerializer.SerializeToNode(p, FFmpegProfileJson) });
+            }
+            node[ExportCatalogKey] = new JsonObject { ["handbrake"] = catalogHandBrake, ["ffmpeg"] = catalogFFmpeg };
             var json = node.ToJsonString(ExportOptions);
             var bytes = Encoding.UTF8.GetBytes(json);
             return Results.File(bytes, "application/json", $"compressarr-config-{DateTime.Now:yyyy-MM-dd}.json");
@@ -93,6 +110,40 @@ public static class BackupEndpoints
                         .DistinctBy(p => p.Name.Trim(), StringComparer.OrdinalIgnoreCase)
                         .ToList();
                     if (missingFFmpeg.Count > 0) ffmpegProfiles.AddUserProfiles(missingFFmpeg);
+                }
+
+                // Profiles that came from a catalog: added back (as catalog profiles) when this install doesn't have a profile of that name, and only
+                // when the definition still matches the fingerprint its record carries.
+                if (JsonNode.Parse(raw) is JsonObject root3 && root3[ExportCatalogKey] is JsonObject exportedCatalog)
+                {
+                    foreach (var item in (exportedCatalog["handbrake"] as JsonArray)?.OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>())
+                    {
+                        try
+                        {
+                            var record = item["record"].Deserialize<Compressarr.Core.Catalog.InstalledCatalogProfile>(FFmpegProfileJson);
+                            if (item["definition"] is JsonObject definition && record is not null && profiles.Find(record.Name) is null
+                                && record.DefinitionSha == Compressarr.Core.Catalog.CatalogHash.OfDefinition(definition))
+                            {
+                                profiles.AddCatalogProfile((JsonObject)definition.DeepClone(), record);
+                            }
+                        }
+                        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentNullException) { /* one bad entry doesn't stop the rest */ }
+                    }
+
+                    foreach (var item in (exportedCatalog["ffmpeg"] as JsonArray)?.OfType<JsonObject>() ?? Enumerable.Empty<JsonObject>())
+                    {
+                        try
+                        {
+                            var record = item["record"].Deserialize<Compressarr.Core.Catalog.InstalledCatalogProfile>(FFmpegProfileJson);
+                            var profile = item["definition"].Deserialize<Compressarr.Core.FFmpeg.FFmpegProfile>(FFmpegProfileJson);
+                            if (profile is not null && record is not null && ffmpegProfiles.Find(record.Name) is null
+                                && record.DefinitionSha == Compressarr.Core.Catalog.CatalogHash.OfFFmpegProfile(profile))
+                            {
+                                ffmpegProfiles.AddCatalogProfile(profile, record);
+                            }
+                        }
+                        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentNullException) { }
+                    }
                 }
 
                 // Lanes that arrived with this config may name presets only the old presets.json has.

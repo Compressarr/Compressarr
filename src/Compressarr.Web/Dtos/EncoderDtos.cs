@@ -31,7 +31,8 @@ public sealed record ProfileDto(
     string Video,
     string Audio,
     string Description,
-    List<string> UsedBy);
+    List<string> UsedBy,
+    bool Catalog = false);
 
 public sealed record ProfileListDto(
     List<ProfileDto> Profiles,
@@ -39,7 +40,10 @@ public sealed record ProfileListDto(
     string ActivePresetsPath,
     string? UserFileError,
     string? FfmpegUserFilePath = null,
-    string? FfmpegUserFileError = null);
+    string? FfmpegUserFileError = null,
+    string? CatalogHandBrakeFilePath = null,
+    string? CatalogFFmpegFilePath = null,
+    List<string>? DamagedCatalog = null);
 
 /// <summary>The editor's view of one HandBrake profile: the form fields, whether it is a locked
 /// built-in (the editor is then read-only), and which lanes use it.</summary>
@@ -47,7 +51,8 @@ public sealed record ProfileEditDto(
     HandBrakeProfileForm Form,
     bool BuiltIn,
     List<string> UsedBy,
-    string ActivePresetsPath);
+    string ActivePresetsPath,
+    bool Catalog = false);
 
 /// <summary>Save request. BaseName (create only) names the profile whose settings the new one starts
 /// from - everything the form doesn't show is inherited from it.</summary>
@@ -64,6 +69,6 @@ public sealed record ImportCandidateDto(string Name, string? Group, string Video
 public sealed record ImportListingDto(string Path, bool Found, string? Error, List<ImportCandidateDto> Candidates);
 
 /// <summary>The ffmpeg profile editor's view of one profile.</summary>
-public sealed record FFmpegProfileEditDto(FFmpegProfile Profile, bool BuiltIn, List<string> UsedBy);
+public sealed record FFmpegProfileEditDto(FFmpegProfile Profile, bool BuiltIn, List<string> UsedBy, bool Catalog = false);
 
 public sealed record FFmpegPreviewRequest(FFmpegProfile Profile, string Path);

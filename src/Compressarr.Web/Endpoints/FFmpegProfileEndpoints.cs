@@ -32,7 +32,7 @@ public static class FFmpegProfileEndpoints
             if (profile is null) return Results.NotFound(new { message = $"There is no ffmpeg profile named '{name}'." });
 
             var usage = ProfileReferences.Find(configStore.Load(AppPaths.GetConfigFilePath()), resumeStore.Load(AppPaths.GetResumeFilePath()), profile.Name, EncoderEngine.FFmpeg);
-            return Results.Json(new FFmpegProfileEditDto(profile, profile.IsBuiltIn, usage.Lanes.ToList()));
+            return Results.Json(new FFmpegProfileEditDto(profile, profile.IsBuiltIn || profile.IsCatalog, usage.Lanes.ToList(), profile.IsCatalog));
         });
 
         app.MapPost("/api/profiles/ffmpeg", (FFmpegProfile profile, IFFmpegProfileStore store) =>
@@ -53,6 +53,7 @@ public static class FFmpegProfileEndpoints
             var existing = store.Find(name);
             if (existing is null) return Results.NotFound(new { message = $"There is no ffmpeg profile named '{name}'." });
             if (existing.IsBuiltIn) return Results.BadRequest(new { message = $"'{existing.Name}' is a built-in profile and can't be changed. Duplicate it to make your own." });
+            if (existing.IsCatalog) return Results.BadRequest(new { message = $"'{existing.Name}' is a catalog profile and can't be changed. Duplicate it to make your own." });
 
             var issues = FFmpegProfileValidator.Validate(profile);
             if (issues.Count > 0) return Invalid(issues);
@@ -88,7 +89,8 @@ public static class FFmpegProfileEndpoints
                 return Results.Conflict(new { message = $"'{existing.Name}' is still used by {string.Join(" and ", where)}. Pick another profile there first." });
             }
 
-            store.RemoveUserProfile(existing.Name);
+            if (existing.IsCatalog) store.RemoveCatalogProfile(existing.Name);
+            else store.RemoveUserProfile(existing.Name);
             return Results.Ok();
         });
 

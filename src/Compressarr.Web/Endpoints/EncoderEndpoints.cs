@@ -75,7 +75,8 @@ public static class EncoderEndpoints
                 Video: HandBrakeProfileSummary.Video(p.Definition),
                 Audio: HandBrakeProfileSummary.Audio(p.Definition),
                 Description: p.Definition["PresetDescription"]?.GetValue<string>() ?? "",
-                UsedBy: UsedBy(p.Name, EncoderEngine.HandBrake))).ToList();
+                UsedBy: UsedBy(p.Name, EncoderEngine.HandBrake),
+                Catalog: p.IsCatalog)).ToList();
 
             rows.AddRange(ffmpegProfiles.GetAll().Select(p => new ProfileDto(
                 Engine: "ffmpeg",
@@ -85,7 +86,8 @@ public static class EncoderEndpoints
                 Video: FFmpegProfileSummary.Video(p),
                 Audio: FFmpegProfileSummary.Audio(p),
                 Description: p.Description,
-                UsedBy: UsedBy(p.Name, EncoderEngine.FFmpeg))));
+                UsedBy: UsedBy(p.Name, EncoderEngine.FFmpeg),
+                Catalog: p.IsCatalog)));
 
             return Results.Json(new ProfileListDto(
                 rows,
@@ -93,7 +95,10 @@ public static class EncoderEndpoints
                 AppPaths.GetHandBrakeActivePresetsFilePath(),
                 profiles.UserFileError,
                 AppPaths.GetFFmpegProfilesFilePath(),
-                ffmpegProfiles.UserFileError));
+                ffmpegProfiles.UserFileError,
+                AppPaths.GetCatalogHandBrakeFilePath(),
+                AppPaths.GetCatalogFFmpegFilePath(),
+                profiles.DamagedCatalogProfiles.Concat(ffmpegProfiles.DamagedCatalogProfiles).ToList()));
         });
     }
 }

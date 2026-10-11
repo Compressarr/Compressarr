@@ -31,7 +31,7 @@ public static class HandBrakeProfileEndpoints
             if (profile is null) return Results.NotFound(new { message = $"There is no profile named '{name}'." });
 
             var usage = ProfileReferences.Find(configStore.Load(AppPaths.GetConfigFilePath()), resumeStore.Load(AppPaths.GetResumeFilePath()), profile.Name);
-            return Results.Json(new ProfileEditDto(HandBrakeProfileForm.From(profile.Definition), profile.IsBuiltIn, usage.Lanes.ToList(), AppPaths.GetHandBrakeActivePresetsFilePath()));
+            return Results.Json(new ProfileEditDto(HandBrakeProfileForm.From(profile.Definition), profile.IsBuiltIn || profile.IsCatalog, usage.Lanes.ToList(), AppPaths.GetHandBrakeActivePresetsFilePath(), profile.IsCatalog));
         });
 
         // The profile exactly as stored (what the editor doesn't show is kept as-is).
@@ -66,6 +66,7 @@ public static class HandBrakeProfileEndpoints
             var existing = store.Find(name);
             if (existing is null) return Results.NotFound(new { message = $"There is no profile named '{name}'." });
             if (existing.IsBuiltIn) return Results.BadRequest(new { message = $"'{existing.Name}' is a built-in profile and can't be changed. Duplicate it to make your own." });
+            if (existing.IsCatalog) return Results.BadRequest(new { message = $"'{existing.Name}' is a catalog profile and can't be changed. Duplicate it to make your own." });
 
             var issues = request.Form.Validate();
             if (issues.Count > 0) return Invalid(issues);
@@ -103,7 +104,8 @@ public static class HandBrakeProfileEndpoints
                 return Results.Conflict(new { message = $"'{existing.Name}' is still used by {string.Join(" and ", where)}. Pick another profile there first." });
             }
 
-            store.RemoveUserProfile(existing.Name);
+            if (existing.IsCatalog) store.RemoveCatalogProfile(existing.Name);
+            else store.RemoveUserProfile(existing.Name);
             return Results.Ok();
         });
 

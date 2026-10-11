@@ -70,7 +70,7 @@ public sealed class BackupService : IBackupService
 
             // Settings/lanes (one file - Lanes is a property inside compressarr.settings.json, not
             // a separate file), the run counter, resume/run state, the history CSV, and the user's own
-            // encoder profiles (HandBrake and ffmpeg). Deliberately excludes the generated handbrake-active.json (derived from
+            // encoder profiles (HandBrake and ffmpeg, and the ones added from a catalog). Deliberately excludes the generated handbrake-active.json (derived from
             // the profiles, rebuilt before every encode) and the Reports folder (regenerable HTML dumps,
             // already retention-pruned).
             // A 2.1.x install's history is still in the Logs folder until 2.2 first starts; pick it up from there too so a
@@ -85,6 +85,9 @@ public sealed class BackupService : IBackupService
                 AppPaths.GetResumeFilePath(),
                 AppPaths.GetHandBrakeProfilesFilePath(),
                 AppPaths.GetFFmpegProfilesFilePath(),
+                AppPaths.GetCatalogHandBrakeFilePath(),
+                AppPaths.GetCatalogFFmpegFilePath(),
+                AppPaths.GetCatalogRecordsFilePath(),
                 historyFile
             };
 
@@ -170,6 +173,10 @@ public sealed class BackupService : IBackupService
                 RestoreEntry(tempDir, "compressarr.resume.json", AppPaths.GetResumeFilePath());
                 RestoreEntry(tempDir, "handbrake-profiles.json", AppPaths.GetHandBrakeProfilesFilePath());
                 RestoreEntry(tempDir, "ffmpeg-profiles.json", AppPaths.GetFFmpegProfilesFilePath());
+                // The profiles added from a catalog, with their records (an older backup has none, and then nothing is touched).
+                RestoreEntry(tempDir, "catalog-handbrake.json", AppPaths.GetCatalogHandBrakeFilePath());
+                RestoreEntry(tempDir, "catalog-ffmpeg.json", AppPaths.GetCatalogFFmpegFilePath());
+                RestoreEntry(tempDir, "catalog-installed.json", AppPaths.GetCatalogRecordsFilePath());
 
                 // The history goes back into the app data folder (also for a backup made by 2.1.x, where it was
                 // the Logs folder's file - the entry name is the same).

@@ -1,7 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json.Nodes;
 using Compressarr.Core;
+using Compressarr.Core.Catalog;
 using Compressarr.Core.Config;
 using Compressarr.Core.Conversion;
 using Compressarr.Core.Diagnostics;
@@ -61,6 +65,9 @@ public sealed class QueueHost : IAsyncDisposable
     public HttpClient Client { get; }
     public IServiceProvider Services => _app.Services;
 
+    /// <summary>The catalog this host serves instead of the real one: a test fills it with profiles, and nothing ever goes to the network.</summary>
+    public TestCatalogClient Catalog { get; private set; } = new();
+
     private QueueHost(string root, WebApplication app, CompressarrConfig config)
     {
         Root = root;
@@ -87,13 +94,16 @@ public sealed class QueueHost : IAsyncDisposable
         // that runs a real pass must never do that to whoever is running the tests.
         builder.Services.RemoveAll<IReportLauncher>();
         builder.Services.AddSingleton<IReportLauncher, NoReportLauncher>();
+        var catalog = new TestCatalogClient();
+        builder.Services.RemoveAll<ICatalogClient>();
+        builder.Services.AddSingleton<ICatalogClient>(catalog);
 
         var app = builder.Build();
         app.MapCompressarrEndpoints();
         await app.StartAsync();
 
         var config = new CompressarrConfig();
-        var host = new QueueHost(root, app, config);
+        var host = new QueueHost(root, app, config) { Catalog = catalog };
         foreach (var spec in lanes)
         {
             var lane = new LaneConfig
@@ -191,5 +201,54 @@ public sealed class QueueHost : IAsyncDisposable
     private sealed class NoCpuSampler : ICpuUsageSampler
     {
         public Task<double?> SampleAsync() => Task.FromResult<double?>(null);
+    }
+}
+
+/// <summary>A catalog served from memory for the web tests (the real client talks to GitHub).</summary>
+public sealed class TestCatalogClient : ICatalogClient
+{
+    public Dictionary<string, byte[]> Files { get; } = new();
+    public CatalogDocument Document { get; } = new() { Schema = 1, Catalog = new CatalogInfo { Name = "Compressarr Presets", Maintainer = "tester", Url = "https://example.invalid/presets" }, Updated = "2026-10-11" };
+    public Exception? LoadFails { get; set; }
+    public CatalogSource Source { get; } = new("official", "Compressarr Presets", "https://example.invalid/presets", CatalogSourceKind.Official);
+
+    public Task<CatalogListing> LoadAsync(CancellationToken cancellationToken) =>
+        LoadFails is null ? Task.FromResult(new CatalogListing(Source, Document, "v-test")) : Task.FromException<CatalogListing>(LoadFails);
+
+    public Task<byte[]> DownloadAsync(CatalogListing listing, CatalogEntry entry, CancellationToken cancellationToken) =>
+        Files.TryGetValue(entry.File, out var bytes) ? Task.FromResult(bytes) : throw new CatalogException("not found");
+
+    public CatalogEntry AddHandBrake(string family, int version, string encoder = "x265_10bit")
+    {
+        var name = $"{family} v{version}";
+        var content = new JsonObject
+        {
+            ["PresetList"] = new JsonArray(new JsonObject
+            {
+                ["PresetName"] = name, ["PresetDescription"] = "A test profile.", ["FileFormat"] = "av_mkv", ["Folder"] = false, ["Type"] = 1,
+                ["VideoEncoder"] = encoder, ["VideoQualitySlider"] = 22
+            }),
+            ["VersionMajor"] = 72, ["VersionMicro"] = 0, ["VersionMinor"] = 0
+        }.ToJsonString();
+        return Add(family, version, "handbrake", content);
+    }
+
+    public CatalogEntry AddFFmpeg(string family, int version)
+    {
+        var profile = new Compressarr.Core.FFmpeg.FFmpegProfile { Name = $"{family} v{version}", VideoCodec = "av1_nvenc", Preset = "p5", PixFmt = "p010le", Quality = 34, AudioCodec = "eac3" };
+        return Add(family, version, "ffmpeg", JsonSerializer.Serialize(profile, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+    }
+
+    private CatalogEntry Add(string family, int version, string engine, string content)
+    {
+        var bytes = Encoding.UTF8.GetBytes(content);
+        var entry = new CatalogEntry
+        {
+            Family = family, Version = version, Engine = engine, File = $"profiles/{engine}/{family.Replace(' ', '-')}-v{version}.json",
+            Sha256 = CatalogHash.OfBytes(bytes), MinAppVersion = "2.2.0", Description = "d", Changelog = "c", Published = "2026-10-11", Author = "tester"
+        };
+        Files[entry.File] = bytes;
+        Document.Profiles.Add(entry);
+        return entry;
     }
 }
