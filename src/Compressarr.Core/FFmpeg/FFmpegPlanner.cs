@@ -171,8 +171,14 @@ public static class FFmpegPlanner
             var why = profile.AudioMode != "passthru" ? "the profile always encodes audio"
                 : !profile.PassthroughCodecs.Contains(maskName, StringComparer.OrdinalIgnoreCase) ? $"{maskName} isn't on the pass-through list"
                 : $"MP4 can't hold {maskName}";
-            int? channels = targetChannels is { } t && stream.Channels > t ? t : null;
-            plan.Audio.Add(new StreamDecision(stream, "encode", $"{why}, so it is encoded as {profile.AudioCodec}", profile.AudioCodec, channels, profile.AudioBitrateKbps));
+            // The encoder is the limit as well as the profile: ffmpeg's E-AC3 and AC3 encoders stop at 5.1 and MP3 at stereo, so a
+            // larger source is mixed down to what the codec can hold - said out loud, not left to happen silently.
+            var codecMax = CodecMaxChannels(profile.AudioCodec);
+            var limit = Math.Min(targetChannels ?? int.MaxValue, codecMax ?? int.MaxValue);
+            int? channels = limit != int.MaxValue && stream.Channels > limit ? limit : null;
+            var cappedByCodec = codecMax is { } cm && stream.Channels > cm && cm < (targetChannels ?? int.MaxValue);
+            var capNote = cappedByCodec ? $" ({profile.AudioCodec} holds at most {codecMax} channels, so this {stream.Channels}-channel track is mixed down to {codecMax})" : "";
+            plan.Audio.Add(new StreamDecision(stream, "encode", $"{why}, so it is encoded as {profile.AudioCodec}{capNote}", profile.AudioCodec, channels, profile.AudioBitrateKbps));
         }
     }
 
@@ -248,6 +254,14 @@ public static class FFmpegPlanner
     {
         "dts" when audio.CodecProfile.Contains("DTS-HD", StringComparison.OrdinalIgnoreCase) => "dtshd",
         var other => other
+    };
+
+    /// <summary>The most channels ffmpeg's encoder for this codec can write; null when it has no practical limit.</summary>
+    internal static int? CodecMaxChannels(string codec) => codec.ToLowerInvariant() switch
+    {
+        "ac3" or "eac3" => 6,
+        "mp3" => 2,
+        _ => null
     };
 
     internal static int? MixdownChannels(string mixdown) => mixdown switch

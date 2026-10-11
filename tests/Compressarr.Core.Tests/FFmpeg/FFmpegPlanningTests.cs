@@ -162,6 +162,24 @@ public class FFmpegPlanningTests : Presets.AppDataTestBase
     }
 
     [Fact]
+    public void Audio_ACodecThatCannotHoldTheChannels_MixesDownToItsLimit_AndSaysSo()
+    {
+        var profile = Builtin("Compressarr SD-HD");
+        profile.AudioMixdown = "7.1";                                       // the profile allows 7.1, E-AC3 cannot carry it
+        var eac3 = FFmpegPlanner.Plan(profile, FFmpegFixtures.Uhd())!;       // 8ch source
+        profile.AudioCodec = "aac";
+        var aac = FFmpegPlanner.Plan(profile, FFmpegFixtures.Uhd())!;
+        profile.AudioCodec = "mp3";
+        var mp3 = FFmpegPlanner.Plan(profile, FFmpegFixtures.Uhd())!;
+
+        Assert.Equal(6, eac3.Audio[0].Channels);
+        Assert.Contains("holds at most 6 channels", eac3.Audio[0].Reason);
+        Assert.Null(aac.Audio[0].Channels);                                  // AAC carries 7.1 as it is
+        Assert.DoesNotContain("holds at most", aac.Audio[0].Reason);
+        Assert.Equal(2, mp3.Audio[0].Channels);
+    }
+
+    [Fact]
     public void Audio_DtsHdIsToldApartFromPlainDts()
     {
         var plain = new MediaStream { Codec = "dts", CodecProfile = "DTS" };

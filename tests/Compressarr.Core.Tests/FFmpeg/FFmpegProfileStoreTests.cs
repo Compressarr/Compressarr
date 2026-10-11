@@ -26,7 +26,7 @@ public class FFmpegProfileStoreTests : Presets.AppDataTestBase
         var uhd = new FFmpegProfileStore().Find("Compressarr UHD AV1")!;
 
         Assert.Equal(("libx265", 24.0, "veryfast", "main10"), (sdhd.VideoCodec, sdhd.Quality, sdhd.Preset, sdhd.VideoProfile));
-        Assert.Equal(("eac3", 512, "7.1", "first"), (sdhd.AudioCodec, sdhd.AudioBitrateKbps, sdhd.AudioMixdown, sdhd.AudioTracks));
+        Assert.Equal(("eac3", 512, "5.1", "first"), (sdhd.AudioCodec, sdhd.AudioBitrateKbps, sdhd.AudioMixdown, sdhd.AudioTracks));
         Assert.Equal(("libsvtav1", 30.0, "4", "psnr"), (uhd.VideoCodec, uhd.Quality, uhd.Preset, uhd.Tune));
         Assert.Equal(("passthru", "all"), (uhd.AudioMode, uhd.AudioTracks));
     }

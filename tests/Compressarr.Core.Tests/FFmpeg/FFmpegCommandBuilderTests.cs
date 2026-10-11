@@ -32,7 +32,7 @@ public class FFmpegCommandBuilderTests
             " -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc -color_range tv" +
             " -x265-params master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,50):max-cll=1000,400" +
             " -fps_mode vfr" +
-            " -c:a:0 eac3 -b:a:0 512k" +
+            " -c:a:0 eac3 -b:a:0 512k -ac:a:0 6" +
             " -c:s:0 copy -c:s:1 copy" +
             " -c:t copy" +
             " out.mkv",

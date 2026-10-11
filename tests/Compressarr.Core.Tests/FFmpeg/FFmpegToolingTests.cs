@@ -406,7 +406,7 @@ public class FFmpegToolingTests : IDisposable
     public void EncodeAnyway_IsOffByDefault_OnNoBuiltIn_AndRoundTripsThroughJson()
     {
         Assert.False(new FFmpegProfile().AllowDroppingDynamicHdr);
-        Assert.All(new FFmpegProfileStore().GetAll(), p => Assert.False(p.AllowDroppingDynamicHdr));
+        Assert.All(new FFmpegProfileStore().GetBuiltIns(), p => Assert.False(p.AllowDroppingDynamicHdr));
 
         var json = System.Text.Json.JsonSerializer.Serialize(new FFmpegProfile { Name = "x", AllowDroppingDynamicHdr = true });
         Assert.True(System.Text.Json.JsonSerializer.Deserialize<FFmpegProfile>(json)!.AllowDroppingDynamicHdr);
