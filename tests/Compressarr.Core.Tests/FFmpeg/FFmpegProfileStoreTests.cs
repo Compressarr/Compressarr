@@ -14,7 +14,9 @@ public class FFmpegProfileStoreTests : Presets.AppDataTestBase
 
         Assert.Equal(new[] { "Compressarr SD-HD", "Compressarr UHD AV1", "HEVC NVENC (fast)" }, all.Select(p => p.Name).ToArray());
         Assert.All(all, p => Assert.True(p.IsBuiltIn));
-        Assert.All(all, p => Assert.False(string.IsNullOrWhiteSpace(p.FallbackHandBrakePreset)));
+        // No built-in hands a Dolby Vision / HDR10+ file to a HandBrake profile on its own: such a file is refused and
+        // reported, so it is never re-encoded (and the original replaced) with a profile the user didn't choose.
+        Assert.All(all, p => Assert.True(string.IsNullOrWhiteSpace(p.FallbackHandBrakePreset)));
     }
 
     [Fact]

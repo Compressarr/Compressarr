@@ -148,7 +148,7 @@ document.getElementById('toastDigestTestBtn').addEventListener('click', async ()
     });
     results.push(await res.json());
   }
-  setStatusMessage(results.map(r => r.message).join(' | '), results.every(r => r.success) ? 'success' : '');
+  setStatusMessage(results.map(r => r.message).join(' | '), results.every(r => r.success) ? 'success' : 'error');
 });
 
 // ---- Notification channels - a dynamic list, each channel's own field set driven entirely by
@@ -318,7 +318,7 @@ async function saveChannel(node) {
   });
 
   if (!res.ok) {
-    setStatusMessage('Failed to save channel.', '');
+    setStatusMessage('Failed to save channel.', 'error');
   } else if (hasIssues) {
     setStatusMessage(`"${dto.displayName}" saved, but a required field is missing - check fields below.`, 'error');
   } else {
@@ -335,7 +335,7 @@ async function removeChannel(node) {
     node.remove();
     setStatusMessage(`"${dto.displayName}" removed.`, 'success');
   } else {
-    setStatusMessage('Failed to remove channel.', '');
+    setStatusMessage('Failed to remove channel.', 'error');
   }
 }
 
@@ -349,7 +349,7 @@ async function testChannel(node) {
     body: JSON.stringify({ type: dto.type, settings: dto.settings })
   });
   const body = await res.json();
-  setStatusMessage(body.message, body.success ? 'success' : '');
+  setStatusMessage(body.message, body.success ? 'success' : 'error');
 }
 
 // Fires a real digest immediately (today's actual numbers, bypassing the schedule entirely) - one
@@ -374,7 +374,7 @@ async function testChannelDigest(node) {
     });
     results.push(await res.json());
   }
-  setStatusMessage(results.map(r => r.message).join(' | '), results.every(r => r.success) ? 'success' : '');
+  setStatusMessage(results.map(r => r.message).join(' | '), results.every(r => r.success) ? 'success' : 'error');
 }
 
 async function loadNotifierTypes() {

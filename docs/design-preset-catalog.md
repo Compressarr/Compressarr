@@ -107,8 +107,7 @@ and an `ffmpeg-presets.json`-style profile object. No new profile format is inve
       "author": "MrWizardCT",
       "sourceUrl": null,
       "deprecated": null,
-      "requires": ["libx265"],
-      "dependsOn": []
+      "requires": ["libx265"]
     }
   ]
 }
@@ -123,10 +122,6 @@ and an `ffmpeg-presets.json`-style profile object. No new profile format is inve
 - `minAppVersion` is per profile: an app older than that lists the profile greyed out ("needs Compressarr 2.3").
 - `requires` lists encoders/capabilities (`libsvtav1`, `av1_nvenc`, an NVENC GPU session...) so the dialog can warn before
   install, as the Profiles page already does for ffmpeg builds.
-- `dependsOn` lists other catalog profiles this one needs (family and version), for example an ffmpeg profile whose
-  `FallbackHandBrakePreset` is another catalog profile. The dialog shows the dependency, and installing the profile offers to install
-  it too (ticked, but the user can untick it). If it is skipped, the profile still installs and the Profiles page flags the
-  missing fallback the way it flags other unusable profiles. A dependency must be in the same source.
 - `sha256` is of the profile file. The app verifies it on download.
 - Possible later: `license`, `tags`, `previewImage`. Not needed now.
 
@@ -294,10 +289,9 @@ Based on the owner's existing, tested ffmpeg profile (`av1_nvenc`).
 - Audio: pass through every English track ffmpeg can copy, E-AC3 640 kbps for the rest. English subtitles and chapters.
 - Requires `av1_nvenc` and a working NVENC **AV1** session (an RTX 40-series GPU or newer). The app's GPU check currently tests
   `hevc_nvenc` only, so it needs an AV1-specific test before this profile can be offered or run.
-- Dolby Vision / HDR10+ files cannot stay in this encode on either engine, so the profile's fallback is the HandBrake profile
-  **Compressarr UHD HEVC (HDR) v1** (10.1), which keeps them. That fallback is itself a catalog profile, hence `dependsOn`
-  (section 5): installing this profile offers to install that one too. (To confirm: the fallback choice was proposed, not
-  explicitly picked.)
+- **Fallback: None.** Dolby Vision / HDR10+ files cannot stay in this encode on either engine, so such a file is refused: left alone
+  and reported as ERROR 112, never re-encoded with a profile the user did not choose. To encode those files the user picks a
+  HandBrake fallback on a duplicate of the profile, or uses a HandBrake lane (for example with 10.1).
 
 ### 10.6 Compressarr HEVC NVENC (quality) v1 - ffmpeg - SETTLED (worth keeping is still open, see 10.7)
 
@@ -306,7 +300,7 @@ The slower, tighter counterpart to the shipped HEVC NVENC (fast).
 - Video: `hevc_nvenc`, 10-bit (`p010le`), main10, **preset p7, cq 24**, MKV.
 - Extra arguments (the profile's existing `ExtraArgs` field): `-multipass fullres -rc-lookahead 32 -spatial-aq 1`.
 - Audio: pass through every English track ffmpeg can copy, E-AC3 640 kbps for the rest. English subtitles and chapters.
-- Fallback for Dolby Vision / HDR10+: **Compressarr UHD HEVC (HDR) v1** (`dependsOn`).
+- **Fallback: None** (Dolby Vision / HDR10+ files are refused and reported, as in 10.5).
 - Requires `hevc_nvenc` and a working NVENC session (already checked today).
 
 ### 10.7 Side-by-side (shipped plus proposed)
@@ -320,14 +314,14 @@ on real clips (this machine has an RTX 4070 and a CPU to test with) before anyth
 |---|---|---|---|---|---|---|---|
 | 1 | Compressarr SD-HD | HandBrake | x265 10-bit, RF 24, veryfast | First English track: copied if possible, else E-AC3 up to 7.1 at 512 | MKV | Kept | CPU |
 | 2 | Compressarr UHD AV1 | HandBrake | SVT-AV1 10-bit, CRF 30, preset 4 | All English tracks copied, else E-AC3 | MKV | Kept | CPU (slow) |
-| 3 | Compressarr SD-HD | ffmpeg | libx265 10-bit, CRF 24, veryfast | E-AC3 up to 7.1 at 512 | MKV | DV/HDR10+ handed to row 1 | ffmpeg with libx265 |
-| 4 | Compressarr UHD AV1 | ffmpeg | libsvtav1 10-bit, CRF 30, preset 4 | All English tracks copied | MKV | DV/HDR10+ handed to row 2 | ffmpeg with libsvtav1 |
-| 5 | HEVC NVENC (fast) | ffmpeg | hevc_nvenc 10-bit, cq 28, p5 | All English tracks copied | MKV | DV/HDR10+ handed to row 1 | NVIDIA GPU |
+| 3 | Compressarr SD-HD | ffmpeg | libx265 10-bit, CRF 24, veryfast | E-AC3 up to 7.1 at 512 | MKV | DV/HDR10+ refused (fallback None) | ffmpeg with libx265 |
+| 4 | Compressarr UHD AV1 | ffmpeg | libsvtav1 10-bit, CRF 30, preset 4 | All English tracks copied | MKV | DV/HDR10+ refused (fallback None) | ffmpeg with libsvtav1 |
+| 5 | HEVC NVENC (fast) | ffmpeg | hevc_nvenc 10-bit, cq 28, p5 | All English tracks copied | MKV | DV/HDR10+ refused (fallback None) | NVIDIA GPU |
 | 6 | **Compressarr UHD HEVC (HDR) v1** | HandBrake | x265 10-bit, RF 22, fast | All English tracks copied, else E-AC3 640 | MKV | Kept | CPU |
 | 7 | **Compressarr HD Quality v1** | HandBrake | x265 10-bit, RF 20, fast | First English track: copied if possible, else E-AC3 up to 7.1 at 512 | MKV | Kept | CPU |
 | 8 | **Compressarr Compatibility (H.264) v1** | HandBrake | x264 8-bit main@4.0, RF 24, veryfast, 30 fps cap | First English track: copied if possible, else AAC 5.1 at 384 | MP4 | SDR only | CPU |
-| 9 | **Compressarr AV1 (NVENC) v1** | ffmpeg | av1_nvenc 10-bit, cq 30, p5 | All English tracks copied, else E-AC3 640 | MKV | DV/HDR10+ handed to row 6 | RTX 40-series or newer |
-| 10 | **Compressarr HEVC NVENC (quality) v1** | ffmpeg | hevc_nvenc 10-bit, cq 24, p7, multipass + lookahead + spatial AQ | All English tracks copied, else E-AC3 640 | MKV | DV/HDR10+ handed to row 6 | NVIDIA GPU |
+| 9 | **Compressarr AV1 (NVENC) v1** | ffmpeg | av1_nvenc 10-bit, cq 30, p5 | All English tracks copied, else E-AC3 640 | MKV | DV/HDR10+ refused (fallback None) | RTX 40-series or newer |
+| 10 | **Compressarr HEVC NVENC (quality) v1** | ffmpeg | hevc_nvenc 10-bit, cq 24, p7, multipass + lookahead + spatial AQ | All English tracks copied, else E-AC3 640 | MKV | DV/HDR10+ refused (fallback None) | NVIDIA GPU |
 
 **What the user sees, and who it is for**
 
@@ -335,13 +329,13 @@ on real clips (this machine has an RTX 4070 and a CPU to test with) before anyth
 |---|---|---|---|---|---|
 | 1 | SD-HD (HB) | Fast | Small | Everyday H.265 10-bit with E-AC3 audio up to 7.1. Crops black bars and keeps English subtitles and chapters. | TV episodes, DVD and 720p/1080p content, large libraries where speed and size matter more than the last bit of quality |
 | 2 | UHD AV1 (HB) | Slow | Smallest | AV1 10-bit for UHD, keeping every English audio track untouched. Smallest files, slowest encode. | 4K archives where disk space matters most and every player you use can decode AV1 |
-| 3 | SD-HD (ffmpeg) | Fast | Small | The ffmpeg version of SD-HD. Dolby Vision and HDR10+ files go to the HandBrake profile of the same name. | Lanes that use ffmpeg but want the SD-HD result |
-| 4 | UHD AV1 (ffmpeg) | Slow | Smallest | The ffmpeg version of UHD AV1. Dolby Vision and HDR10+ files go to the HandBrake profile. | Lanes that use ffmpeg for AV1 on the CPU |
+| 3 | SD-HD (ffmpeg) | Fast | Small | The ffmpeg version of SD-HD. Dolby Vision and HDR10+ files are refused (use a HandBrake lane). | Lanes that use ffmpeg but want the SD-HD result |
+| 4 | UHD AV1 (ffmpeg) | Slow | Smallest | The ffmpeg version of UHD AV1. Dolby Vision and HDR10+ files are refused (use a HandBrake lane). | Lanes that use ffmpeg for AV1 on the CPU |
 | 5 | HEVC NVENC (fast) | Very fast | Large | H.265 10-bit on an NVIDIA GPU: much faster than software, with larger files. | Large backlogs where finishing quickly matters most |
 | 6 | UHD HEVC (HDR) | Medium | Medium | H.265 10-bit for 4K HDR. Keeps HDR10, HDR10+ and Dolby Vision, and every English audio track untouched. | 4K UHD Blu-ray rips and remuxes with HDR or Dolby Vision, for players that handle HEVC (nearly every 4K TV and box) |
 | 7 | HD Quality | Medium | Medium (larger than SD-HD) | A higher-quality H.265 10-bit than SD-HD, with the same E-AC3 audio. More detail kept, bigger files. | 1080p Blu-ray movies and favourite shows you do not want to re-encode later |
 | 8 | Compatibility (H.264) | Very fast | Largest | H.264 in MP4 with AAC audio and a 30 fps cap, for older TVs, boxes and phones that cannot play H.265. SDR only; files are larger than H.265. | SDR 1080p and SD content for older or shared devices, Plex/Jellyfin clients that would otherwise transcode. Not for HDR sources |
-| 9 | AV1 (NVENC) | Fast | Small | AV1 10-bit on an NVIDIA RTX 40-series (or newer) GPU: AV1 savings at GPU speed. Dolby Vision and HDR10+ files are handed to the UHD HEVC (HDR) profile. | RTX 40-series owners who want AV1 file sizes without the CPU time, with players that decode AV1 |
+| 9 | AV1 (NVENC) | Fast | Small | AV1 10-bit on an NVIDIA RTX 40-series (or newer) GPU: AV1 savings at GPU speed. Dolby Vision and HDR10+ files are refused (use a HandBrake lane). | RTX 40-series owners who want AV1 file sizes without the CPU time, with players that decode AV1 |
 | 10 | HEVC NVENC (quality) | Fast | Medium | H.265 10-bit on an NVIDIA GPU at its best-quality setting: noticeably tighter than the fast profile, still much faster than the CPU. | GPU users who want a better result than HEVC NVENC (fast); backlogs of 1080p or 4K SDR/HDR10 |
 
 **Overlap check** (for the final decision)
@@ -351,8 +345,8 @@ on real clips (this machine has an RTX 4070 and a CPU to test with) before anyth
 - Rows 9 and 10 sit next to 5 (NVENC fast) and 2 (UHD AV1). 9 is the only AV1 you can run on the GPU, so it is distinct; 10 is
   the closest to something that could be "just a different setting of row 5", so it is the easiest to defer.
 - Row 8 is the only one that differs in kind (H.264, MP4, SDR), so it does not overlap with anything.
-- Rows 6, 9 and 10 depend on each other (9 and 10 fall back to 6), so dropping 6 would mean choosing another fallback for 9
-  and 10.
+- No profile in the catalog depends on another: every ffmpeg profile has fallback None, so Dolby Vision / HDR10+ files are
+  refused unless the user chooses a fallback on a duplicate. The catalog therefore needs no `dependsOn` field.
 
 ## 11. Work breakdown
 
@@ -378,6 +372,9 @@ Estimate: two to three days of app work, plus the repo and the first profiles.
 
 Decided:
 
+0. **Fallback is always None** for built-in and catalog ffmpeg profiles: a Dolby Vision / HDR10+ file is refused and reported
+   (ERROR 112) instead of being re-encoded with a profile the user did not choose, which would replace the original. (Shipped
+   in beta.6 for the three built-ins.)
 1. **Hosting:** tagged releases of the repo with release assets and recorded digests (section 5).
 2. **Checking:** never automatic. An About-page card and an on-demand note (6.4).
 3. **Multiple versions of a family** may be installed side by side.

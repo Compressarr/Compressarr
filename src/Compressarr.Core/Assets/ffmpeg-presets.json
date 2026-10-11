@@ -24,7 +24,7 @@
       "subtitleLanguages": [ "eng" ],
       "subtitleTracks": "all",
       "chapters": true,
-      "fallbackHandBrakePreset": "Compressarr SD-HD"
+      "fallbackHandBrakePreset": ""
     },
     {
       "name": "Compressarr UHD AV1",
@@ -50,7 +50,7 @@
       "subtitleLanguages": [ "eng" ],
       "subtitleTracks": "all",
       "chapters": true,
-      "fallbackHandBrakePreset": "Compressarr UHD AV1"
+      "fallbackHandBrakePreset": ""
     },
     {
       "name": "HEVC NVENC (fast)",
@@ -76,7 +76,7 @@
       "subtitleLanguages": [ "eng" ],
       "subtitleTracks": "all",
       "chapters": true,
-      "fallbackHandBrakePreset": "Compressarr SD-HD"
+      "fallbackHandBrakePreset": ""
     }
   ]
 }

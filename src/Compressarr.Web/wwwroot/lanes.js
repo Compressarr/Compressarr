@@ -10,7 +10,8 @@ let presetNamesByEngine = { HandBrake: [], FFmpeg: [] };
 // success truthy -> green (auto-clears after 4s), same convention as settings.js's setStatus -
 // this used to just set plain text with no color at all, which is why Lanes' own save messages
 // never turned green like Settings/Notifications did.
-function setStatus(text, success) { setStatusMessage(text, success ? 'success' : ''); }
+// success: true = green, 'error' = red, anything else = plain (progress such as "Saving...").
+function setStatus(text, success) { setStatusMessage(text, success === 'error' ? 'error' : success ? 'success' : ''); }
 
 // Logical validation-issue field key -> the class each field lives on, resolved within one lane
 // card's own node (not the whole document) - every card repeats the same classes, so scoping
@@ -225,7 +226,7 @@ async function duplicateLane(node) {
   const name = prompt(`Name for the new lane, copied from "${dto.displayName}":`, `${dto.displayName} (copy)`);
   if (name === null) return;
   if (!name.trim()) {
-    setStatus('Enter a name for the new lane.');
+    setStatus('Enter a name for the new lane.', 'error');
     return;
   }
 
@@ -236,7 +237,7 @@ async function duplicateLane(node) {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    setStatus(body.message || 'Could not duplicate the lane.');
+    setStatus(body.message || 'Could not duplicate the lane.', 'error');
     return;
   }
 
@@ -269,7 +270,7 @@ async function removeLane(node) {
     node.remove();
     setStatus(`Lane "${dto.displayName}" removed.`, true);
   } else {
-    setStatus('Failed to remove lane.');
+    setStatus('Failed to remove lane.', 'error');
   }
 }
 
@@ -286,7 +287,7 @@ function showEngineNote(node, engine, issues) {
     note.textContent = problem.message;
     note.classList.remove('hidden');
   } else if (engine === 'FFmpeg') {
-    note.textContent = "Experimental. Files with Dolby Vision or HDR10+ are handed to HandBrake, using the ffmpeg profile's fallback profile.";
+    note.textContent = "Experimental. Files with Dolby Vision or HDR10+ are left alone and reported (ERROR 112) unless the ffmpeg profile names a HandBrake fallback profile.";
     note.classList.remove('hidden');
   } else {
     note.classList.add('hidden');

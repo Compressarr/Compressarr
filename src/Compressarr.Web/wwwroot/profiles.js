@@ -1,6 +1,7 @@
 renderNav('profiles');
 
-function setStatus(text, success) { setStatusMessage(text, success ? 'success' : ''); }
+// success: true = green, 'error' = red, anything else = plain (progress such as "Saving...").
+function setStatus(text, success) { setStatusMessage(text, success === 'error' ? 'error' : success ? 'success' : ''); }
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -111,7 +112,7 @@ document.getElementById('profileRows').addEventListener('click', async e => {
       setStatus(`Duplicated as "${body.name}".`, true);
       await loadProfiles();
     } else {
-      setStatus(body.message || 'Could not duplicate the profile.');
+      setStatus(body.message || 'Could not duplicate the profile.', 'error');
     }
   } else if (btn.dataset.act === 'dupff') {
     const res = await fetch(`/api/profiles/handbrake/${encodeURIComponent(p.name)}/duplicate-as-ffmpeg`, {
@@ -122,7 +123,7 @@ document.getElementById('profileRows').addEventListener('click', async e => {
       showConversion(p.name, body);
       await loadProfiles();
     } else {
-      setStatus(body.message || 'Could not make an ffmpeg profile from this one.');
+      setStatus(body.message || 'Could not make an ffmpeg profile from this one.', 'error');
     }
   } else if (btn.dataset.act === 'del') {
     if (!confirm(`Delete the ${p.engine === 'ffmpeg' ? 'ffmpeg ' : ''}profile "${p.name}"?\n\nThis can't be undone.`)) return;
@@ -132,7 +133,7 @@ document.getElementById('profileRows').addEventListener('click', async e => {
       await loadProfiles();
     } else {
       const body = await res.json().catch(() => ({}));
-      setStatus(body.message || 'Could not delete the profile.');
+      setStatus(body.message || 'Could not delete the profile.', 'error');
     }
   }
 });
@@ -206,7 +207,7 @@ async function readFile() {
   const dto = await res.json();
   if (!dto.found) {
     resetPicker();
-    setStatus(dto.error || 'Could not read that file.');
+    setStatus(dto.error || 'Could not read that file.', 'error');
     return;
   }
   setStatus(`Read ${dto.candidates.length} preset${dto.candidates.length === 1 ? '' : 's'} from the file.`, true);
@@ -282,7 +283,7 @@ document.getElementById('importGo').addEventListener('click', async () => {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    setStatus(body.message || 'Import failed.');
+    setStatus(body.message || 'Import failed.', 'error');
     return;
   }
   closeImport();

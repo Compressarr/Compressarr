@@ -1,6 +1,7 @@
 renderNav('profiles');
 
-function setStatus(text, success) { setStatusMessage(text, success ? 'success' : ''); }
+// success: true = green, 'error' = red, anything else = plain (progress such as "Saving...").
+function setStatus(text, success) { setStatusMessage(text, success === 'error' ? 'error' : success ? 'success' : ''); }
 
 const params = new URLSearchParams(location.search);
 const isNew = params.get('new') === '1';
@@ -191,7 +192,7 @@ async function loadProfile(name) {
   const res = await fetch(`/api/profiles/handbrake/${encodeURIComponent(name)}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    setStatus(body.message || 'Could not load that profile.');
+    setStatus(body.message || 'Could not load that profile.', 'error');
     return null;
   }
   return res.json();
@@ -282,7 +283,7 @@ $('dupBtn').addEventListener('click', async () => {
   });
   const body = await res.json().catch(() => ({}));
   if (res.ok) location.href = `/profile-edit.html?name=${encodeURIComponent(body.name)}`;
-  else setStatus(body.message || 'Could not duplicate the profile.');
+  else setStatus(body.message || 'Could not duplicate the profile.', 'error');
 });
 
 $('saveBtn').addEventListener('click', async () => {
@@ -307,7 +308,7 @@ $('saveBtn').addEventListener('click', async () => {
   }
 
   if (body.validationIssues) applyValidationIssues(document, body.validationIssues, FIELD_MAP, '');
-  setStatus(body.message || 'Could not save the profile.');
+  setStatus(body.message || 'Could not save the profile.', 'error');
 });
 
 init();

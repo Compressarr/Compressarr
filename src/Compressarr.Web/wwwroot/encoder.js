@@ -1,6 +1,7 @@
 renderNav('encoder');
 
-function setStatus(text, success) { setStatusMessage(text, success ? 'success' : ''); }
+// success: true = green, 'error' = red, anything else = plain (progress such as "Saving...").
+function setStatus(text, success) { setStatusMessage(text, success === 'error' ? 'error' : success ? 'success' : ''); }
 
 // Logical validation-issue field key -> the actual input it lives on.
 const ENCODER_FIELD_MAP = {
@@ -155,7 +156,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
       setStatus('Encoder settings saved.', true);
     }
   } else {
-    setStatus('Failed to save encoder settings.');
+    setStatus('Failed to save encoder settings.', 'error');
   }
 });
 
@@ -200,7 +201,7 @@ document.getElementById('checkHandBrakeBtn').addEventListener('click', async () 
   const releaseRes = await fetch('/api/handbrake/latest-release');
   const release = await releaseRes.json();
   if (!release.available) {
-    setStatus('No downloadable HandBrakeCLI build for this platform - on Linux, install it via your package manager or Flatpak.');
+    setStatus('No downloadable HandBrakeCLI build for this platform - on Linux, install it via your package manager or Flatpak.', 'error');
     return;
   }
 
@@ -217,7 +218,7 @@ document.getElementById('checkHandBrakeBtn').addEventListener('click', async () 
     await loadEncoder();
     setStatus(`HandBrakeCLI ${installBody.version} installed.`, true);
   } else {
-    setStatus('HandBrakeCLI install failed.');
+    setStatus('HandBrakeCLI install failed.', 'error');
   }
 });
 
@@ -232,7 +233,7 @@ document.getElementById('checkFfmpegBtn').addEventListener('click', async () => 
     // A file being there is not enough - ask it, so a wrong program (notepad.exe...) isn't called ffmpeg.
     const caps = await (await fetch('/api/ffmpeg/capabilities')).json().catch(() => ({ found: false }));
     if (!caps.found) {
-      setStatus('There is a file at the configured ffmpeg path, but it did not answer like ffmpeg - check the path.');
+      setStatus('There is a file at the configured ffmpeg path, but it did not answer like ffmpeg - check the path.', 'error');
       loadFfmpegCapabilities(lastDto || { ffmpegProfileCount: 0, ffmpegLanes: [] });
       return;
     }
@@ -270,7 +271,7 @@ document.getElementById('checkFfmpegBtn').addEventListener('click', async () => 
 
   const release = await (await fetch(`/api/ffmpeg/latest-release?channel=${channel}`)).json();
   if (!release.available) {
-    setStatus(release.error || 'No downloadable ffmpeg build for this platform - install ffmpeg with your package manager and set its path here.');
+    setStatus(release.error || 'No downloadable ffmpeg build for this platform - install ffmpeg with your package manager and set its path here.', 'error');
     return;
   }
 
@@ -288,7 +289,7 @@ document.getElementById('checkFfmpegBtn').addEventListener('click', async () => 
     await loadEncoder();
     setStatus('ffmpeg installed.', true);
   } else {
-    setStatus(body.message || 'The ffmpeg install failed.');
+    setStatus(body.message || 'The ffmpeg install failed.', 'error');
   }
 });
 

@@ -5,7 +5,8 @@ renderNav('settings');
 // (Save, Install/Reload Presets, Fix Network, Arr connection tests, Import, maintenance actions)
 // goes through this one function into the toolbar - there's no per-section status left in the
 // page body any more.
-function setStatus(text, success) { setStatusMessage(text, success ? 'success' : ''); }
+// success: true = green, 'error' = red, anything else = plain (progress such as "Saving...").
+function setStatus(text, success) { setStatusMessage(text, success === 'error' ? 'error' : success ? 'success' : ''); }
 
 // Logical validation-issue field key -> the actual input it lives on (see ValidationIssue's own
 // note on why these can differ).
@@ -22,7 +23,7 @@ document.getElementById('fileBotFixNetworkBtn').addEventListener('click', async 
   setStatus('Applying FileBot network fix...');
   const res = await fetch('/api/filebot/fix-network', { method: 'POST' });
   const body = await res.json().catch(() => ({}));
-  setStatus(body.message || 'Fix failed - see the recent log for details.', !!body.success);
+  setStatus(body.message || 'Fix failed - see the recent log for details.', body.success ? true : 'error');
 });
 
 const MIN_SIZE_UNIT_MULTIPLIERS = { KB: 1024, MB: 1024 * 1024, GB: 1024 * 1024 * 1024 };
@@ -181,7 +182,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
       setStatus('Settings saved.', true);
     }
   } else {
-    setStatus('Failed to save settings.');
+    setStatus('Failed to save settings.', 'error');
   }
 });
 
@@ -217,7 +218,7 @@ document.getElementById('runOnceBtn').addEventListener('click', async () => {
   if (res.ok) {
     setStatus(`Done: ${body.totalFiles} file(s) processed.`, true);
   } else {
-    setStatus(body.message || 'Run failed.');
+    setStatus(body.message || 'Run failed.', 'error');
   }
 });
 
@@ -234,7 +235,7 @@ async function testArrConnection(service) {
     })
   });
   const body = await res.json();
-  setStatus(body.message, !!body.success);
+  setStatus(body.message, body.success ? true : 'error');
 }
 
 document.getElementById('sonarrTestBtn').addEventListener('click', () => testArrConnection('sonarr'));
@@ -251,7 +252,7 @@ document.getElementById('importConfigBtn').addEventListener('click', () => {
   const fileInput = document.getElementById('importConfigFile');
   const file = fileInput.files[0];
   if (!file) {
-    setStatus('Choose a file to import first.');
+    setStatus('Choose a file to import first.', 'error');
     return;
   }
 
@@ -272,7 +273,7 @@ document.getElementById('importConfigBtn').addEventListener('click', () => {
       loadSettings();
     } else {
       const body = await res.json().catch(() => ({}));
-      setStatus(body.message || 'Failed to import config.');
+      setStatus(body.message || 'Failed to import config.', 'error');
     }
   };
   reader.readAsText(file);
@@ -284,7 +285,7 @@ async function runMaintenanceAction(url, confirmMessage, successMessage) {
   setStatus('Working...');
 
   const res = await fetch(url, { method: 'POST' });
-  setStatus(res.ok ? successMessage : 'Failed - see the recent log for details.', res.ok);
+  setStatus(res.ok ? successMessage : 'Failed - see the recent log for details.', res.ok ? true : 'error');
 
   // Every maintenance action only ever writes a file - reloading the form (which re-fetches
   // /api/settings) is how the effect actually shows up immediately, no app restart needed. A
@@ -371,7 +372,7 @@ document.getElementById('runBackupNowBtn').addEventListener('click', async () =>
     loadBackupList();
   } else {
     const body = await res.json().catch(() => ({}));
-    setStatus(body.message || 'Failed to create backup.');
+    setStatus(body.message || 'Failed to create backup.', 'error');
   }
 });
 
@@ -451,7 +452,7 @@ async function restoreBackup(fileName) {
     loadSettings(); // the config on disk just changed out from under this page - reload the form (and its Last Backup label)
   } else {
     const body = await res.json().catch(() => ({}));
-    setStatus(body.message || 'Failed to restore backup.');
+    setStatus(body.message || 'Failed to restore backup.', 'error');
   }
 }
 

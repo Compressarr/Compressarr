@@ -70,7 +70,7 @@
         <h2>ffmpeg <span class="prof-chip warn" style="margin-left:8px">Experimental</span></h2>
       </div>
       <div class="card-body">
-        <p class="enc-note" style="margin-top:0">An optional second encoder. A lane uses it only if you pick <em>ffmpeg</em> as that lane's encoder on the <a href="/lanes.html">Lanes</a> page - until then nothing changes. ffmpeg won't produce byte-identical output to HandBrake, and Dolby Vision / HDR10+ files are handed to HandBrake automatically (see the ffmpeg profile's fallback).</p>
+        <p class="enc-note" style="margin-top:0">An optional second encoder. A lane uses it only if you pick <em>ffmpeg</em> as that lane's encoder on the <a href="/lanes.html">Lanes</a> page - until then nothing changes. ffmpeg won't produce byte-identical output to HandBrake, and Dolby Vision / HDR10+ files are left alone and reported (ERROR 112), because ffmpeg would drop that metadata - unless the ffmpeg profile names a HandBrake fallback profile, which then encodes them.</p>
         <div class="field-block">
           <label for="ffPath">ffmpeg path<span class="help-tag" tabindex="0" title="Full path to ffmpeg.exe. Check/Install uses one already on this computer, or downloads a managed copy into Compressarr's own folder after asking.">?<span class="help-tip">Full path to ffmpeg.exe. Check/Install uses one already on this computer, or downloads a managed copy into Compressarr's own folder after asking.</span></span></label>
           <div class="field-with-btn"><input type="text" id="ffPath" /><button class="browse-btn" data-target="ffPath">Browse...</button><button id="checkFfmpegBtn">Check/Install</button></div>

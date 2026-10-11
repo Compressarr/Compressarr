@@ -386,9 +386,9 @@ public class FFmpegEndpointTests
         var profile = (JsonObject)(await GetProfileAsync(host, "Compressarr SD-HD"))["profile"]!.DeepClone();
         profile["crop"] = "off";
 
+        var without = await PreviewAsync(host, profile, movie); // the built-in has no fallback
+        profile["fallbackHandBrakePreset"] = "Compressarr SD-HD";
         var withFallback = await PreviewAsync(host, profile, movie);
-        profile["fallbackHandBrakePreset"] = "";
-        var without = await PreviewAsync(host, profile, movie);
 
         Assert.Equal("Dolby Vision", withFallback["video"]!["dynamicHdr"]!.GetValue<string>());
         Assert.True(withFallback["video"]!["hasFallback"]!.GetValue<bool>());

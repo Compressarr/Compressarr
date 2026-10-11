@@ -1,6 +1,7 @@
 renderNav('scheduler');
 
-function setStatus(text, success) { setStatusMessage(text, success ? 'success' : ''); }
+// success: true = green, 'error' = red, anything else = plain (progress such as "Saving...").
+function setStatus(text, success) { setStatusMessage(text, success === 'error' ? 'error' : success ? 'success' : ''); }
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 // The order the "Each day" rows are shown in (the saved list itself is Sunday-first, index = DayOfWeek).
@@ -240,7 +241,7 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     body: JSON.stringify(readForm())
   });
   if (!res.ok) {
-    setStatus('Failed to save the schedule.');
+    setStatus('Failed to save the schedule.', 'error');
     return;
   }
   const dto = await res.json();
