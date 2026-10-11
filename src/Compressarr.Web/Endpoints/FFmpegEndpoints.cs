@@ -62,7 +62,7 @@ public static class FFmpegEndpoints
         app.MapGet("/api/ffmpeg/find", () =>
         {
             var found = FFmpegLocator.Find();
-            return Results.Json(found is { } f ? new { found = true, path = f.FFmpeg, probePath = f.FFprobe } : new { found = false, path = (string?)null, probePath = (string?)null });
+            return Results.Json(new { found = found is not null, path = found?.FFmpeg, probePath = found?.FFprobe });
         });
 
         app.MapGet("/api/ffmpeg/latest-release", async (IConfigStore configStore, IFFmpegInstaller installer, string? channel) =>
