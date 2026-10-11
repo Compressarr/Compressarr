@@ -124,8 +124,10 @@ function renderNav(activePage) {
   // the title - pages without one (About) just get a title with no actions.
   const actionsEl = existingMain ? existingMain.querySelector('.page-actions') : null;
 
-  // The Advanced button only appears on a page that has something to reveal.
-  const hasAdvanced = !!(existingMain && existingMain.querySelector('.adv-only'));
+  // The Advanced button only appears on a page that has something to reveal - including inside a <template>, whose content
+  // (the Lanes page's lane card) is not part of the page's own DOM tree.
+  const hasAdvanced = !!((existingMain && existingMain.querySelector('.adv-only'))
+    || [...document.querySelectorAll('template')].some(t => t.content.querySelector('.adv-only')));
 
   const currentTheme = getPreferredTheme();
   const toolbar = document.createElement('div');

@@ -1,5 +1,6 @@
 using Compressarr.Core.Arr;
 using Compressarr.Core.Config;
+using Compressarr.Core.FFmpeg;
 using Compressarr.Core.FileBot;
 using Compressarr.Core.Logging;
 using Compressarr.Core.Orchestration;
@@ -150,6 +151,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
     private readonly IArrUnmonitorService _arrUnmonitor;
     private readonly ITrashService _trash;
     private readonly IRunLogger _logger;
+    private bool _loggedHdrCheckSkipped;
     private readonly IResumeStateStore _resumeStore;
     private readonly IRunProgressReporter _progress;
     private readonly IConfigStore _configStore;
@@ -409,6 +411,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         var binding = _encoders?.For(lane.Engine, config)
             ?? new EncoderBinding(EncoderEngine.HandBrake, _processRunner, _presets, hbloc, null, config.HandBrake.Options);
         string? encoderLabel = binding.Engine == EncoderEngine.FFmpeg ? "ffmpeg" : null;
+        MediaProbeResult? sourceProbe = null;
 
         if (binding.Engine == EncoderEngine.FFmpeg && _encoders is not null)
         {
@@ -417,6 +420,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             // preset - or is refused. It is never encoded in a way that quietly loses the HDR, except when the
             // profile explicitly says to drop it (and the file has a base layer that still looks right).
             var probe = await _encoders.ProbeAsync(config, file.FullName, cancellationToken);
+            sourceProbe = probe;
             if (probe is { HasDynamicHdrMetadata: true })
             {
                 var fallback = _encoders.FallbackHandBrakePreset(presetName);
@@ -470,6 +474,49 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
                         HomeLaneName = lane.DisplayName
                     };
                 }
+            }
+        }
+
+        // The HandBrake side of the same rule (a lane that runs HandBrake, or a file an ffmpeg lane handed to it): an HDR / Dolby Vision
+        // file is not re-encoded with a profile whose video encoder would lose the HDR - and then replace the original. A profile
+        // whose encoder keeps everything (x265, SVT-AV1 with dynamic metadata on) is never probed, so those lanes pay nothing.
+        if (binding.Engine == EncoderEngine.HandBrake && _encoders is not null
+            && _encoders.HandBrakeTraits(presetName) is { } hdrTraits && HandBrakeHdrGuard.NeedsProbe(hdrTraits))
+        {
+            sourceProbe ??= await _encoders.ProbeAsync(config, file.FullName, cancellationToken);
+            if (sourceProbe is null)
+            {
+                if (!_loggedHdrCheckSkipped)
+                {
+                    _loggedHdrCheckSkipped = true;
+                    _logger.Log("  HDR check skipped: ffprobe was not found, so HDR files can't be recognised before encoding (install ffmpeg on the Encoder page to turn it on).");
+                }
+            }
+            else if (HandBrakeHdrGuard.RefusalReason(sourceProbe, hdrTraits, lane.AllowHdrLoss) is { } hdrWhy)
+            {
+                var hdrMessage = $"Not encoded: {hdrWhy} - the file was left alone.";
+                _logger.Log($"  {hdrMessage}", LogSeverity.Error);
+                resumeEntry.Status = ResumeStatus.Error;
+                resumeEntry.HeldAfterFailure = true; // nothing about the file changes by itself; see the ffmpeg refusal above
+                SaveEntryResult(resumeEntry, resumeFilePath);
+
+                return new ConversionResult
+                {
+                    LaneId = lane.Id,
+                    FileName = file.Name,
+                    FullName = file.FullName,
+                    ContentType = contentType,
+                    PresetName = presetName,
+                    EncoderLabel = encoderLabel,
+                    BeginSizeGb = beginSizeGb,
+                    EndSizeGb = 0,
+                    Success = false,
+                    FailureReason = hdrMessage,
+                    ErrorCode = ReportErrorCode.ProfileCannotKeepHdr,
+                    StartTime = startTime,
+                    EndTime = DateTime.Now,
+                    HomeLaneName = lane.DisplayName
+                };
             }
         }
 

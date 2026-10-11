@@ -149,6 +149,12 @@ public sealed class LaneConfig
     /// none, and skip the lane with the usual "preset not found" message - never encoding with the
     /// wrong tool.</summary>
     public EncoderEngine Engine { get; set; } = EncoderEngine.HandBrake;
+
+    /// <summary>HandBrake lanes: encode an HDR / Dolby Vision file even when the profile's encoder would lose the HDR (an SDR-only
+    /// H.264 profile, or a hardware encoder that can't keep Dolby Vision / HDR10+). Off by default: such a file is refused and
+    /// reported (ERROR 114) rather than re-encoded and replaced. It never covers a Dolby Vision profile 5 file, which would show
+    /// wrong colours. ffmpeg lanes have the equivalent setting on the profile.</summary>
+    public bool AllowHdrLoss { get; set; }
 }
 
 /// <summary>The encoders a lane can use.</summary>

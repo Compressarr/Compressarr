@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 using Compressarr.Core.Config;
+using Compressarr.Core.Conversion;
 using Compressarr.Core.FFmpeg;
 
 namespace Compressarr.Core.Tests.FFmpeg;
@@ -295,6 +296,42 @@ public class FFmpegToolingTests : IDisposable
     private sealed class NoHttpFactory : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => throw new InvalidOperationException("must not be called");
+    }
+
+    // ---- which HandBrake encoders keep HDR --------------------------------------------------------
+
+    [Theory]
+    [InlineData("x265", HandBrakeHdrSupport.DynamicHdr)]
+    [InlineData("x265_10bit", HandBrakeHdrSupport.DynamicHdr)]
+    [InlineData("x265_12bit", HandBrakeHdrSupport.DynamicHdr)]
+    [InlineData("svt_av1", HandBrakeHdrSupport.DynamicHdr)]
+    [InlineData("svt_av1_10bit", HandBrakeHdrSupport.DynamicHdr)]
+    [InlineData("vt_h265_10bit", HandBrakeHdrSupport.DynamicHdr)]
+    [InlineData("x264", HandBrakeHdrSupport.SdrOnly)]
+    [InlineData("x264_10bit", HandBrakeHdrSupport.SdrOnly)]
+    [InlineData("nvenc_h264", HandBrakeHdrSupport.SdrOnly)]
+    [InlineData("qsv_h264", HandBrakeHdrSupport.SdrOnly)]
+    [InlineData("mpeg4", HandBrakeHdrSupport.SdrOnly)]
+    [InlineData("theora", HandBrakeHdrSupport.SdrOnly)]
+    [InlineData("nvenc_h265", HandBrakeHdrSupport.StaticHdr)]
+    [InlineData("nvenc_h265_10bit", HandBrakeHdrSupport.StaticHdr)]
+    [InlineData("nvenc_av1_10bit", HandBrakeHdrSupport.StaticHdr)]
+    [InlineData("qsv_h265_10bit", HandBrakeHdrSupport.StaticHdr)]
+    [InlineData("vce_h265_10bit", HandBrakeHdrSupport.StaticHdr)]
+    [InlineData("some_future_encoder", HandBrakeHdrSupport.StaticHdr)] // never refused just because it is unfamiliar
+    [InlineData("", HandBrakeHdrSupport.StaticHdr)]
+    public void HandBrakeEncoders_AreClassifiedByWhatTheyDoWithHdr(string encoder, HandBrakeHdrSupport expected)
+    {
+        Assert.Equal(expected, HandBrakeHdrGuard.SupportOf(encoder));
+    }
+
+    [Fact]
+    public void OnlyAProfileThatCannotBeRelied_OnForHdr_NeedsTheSourceRead()
+    {
+        Assert.False(HandBrakeHdrGuard.NeedsProbe(new HandBrakeProfileTraits("x265_10bit", true)));
+        Assert.True(HandBrakeHdrGuard.NeedsProbe(new HandBrakeProfileTraits("x265_10bit", false)));  // switched off: Dolby Vision profile 5 still matters
+        Assert.True(HandBrakeHdrGuard.NeedsProbe(new HandBrakeProfileTraits("x264", true)));
+        Assert.True(HandBrakeHdrGuard.NeedsProbe(new HandBrakeProfileTraits("nvenc_h265", true)));
     }
 
     // ---- Dolby Vision base layer (for "encode anyway") --------------------------------------------

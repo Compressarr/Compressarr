@@ -152,6 +152,8 @@ internal sealed class EngResolver : IEncoderResolver
     public string? FallbackHandBrakePreset(string ffmpegProfileName) => Fallbacks.GetValueOrDefault(ffmpegProfileName);
     public HashSet<string> DropsDynamicHdr { get; } = new(StringComparer.OrdinalIgnoreCase);
     public bool AllowsDroppingDynamicHdr(string ffmpegProfileName) => DropsDynamicHdr.Contains(ffmpegProfileName);
+    public Dictionary<string, HandBrakeProfileTraits> Traits { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public HandBrakeProfileTraits? HandBrakeTraits(string handBrakeProfileName) => Traits.GetValueOrDefault(handBrakeProfileName);
 }
 
 /// <summary>The orchestrator choosing the encoder per lane: the lane's engine decides the runner, the
@@ -441,6 +443,160 @@ public class EncoderEngineTests : IDisposable
 
         Assert.False(result.Success);
         Assert.Contains("no HandBrake fallback preset", result.FailureReason);
+    }
+
+    // ---- HandBrake lanes: an HDR file is not encoded with a profile that would lose the HDR ----------------
+
+    private static MediaProbeResult Hdr10() => FFprobeParser.Parse(FFmpegFixtures.UhdHdr10Rip);
+    private static MediaProbeResult Sdr() => FFmpegFixtures.Dvd();
+
+    private Rig HandBrakeRig(string encoder, bool dynamicMetadata, MediaProbeResult? probe, bool allowHdrLoss = false)
+    {
+        var rig = BuildRig(EncoderEngine.HandBrake, "HB Preset");
+        rig.Resolver.Traits["HB Preset"] = new HandBrakeProfileTraits(encoder, dynamicMetadata);
+        rig.Resolver.Probe = probe;
+        rig.Lane.AllowHdrLoss = allowHdrLoss;
+        return rig;
+    }
+
+    [Fact]
+    public async Task AnHdrFile_WithAnSdrOnlyH264Profile_IsRefused_HeldAndLeftAlone()
+    {
+        var rig = HandBrakeRig("x264", dynamicMetadata: true, Hdr10());
+        var resume = new List<ResumeEntry>();
+        var context = await rig.Orchestrator.PrepareLaneAsync(rig.Lane, rig.Config, resume, rig.ResumePath);
+        var entry = resume.Single(e => e.LaneId == rig.Lane.Id);
+
+        var result = await rig.Orchestrator.ProcessOneFileAsync(context!, entry, rig.ResumePath.Replace("resume.json", ""), "20260101_000000", resume, rig.ResumePath, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ReportErrorCode.ProfileCannotKeepHdr, result.ErrorCode);
+        Assert.Contains("can only produce SDR", result.FailureReason);
+        Assert.Contains("(x264)", result.FailureReason);
+        Assert.Empty(rig.Resolver.HandBrake.Requests);
+        Assert.True(File.Exists(rig.Source));
+        Assert.Equal(ResumeStatus.Error, entry.Status);
+        Assert.True(entry.HeldAfterFailure);
+    }
+
+    [Fact]
+    public async Task TheLanesChoiceToAllowHdrLoss_LetsThatFileThrough()
+    {
+        var rig = HandBrakeRig("x264", dynamicMetadata: true, Hdr10(), allowHdrLoss: true);
+
+        var result = await RunAsync(rig);
+
+        Assert.True(result.Success);
+        Assert.Single(rig.Resolver.HandBrake.Requests);
+    }
+
+    [Fact]
+    public async Task AnSdrFile_WithAnH264Profile_IsEncodedAsAlways()
+    {
+        var rig = HandBrakeRig("x264", dynamicMetadata: true, Sdr());
+
+        var result = await RunAsync(rig);
+
+        Assert.True(result.Success);
+        Assert.Single(rig.Resolver.HandBrake.Requests);
+    }
+
+    [Theory]
+    [InlineData("x265_10bit")]
+    [InlineData("svt_av1_10bit")]
+    public async Task AProfileThatKeepsEverything_IsNeverProbed_SoTheLaneIsNotSlowedDown(string encoder)
+    {
+        var rig = HandBrakeRig(encoder, dynamicMetadata: true, DvRip(8, 1));
+
+        var result = await RunAsync(rig);
+
+        Assert.True(result.Success);
+        Assert.Equal(0, rig.Resolver.ProbeCalls);
+    }
+
+    [Fact]
+    public async Task ADolbyVisionFile_WithAHardwareEncoderThatCannotKeepIt_IsRefused()
+    {
+        var rig = HandBrakeRig("nvenc_h265_10bit", dynamicMetadata: true, DvRip(8, 1));
+
+        var result = await RunAsync(rig);
+
+        Assert.Equal(ReportErrorCode.ProfileCannotKeepHdr, result.ErrorCode);
+        Assert.Contains("Dolby Vision", result.FailureReason);
+        Assert.Contains("can't keep", result.FailureReason);
+        Assert.Empty(rig.Resolver.HandBrake.Requests);
+    }
+
+    [Fact]
+    public async Task APlainHdr10File_WithAHardwareEncoder_IsEncoded_BecauseItKeepsHdr10()
+    {
+        var rig = HandBrakeRig("nvenc_h265_10bit", dynamicMetadata: true, Hdr10());
+
+        var result = await RunAsync(rig);
+
+        Assert.True(result.Success);
+    }
+
+    [Fact]
+    public async Task AProfileThatHasSwitchedDynamicMetadataOff_HasAlreadySaidItDoesNotWantIt()
+    {
+        var rig = HandBrakeRig("nvenc_h265_10bit", dynamicMetadata: false, DvRip(8, 1));
+
+        var result = await RunAsync(rig);
+
+        Assert.True(result.Success);
+    }
+
+    [Fact]
+    public async Task ALanesChoiceNeverCoversDolbyVisionProfile5_WhichWouldShowWrongColours()
+    {
+        var rig = HandBrakeRig("nvenc_h265_10bit", dynamicMetadata: true, DvRip(5, 0), allowHdrLoss: true);
+
+        var result = await RunAsync(rig);
+
+        Assert.Equal(ReportErrorCode.ProfileCannotKeepHdr, result.ErrorCode);
+        Assert.Contains("profile 5", result.FailureReason);
+        Assert.Contains("wrong colours", result.FailureReason);
+        Assert.Empty(rig.Resolver.HandBrake.Requests);
+    }
+
+    [Fact]
+    public async Task WithoutFfprobe_TheHdrCheckIsSkippedWithOneNote_AndTheFileIsEncodedAsBefore()
+    {
+        var rig = HandBrakeRig("x264", dynamicMetadata: true, probe: null);
+
+        var result = await RunAsync(rig);
+
+        Assert.True(result.Success);
+        Assert.Single(rig.Logger.Logs, l => l.Message.Contains("HDR check skipped"));
+    }
+
+    [Fact]
+    public async Task AnUnknownProfile_IsNotJudged()
+    {
+        var rig = BuildRig(EncoderEngine.HandBrake, "HB Preset"); // no traits registered for it
+        rig.Resolver.Probe = Hdr10();
+
+        var result = await RunAsync(rig);
+
+        Assert.True(result.Success);
+        Assert.Equal(0, rig.Resolver.ProbeCalls);
+    }
+
+    [Fact]
+    public async Task ADolbyVisionFile_HandedToAnH264HandBrakeFallback_IsStillRefused()
+    {
+        var rig = BuildRig(EncoderEngine.FFmpeg, "FF Preset");
+        rig.Resolver.Probe = DvRip(8, 1);
+        rig.Resolver.Fallbacks["FF Preset"] = "Compressarr SD-HD";
+        rig.Resolver.Traits["Compressarr SD-HD"] = new HandBrakeProfileTraits("x264", true);
+
+        var result = await RunAsync(rig);
+
+        Assert.Equal(ReportErrorCode.ProfileCannotKeepHdr, result.ErrorCode);
+        Assert.Equal("HandBrake (Dolby Vision fallback)", result.EncoderLabel);
+        Assert.Empty(rig.Resolver.HandBrake.Requests);
+        Assert.Empty(rig.Resolver.FFmpeg.Requests);
     }
 
     [Fact]

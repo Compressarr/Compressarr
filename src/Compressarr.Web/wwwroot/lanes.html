@@ -78,6 +78,11 @@
           <div class="lane-encoder-note f-engineNote hidden"></div>
         </div>
 
+        <div class="field-block adv-only">
+          <div class="check-row"><input type="checkbox" class="f-allowHdrLoss" /><label>Allow HDR files to lose their HDR<span class="help-tag" tabindex="0" title="Normally a HDR, Dolby Vision or HDR10+ file is NOT encoded with a profile that would lose the HDR (an SDR-only H.264 profile, or a hardware encoder that can't keep Dolby Vision / HDR10+): it is left alone and reported as ERROR 114, so the original is never replaced by a washed-out copy. Tick this to encode them anyway. A Dolby Vision profile 5 file is always refused (it would show wrong colours). For ffmpeg lanes, the same choice is on the ffmpeg profile.">?<span class="help-tip">Normally a HDR, Dolby Vision or HDR10+ file is NOT encoded with a profile that would lose the HDR (an SDR-only H.264 profile, or a hardware encoder that can't keep Dolby Vision / HDR10+): it is left alone and reported as ERROR 114, so the original is never replaced by a washed-out copy. Tick this to encode them anyway. A Dolby Vision profile 5 file is always refused (it would show wrong colours). For ffmpeg lanes, the same choice is on the ffmpeg profile.</span></span></label></div>
+        </div>
+        <div class="lane-encoder-note f-hdrLossNote adv-off-only hidden">HDR files may lose their HDR on this lane.</div>
+
         <div class="routing-heading">Content routing</div>
         <div class="routing-grid">
           <div class="routing-col">

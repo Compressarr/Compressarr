@@ -69,6 +69,22 @@ public class FFmpegEndpointTests
     }
 
     [Fact]
+    public async Task TheLanesHdrChoice_DefaultsOff_IsSaved_AndAClientThatDoesNotSendItLeavesItAlone()
+    {
+        await using var host = await QueueHost.StartAsync(HbLane);
+        var lane = (await host.Client.GetFromJsonAsync<JsonArray>("/api/lanes"))![0]!.AsObject();
+        Assert.False(lane["allowHdrLoss"]!.GetValue<bool>());
+
+        lane["allowHdrLoss"] = true;
+        (await host.Client.PutAsJsonAsync("/api/lanes/hb", lane)).EnsureSuccessStatusCode();
+        Assert.True((await host.Client.GetFromJsonAsync<JsonArray>("/api/lanes"))![0]!["allowHdrLoss"]!.GetValue<bool>());
+
+        lane.Remove("allowHdrLoss"); // a cached older page
+        (await host.Client.PutAsJsonAsync("/api/lanes/hb", lane)).EnsureSuccessStatusCode();
+        Assert.True((await host.Client.GetFromJsonAsync<JsonArray>("/api/lanes"))![0]!["allowHdrLoss"]!.GetValue<bool>());
+    }
+
+    [Fact]
     public async Task AnFfmpegLane_IsCheckedAgainstTheFfmpegCatalog_AndFlagsAMissingFfmpeg()
     {
         await using var host = await QueueHost.StartAsync(FfLane);

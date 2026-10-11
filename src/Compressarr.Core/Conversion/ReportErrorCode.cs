@@ -74,6 +74,10 @@ public enum ReportErrorCode
     /// <summary>The lane's encoder (HandBrake or ffmpeg) isn't installed where Compressarr looks for it,
     /// so the lane was skipped this pass.</summary>
     LaneEncoderNotAvailable = 113,
+
+    /// <summary>A HandBrake lane met an HDR / Dolby Vision file whose profile's video encoder would lose the HDR (an SDR-only H.264
+    /// profile, or a hardware encoder that can't keep Dolby Vision / HDR10+). The file was not touched.</summary>
+    ProfileCannotKeepHdr = 114,
 }
 
 public static class ReportErrorCodeExtensions
@@ -106,6 +110,8 @@ public static class ReportErrorCodeExtensions
             "The encoded file is much shorter (or longer) than the source, so it was not kept and the original was left alone. This can mean a corrupt source or a full disk. Open the encode details for ffmpeg's own output.",
         ReportErrorCode.DynamicHdrNeedsHandBrake =>
             "This file has Dolby Vision or HDR10+ dynamic metadata, which ffmpeg would silently drop. The ffmpeg profile has no usable HandBrake fallback profile (or HandBrake is not installed), so the file was left alone and nothing was encoded. To encode such files, name a HandBrake fallback profile on the ffmpeg profile (Profiles page), or put them in a HandBrake lane. A profile can also be set to encode them anyway without the Dolby Vision / HDR10+ data, but never a Dolby Vision profile 5 file, which would show wrong colours.",
+        ReportErrorCode.ProfileCannotKeepHdr =>
+            "This file is HDR (HDR10, HLG, Dolby Vision or HDR10+), and the lane's profile would lose it - an H.264 profile can only produce SDR, and a hardware encoder can't keep Dolby Vision or HDR10+ - so the file was left alone and nothing was encoded. Use a profile that keeps HDR (x265 or SVT-AV1), or tick 'Allow HDR files to lose their HDR' on the lane (Advanced). A Dolby Vision profile 5 file is always refused, because it would show wrong colours.",
         ReportErrorCode.LaneEncoderNotAvailable =>
             "This lane's encoder (HandBrake or ffmpeg) wasn't found where Compressarr looks for it, so the lane was skipped this pass. Check the Encoder page.",
         _ => "An unspecified error occurred.",

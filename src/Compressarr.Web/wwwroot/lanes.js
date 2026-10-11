@@ -68,6 +68,10 @@ function laneCardFromDto(dto) {
   node.querySelector('.f-output').value = dto.output;
   const engine = dto.engine || 'HandBrake';
   node.querySelector('.f-engine').value = engine;
+  node.querySelector('.f-allowHdrLoss').checked = !!dto.allowHdrLoss;
+  const syncHdrNote = () => node.querySelector('.f-hdrLossNote').classList.toggle('hidden', !node.querySelector('.f-allowHdrLoss').checked);
+  node.querySelector('.f-allowHdrLoss').addEventListener('change', syncHdrNote);
+  syncHdrNote();
   fillPresetSelect(node.querySelector('.f-tvPreset'), dto.tvPreset, engine);
   fillPresetSelect(node.querySelector('.f-moviePreset'), dto.moviePreset, engine);
   showEngineNote(node, engine, dto.validationIssues);
@@ -140,6 +144,7 @@ function readLaneCard(node) {
     tvPreset: node.querySelector('.f-tvPreset').value,
     moviePreset: node.querySelector('.f-moviePreset').value,
     engine: node.querySelector('.f-engine').value,
+    allowHdrLoss: node.querySelector('.f-allowHdrLoss').checked,
     tvShowBasePath: node.querySelector('.f-tvShowBasePath').value,
     movieBasePath: node.querySelector('.f-movieBasePath').value
   };

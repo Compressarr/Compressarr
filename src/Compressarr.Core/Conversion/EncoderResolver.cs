@@ -42,6 +42,9 @@ public interface IEncoderResolver
     /// <summary>True when the named ffmpeg profile allows encoding a Dolby Vision / HDR10+ file with ffmpeg anyway, dropping
     /// that metadata (only consulted when it has no HandBrake fallback).</summary>
     bool AllowsDroppingDynamicHdr(string ffmpegProfileName);
+
+    /// <summary>The video encoder and dynamic-HDR setting of a HandBrake profile, or null when the profile isn't found.</summary>
+    HandBrakeProfileTraits? HandBrakeTraits(string handBrakeProfileName);
 }
 
 public sealed class EncoderResolver : IEncoderResolver
@@ -51,6 +54,7 @@ public sealed class EncoderResolver : IEncoderResolver
     private readonly IEncoderRunner _ffmpegRunner;
     private readonly FFmpegPresetService _ffmpegPresets;
     private readonly IFFmpegProfileStore _ffmpegProfiles;
+    private readonly IHandBrakeProfileStore _handBrakeProfiles;
     private readonly IPathExpander _pathExpander;
     private readonly IMediaProbe _probe;
 
@@ -60,9 +64,11 @@ public sealed class EncoderResolver : IEncoderResolver
         FFmpegRunner ffmpegRunner,
         FFmpegPresetService ffmpegPresets,
         IFFmpegProfileStore ffmpegProfiles,
+        IHandBrakeProfileStore handBrakeProfiles,
         IPathExpander pathExpander,
         IMediaProbe probe)
     {
+        _handBrakeProfiles = handBrakeProfiles;
         _handBrakeRunner = handBrakeRunner;
         _handBrakePresets = handBrakePresets;
         _ffmpegRunner = ffmpegRunner;
@@ -94,6 +100,17 @@ public sealed class EncoderResolver : IEncoderResolver
 
     public bool AllowsDroppingDynamicHdr(string ffmpegProfileName) =>
         _ffmpegProfiles.Find(ffmpegProfileName)?.AllowDroppingDynamicHdr ?? false;
+
+    public HandBrakeProfileTraits? HandBrakeTraits(string handBrakeProfileName)
+    {
+        var definition = _handBrakeProfiles.Find(handBrakeProfileName)?.Definition;
+        if (definition is null) return null;
+
+        var encoder = definition["VideoEncoder"]?.GetValue<string>() ?? "";
+        // HandBrake's own values: all, hdr10plus, dolbyvision, or off/none. Anything but those three means "not passed through".
+        var dynamic = (definition["VideoPasshtruHDRDynamicMetadata"]?.ToString() ?? "").Trim().ToLowerInvariant() is "all" or "hdr10plus" or "dolbyvision";
+        return new HandBrakeProfileTraits(encoder, dynamic);
+    }
 }
 
 /// <summary>"Is this engine's tooling in place" - the same answer for the run, the Lanes page and the
