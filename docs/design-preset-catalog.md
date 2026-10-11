@@ -285,7 +285,8 @@ so it deliberately differs from SD-HD (MP4, a 30 fps cap and AAC audio are what 
 
 Based on the owner's existing, tested ffmpeg profile (`av1_nvenc`).
 
-- Video: `av1_nvenc`, 10-bit (`p010le`), **preset p5, cq 30**, MKV.
+- Video: `av1_nvenc`, 10-bit (`p010le`), **preset p5, cq 34**, MKV. (cq 30, the first choice, measured larger than HEVC NVENC fast;
+  cq 34 gives about its quality in 7-20% less space. See 10.8.)
 - Audio: pass through every English track ffmpeg can copy, E-AC3 640 kbps for the rest. English subtitles and chapters.
 - Requires `av1_nvenc` and a working NVENC **AV1** session (an RTX 40-series GPU or newer). The app's GPU check currently tests
   `hevc_nvenc` only, so it needs an AV1-specific test before this profile can be offered or run.
@@ -297,8 +298,8 @@ Based on the owner's existing, tested ffmpeg profile (`av1_nvenc`).
 
 The slower, tighter counterpart to the shipped HEVC NVENC (fast).
 
-- Video: `hevc_nvenc`, 10-bit (`p010le`), main10, **preset p7, cq 24**, MKV.
-- Extra arguments (the profile's existing `ExtraArgs` field): `-multipass fullres -rc-lookahead 32 -spatial-aq 1`.
+- Video: `hevc_nvenc`, 10-bit (`p010le`), main10, **preset p5, cq 26**, MKV, no extra arguments. (The first choice, p7 + cq 24 + multipass,
+  lookahead and spatial AQ, measured 3-10 times larger than fast for a small quality gain; p7 itself gave no gain over p5. See 10.8.)
 - Audio: pass through every English track ffmpeg can copy, E-AC3 640 kbps for the rest. English subtitles and chapters.
 - **Fallback: None** (Dolby Vision / HDR10+ files are refused and reported, as in 10.5).
 - Requires `hevc_nvenc` and a working NVENC session (already checked today).
@@ -320,8 +321,8 @@ on real clips (this machine has an RTX 4070 and a CPU to test with) before anyth
 | 6 | **Compressarr UHD HEVC (HDR) v1** | HandBrake | x265 10-bit, RF 22, fast | All English tracks copied, else E-AC3 640 | MKV | Kept | CPU |
 | 7 | **Compressarr HD Quality v1** | HandBrake | x265 10-bit, RF 20, fast | First English track: copied if possible, else E-AC3 up to 7.1 at 512 | MKV | Kept | CPU |
 | 8 | **Compressarr Compatibility (H.264) v1** | HandBrake | x264 8-bit main@4.0, RF 24, veryfast, 30 fps cap | First English track: copied if possible, else AAC 5.1 at 384 | MP4 | SDR only | CPU |
-| 9 | **Compressarr AV1 (NVENC) v1** | ffmpeg | av1_nvenc 10-bit, cq 30, p5 | All English tracks copied, else E-AC3 640 | MKV | DV/HDR10+ refused (fallback None) | RTX 40-series or newer |
-| 10 | **Compressarr HEVC NVENC (quality) v1** | ffmpeg | hevc_nvenc 10-bit, cq 24, p7, multipass + lookahead + spatial AQ | All English tracks copied, else E-AC3 640 | MKV | DV/HDR10+ refused (fallback None) | NVIDIA GPU |
+| 9 | **Compressarr AV1 (NVENC) v1** | ffmpeg | av1_nvenc 10-bit, cq 34, p5 | All English tracks copied, else E-AC3 640 | MKV | DV/HDR10+ refused (fallback None) | RTX 40-series or newer |
+| 10 | **Compressarr HEVC NVENC (quality) v1** | ffmpeg | hevc_nvenc 10-bit, cq 26, p5 | All English tracks copied, else E-AC3 640 | MKV | DV/HDR10+ refused (fallback None) | NVIDIA GPU |
 
 **What the user sees, and who it is for**
 
@@ -347,6 +348,56 @@ on real clips (this machine has an RTX 4070 and a CPU to test with) before anyth
 - Row 8 is the only one that differs in kind (H.264, MP4, SDR), so it does not overlap with anything.
 - No profile in the catalog depends on another: every ffmpeg profile has fallback None, so Dolby Vision / HDR10+ files are
   refused unless the user chooses a fallback on a duplicate. The catalog therefore needs no `dependsOn` field.
+
+### 10.8 Measured results (2026-10-10)
+
+15-second clips at three scenes of a UHD HEVC remux (this machine: RTX 4070, desktop CPU). Video-only bitrate in kb/s; "hard" is a bright
+action scene (6000 s), "easy" a dark/quiet one (1200 s). Wall time is for the 15 s clip, so 15 s means real time.
+
+| Profile | easy (1200 s) | middle (3600 s) | hard (6000 s) | wall time per 15 s clip |
+|---|---|---|---|---|
+| SD-HD (HandBrake x265 RF 24 veryfast) - shipped | 541 | 673 | 3964 | 34-62 s |
+| UHD HEVC (HDR) v1 (x265 RF 22 fast) | 729 | 911 | 4978 | 45-76 s |
+| HD Quality v1 (x265 RF 20 fast) | 951 | 1180 | 6255 | 44-72 s |
+| Compatibility (H.264) v1 (x264 RF 24 veryfast) | 1478 | 2242 | 8371 | 17-20 s |
+| SD-HD (ffmpeg libx265) - shipped | 690 | 861 | 4389 | 33-68 s |
+| HEVC NVENC (fast) cq 28 p5 - shipped | 1114 | 1440 | 6122 | 10-11 s |
+| AV1 (NVENC) cq 30 (first choice) | 1534 | 2031 | 9165 | 10 s |
+| HEVC NVENC (quality) p7 cq 24 + extras (first choice) | 10975 | 11473 | 19952 | 13-15 s |
+
+VMAF against the source (every 4th frame; a rough guide, and it favours the hardware encoders over x265) and bitrate, hard | middle scene:
+
+| Variant | kb/s | VMAF | kb/s | VMAF |
+|---|---|---|---|---|
+| HEVC NVENC p5 cq 28 (shipped fast) | 6124 | 97.6 | 1442 | 94.3 |
+| HEVC NVENC p7 cq 28, no extras | 6083 | 97.7 | 1436 | 94.3 |
+| HEVC NVENC p7 cq 26, no extras | 8119 | 98.5 | 2039 | 95.3 |
+| HEVC NVENC p7 cq 24, no extras | 11288 | 99.1 | 3365 | 96.0 |
+| HEVC NVENC p7 cq 28 + extras | 12943 | 97.6 | 4605 | 95.3 |
+| HEVC NVENC p7 cq 30 + extras | 9428 | 96.7 | 2859 | 94.8 |
+| HEVC NVENC p7 cq 24 + extras (first choice) | 19954 | 98.5 | 11475 | 96.3 |
+| AV1 NVENC cq 30 | 9167 | 99.0 | 2032 | 95.4 |
+| AV1 NVENC cq 32 | 7123 | 98.5 | 1467 | 94.9 |
+| AV1 NVENC cq 34 (chosen) | 5673 | 97.9 | 1141 | 94.3 |
+| AV1 NVENC cq 36 | 4662 | 97.1 | 940 | 93.6 |
+| AV1 NVENC cq 38 | 3889 | 96.2 | 802 | 92.8 |
+| x265 veryfast CRF 24 (SD-HD recipe) | 4392 | 94.3 | 864 | 93.0 |
+| x265 fast CRF 22 (UHD HEVC recipe) | 5581 | 95.9 | 1219 | 94.3 |
+| x265 fast CRF 20 (HD Quality recipe) | 7319 | 97.1 | 1753 | 94.9 |
+
+What it means:
+
+- **NVENC p7 and the extra arguments buy nothing.** At the same cq, p7 matches p5, and multipass + lookahead + spatial AQ only spend more bits
+  (3-10 times more for about one VMAF point). The HEVC NVENC (quality) profile is therefore just a lower cq: cq 26 (about 1.3-1.4 times the size of
+  fast, VMAF +0.8 to +1.0).
+- **AV1 NVENC cq 34 is the sensible default.** At the same quality as HEVC NVENC fast (VMAF 97.9 / 94.3) it is 7-20% smaller; cq 30 was larger than
+  HEVC fast.
+- **The GPU encoders are 3-7 times faster than the CPU x265 profiles** (10-14 s per 15 s clip, about 1.1-1.5x real time, against 33-76 s).
+- **UHD HEVC (HDR) v1** (the HandBrake profile that keeps Dolby Vision) runs at about 3-5x slower than real time on this CPU: a 2-hour film takes
+  roughly 6-10 hours.
+- Real encodes confirmed: UHD HEVC (HDR) keeps Dolby Vision (profile 7 and AV1 profile 10 sources both come out as profile 8.1 with HDR10 data and every
+  English audio track); Compatibility (H.264) produces 8-bit H.264 in MP4 with AAC and no subtitles, tagged HDR but washed out on an HDR source (which the
+  HandBrake guard now refuses).
 
 ## 11. Work breakdown
 
