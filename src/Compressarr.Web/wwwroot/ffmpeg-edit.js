@@ -228,7 +228,7 @@ async function init() {
     $('formFields').disabled = true;
     $('saveBtn').classList.add('hidden');
     $('dupBtn').classList.remove('hidden');
-    showBanner('This is a built-in profile: it ships with Compressarr and is locked. Duplicate it to make your own copy to change.');
+    showBanner(dto.catalog ? 'This profile came from the Compressarr catalog: it is locked, and a published version never changes. Duplicate it to make your own copy to change, or delete it on the Profiles page.' : 'This is a built-in profile: it ships with Compressarr and is locked. Duplicate it to make your own copy to change.');
   } else if (dto.usedBy.length) {
     showBanner(`Used by: ${dto.usedBy.join(', ')}. Changes apply to the next file each of those lanes encodes.`);
   }

@@ -1,6 +1,6 @@
 # Design: the Compressarr Presets catalog
 
-Status: draft v2 (the first catalog, four profiles, is published at https://github.com/MrWizardCT/Compressarr-Presets) (decisions from the first review are folded in; see section 12). Nothing here is built.
+Status: built in beta.6 (the first catalog, four profiles, is published at https://github.com/MrWizardCT/Compressarr-Presets) (decisions from the first review are folded in; see section 12). Nothing here is built.
 Target: 2.2 beta.6 (decided 2026-10-10). The AV1 NVENC GPU check, a prerequisite, is done (beta.6). The public repo and profile files can be created any time before beta.6 ships.
 
 ## 1. Goal
@@ -165,11 +165,9 @@ middle:
 
 ### 6.2 Storage and backups
 
-- Catalog profiles live in a separate read-only store under AppData, for example `Profiles\catalog\handbrake\*.json` and
-  `Profiles\catalog\ffmpeg\*.json`, beside (never inside) the user's own profile files. User profile files are never touched.
-- A small `catalog-installed.json` records for each installed profile: family, version, sha256 at install, the source
-  (catalog name and URL), release tag, author, install date. On load the app re-checks each stored file against the recorded hash. A
-  mismatch is shown as "damaged - delete and add again" and the profile is not offered to lanes.
+- Catalog profiles live in two files under AppData, one per encoder, beside (never inside) the user's own profile files: `Profilescatalog-handbrake.json` (a HandBrake preset file) and
+  `Profilescatalog-ffmpeg.json`. User profile files are never touched. (Built: consolidated files rather than one file per profile, so the backup stays a flat set of files.)
+- A small `catalog-installed.json` records for each installed profile: family, version, the published file's sha256, a fingerprint of the stored definition, the source (name and URL), release tag, author, install date. On load the app re-checks each stored profile against its fingerprint; a mismatch (or a missing record) is shown as "damaged - delete and add again" and the profile is not offered to lanes.
 - `IHandBrakeProfileStore` and `IFFmpegProfileStore` list a third tier. Resolution by name is unchanged, and names are unique
   across tiers by rule.
 - **Backups.** The catalog store and `catalog-installed.json` are part of the regular backups, the same as the user profile files:

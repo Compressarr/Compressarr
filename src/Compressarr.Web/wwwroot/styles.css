@@ -1775,6 +1775,8 @@ td { font-variant-numeric: tabular-nums; }
 .prof-chip.warn { background: var(--warn-bg); color: var(--warn); }
 .prof-import-modal { width: 820px; max-height: 90vh; overflow: auto; }
 .prof-import-list { max-height: 320px; overflow: auto; }
+.cat-importas { margin-top: 6px; font-size: 12.5px; }
+.cat-importas input { width: 320px; max-width: 100%; }
 .prof-tabs { display: flex; gap: 6px; margin-bottom: 12px; }
 .prof-tabs button { padding: 5px 14px; font-size: 12.5px; }
 .prof-tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }

@@ -17,16 +17,19 @@ function apiBase(p) { return p.engine === 'ffmpeg' ? '/api/profiles/ffmpeg/' : '
 function editorUrl(p) { return `${p.engine === 'ffmpeg' ? '/ffmpeg-edit.html' : '/profile-edit.html'}?name=${encodeURIComponent(p.name)}`; }
 
 function profileRow(p, index) {
+  const locked = p.builtIn || p.catalog;
   const lock = p.builtIn
     ? `<span class="prof-lock" title="Built-in - ships with Compressarr and can't be changed or deleted">${LOCK_ICON}built-in</span>`
-    : `<span class="prof-lock" title="Created by you - you can edit, duplicate or delete it">user</span>`;
+    : p.catalog
+      ? `<span class="prof-lock" title="Added from the Compressarr catalog - locked like a built-in, but you can delete it">${LOCK_ICON}catalog</span>`
+      : `<span class="prof-lock" title="Created by you - you can edit, duplicate or delete it">user</span>`;
   const engine = p.engine === 'ffmpeg' ? 'ffmpeg' : 'HandBrake';
-  const sub = [p.container, p.builtIn ? '' : 'saved in Compressarr\'s own file'].filter(Boolean).join(' · ');
+  const sub = [p.container, locked ? '' : 'saved in Compressarr\'s own file'].filter(Boolean).join(' · ');
   const missing = p.engine === 'ffmpeg' ? warnings[p.name] : null;
   const warn = missing ? `<div class="prof-warn" title="This ffmpeg build can't run this profile">Needs ${escapeHtml(missing.join(', '))}</div>` : '';
 
   const buttons = [];
-  buttons.push(p.builtIn ? `<button data-act="view" data-i="${index}">View</button>` : `<button data-act="edit" data-i="${index}">Edit</button>`);
+  buttons.push(locked ? `<button data-act="view" data-i="${index}">View</button>` : `<button data-act="edit" data-i="${index}">Edit</button>`);
   buttons.push(`<button data-act="dup" data-i="${index}">Duplicate</button>`);
   if (p.engine !== 'ffmpeg') buttons.push(`<button data-act="dupff" data-i="${index}" title="Make the closest ffmpeg profile from this one and list what ffmpeg can't carry over">Duplicate as ffmpeg&hellip;</button>`);
   if (!p.builtIn) buttons.push(`<button data-act="del" data-i="${index}">Delete</button>`);
@@ -64,8 +67,12 @@ async function loadProfiles() {
   renderRows();
   document.getElementById('userFilePath').textContent = dto.userFilePath;
   if (dto.ffmpegUserFilePath) document.getElementById('ffUserFilePath').textContent = dto.ffmpegUserFilePath;
+  if (dto.catalogHandBrakeFilePath) document.getElementById('catalogHbFilePath').textContent = dto.catalogHandBrakeFilePath;
+  if (dto.catalogFFmpegFilePath) document.getElementById('catalogFfFilePath').textContent = dto.catalogFFmpegFilePath;
+  if (typeof showCatalogNote === 'function') showCatalogNote();
 
   const errors = [];
+  if ((dto.damagedCatalog || []).length) errors.push(`${dto.damagedCatalog.map(n => `"${n}"`).join(', ')} from the catalog no longer match${dto.damagedCatalog.length === 1 ? 'es' : ''} what was installed (the stored copy was changed or damaged), so ${dto.damagedCatalog.length === 1 ? 'it is' : 'they are'} not offered to lanes. Add ${dto.damagedCatalog.length === 1 ? 'it' : 'them'} again from the catalog.`);
   if (dto.userFileError) errors.push(`Your HandBrake profile file could not be read, so only the built-ins are shown: ${dto.userFileError}`);
   if (dto.ffmpegUserFileError) errors.push(`Your ffmpeg profile file could not be read, so only the built-ins are shown: ${dto.ffmpegUserFileError}`);
   const errorBox = document.getElementById('profileError');
@@ -171,12 +178,17 @@ function openImport() {
 
 function closeImport() { overlay.classList.add('hidden'); }
 
+let currentImportTab = 'installed';
+
 function showTab(tab) {
+  currentImportTab = tab;
   for (const b of document.querySelectorAll('#importTabs button')) b.classList.toggle('on', b.dataset.t === tab);
   document.getElementById('tabInstalled').classList.toggle('hidden', tab !== 'installed');
+  document.getElementById('tabCatalog').classList.toggle('hidden', tab !== 'catalog');
   document.getElementById('tabFile').classList.toggle('hidden', tab !== 'file');
   resetPicker();
   if (tab === 'installed') loadInstalled();
+  if (tab === 'catalog') loadCatalog();
 }
 
 function resetPicker() {
@@ -275,6 +287,7 @@ document.getElementById('importSelectShown').addEventListener('click', () => {
 document.getElementById('importClear').addEventListener('click', () => { selected.clear(); renderCandidates(); });
 
 document.getElementById('importGo').addEventListener('click', async () => {
+  if (currentImportTab === 'catalog') { await installFromCatalog(); return; }
   const onConflict = document.querySelector('input[name=onConflict]:checked').value;
   const names = [...selected].map(i => candidates[i].name);
   const res = await fetch('/api/profiles/import', {

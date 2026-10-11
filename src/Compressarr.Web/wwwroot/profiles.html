@@ -34,6 +34,7 @@
       <div class="card-body">
         <p class="enc-note" style="margin-top:0">These are all the encoding profiles Compressarr has - its own built-ins plus yours. A lane picks one on the <a href="/lanes.html">Lanes</a> page. Compressarr never reads HandBrake's own presets file while encoding; <em>Import</em> (HandBrake profiles) is how presets get in from it. A lane picks profiles from its own encoder's list, so the same name can exist for both.</p>
         <div id="profileError" class="banner err hidden"></div>
+        <div id="catalogNote" class="banner ok hidden"></div>
         <div class="prof-tabs" id="engineTabs"><button class="on" data-f="all">All</button><button data-f="handbrake">HandBrake</button><button data-f="ffmpeg">ffmpeg</button></div>
         <div class="table-wrap">
           <table class="prof-table">
@@ -62,6 +63,7 @@
       <div class="card-body">
         <div class="prof-where">
           <div><b>Built-in</b> (locked)<br>Ship with Compressarr, so they are always the same and can't be changed or deleted. Duplicate one to make your own.</div>
+          <div><b>Catalog (downloaded)</b> (locked, deletable)<br><code id="catalogHbFilePath">%AppData%CompressarrProfilescatalog-handbrake.json</code><br><code id="catalogFfFilePath">%AppData%CompressarrProfilescatalog-ffmpeg.json</code><br>Profiles you added from the Compressarr catalog (Import &gt; From Catalog). Locked like the built-ins, but you can delete them. Included in the automatic backups and in Export/Import config. HandBrake is handed them in its generated copy together with the built-ins and yours.</div>
           <div><b>Yours - ffmpeg</b><br><code id="ffUserFilePath">%AppData%\Compressarr\Profiles\ffmpeg-profiles.json</code><br>Your ffmpeg profiles. Included in the automatic backups and in Export/Import config too. ffmpeg reads its profiles straight from here - there is no generated copy.</div>
           <div><b>Yours - HandBrake</b><br><code id="userFilePath">%AppData%\Compressarr\Profiles\handbrake-profiles.json</code><br>Everything you create, duplicate or import. It is included in Compressarr's automatic backups and in Export/Import config, with the rest of your settings. For every encode Compressarr hands HandBrake its own generated copy (built-ins plus yours), so the HandBrake app and Compressarr never touch each other's files.</div>
         </div>
@@ -74,11 +76,25 @@
       <h3>Import profiles</h3>
       <div class="prof-tabs" id="importTabs">
         <button class="on" data-t="installed">From installed HandBrake</button>
+        <button data-t="catalog">From Catalog</button>
         <button data-t="file">From a presets file</button>
       </div>
 
       <div id="tabInstalled">
         <p class="enc-note" id="installedNote" style="margin-top:0">Looking for HandBrake's presets&hellip;</p>
+      </div>
+
+      <div id="tabCatalog" class="hidden">
+        <p class="enc-note" id="catalogSource" style="margin-top:0"></p>
+        <p class="enc-note" id="catalogStatus"></p>
+        <div id="catalogPicker" class="hidden">
+          <div class="field-with-btn" style="margin:10px 0">
+            <input type="text" id="catalogSearch" placeholder="Search the catalog..." />
+            <button id="catalogSelectShown">Select all new</button>
+            <button id="catalogClear">Clear</button>
+          </div>
+          <div class="modal-list prof-import-list"><table class="prof-table" id="catalogTable"><tbody></tbody></table></div>
+        </div>
       </div>
 
       <div id="tabFile" class="hidden">
@@ -111,5 +127,6 @@
   <script src="/nav.js"></script>
   <script src="/browse.js"></script>
   <script src="/profiles.js"></script>
+  <script src="/catalog.js"></script>
 </body>
 </html>

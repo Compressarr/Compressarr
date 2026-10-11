@@ -147,6 +147,51 @@ checkUpdateBtn.addEventListener('click', async () => {
   }
 });
 
+// ---- Preset catalog ---------------------------------------------------------------------------------------------
+// Never checked by itself: the source is shown from the start, and the catalog is read only when Check for Updates is pressed.
+const catSourceText = document.getElementById('catSourceText');
+const catStatus = document.getElementById('catStatus');
+const catCheckBtn = document.getElementById('catCheckBtn');
+const catOpenLink = document.getElementById('catOpenLink');
+
+function escapeAboutHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function loadCatalogSource() {
+  try {
+    const source = await (await fetch('/api/catalog/source')).json();
+    catSourceText.innerHTML = `<strong>${escapeAboutHtml(source.name)}</strong> - <a href="${escapeAboutHtml(source.url)}" target="_blank" rel="noopener">${escapeAboutHtml(source.url)}</a>`;
+  } catch { catSourceText.textContent = '-'; }
+}
+
+catCheckBtn.addEventListener('click', async () => {
+  catCheckBtn.disabled = true;
+  catStatus.textContent = 'Checking...';
+  catOpenLink.classList.add('hidden');
+  try {
+    const dto = await (await fetch('/api/catalog')).json();
+    if (!dto.ok) {
+      catStatus.textContent = `Couldn't check the catalog: ${dto.error}`;
+    } else {
+      const c = dto.catalog;
+      const total = c.families.reduce((n, f) => n + f.versions.length, 0);
+      const updated = c.updated ? ` (updated ${c.updated})` : '';
+      catStatus.textContent = c.notInstalled === 0
+        ? `You have every profile in the catalog (${total} published${updated}).`
+        : `${c.notInstalled} of ${total} profile${total === 1 ? '' : 's'} in the catalog you haven't added${updated}.`;
+      // The Profiles page shows a quiet note about it, only because a check was just run (nothing runs on a timer).
+      try { if (c.notInstalled > 0) sessionStorage.setItem('compressarr.catalogNew', String(c.notInstalled)); else sessionStorage.removeItem('compressarr.catalogNew'); } catch { /* a nicety */ }
+      catOpenLink.classList.remove('hidden');
+    }
+  } catch (err) {
+    catStatus.textContent = `Couldn't check the catalog: ${err.message}`;
+  } finally {
+    catCheckBtn.disabled = false;
+  }
+});
+
 loadAbout();
+loadCatalogSource();
 loadHandBrakeVersion();
 loadFfmpegVersion();
