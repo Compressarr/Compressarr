@@ -1,7 +1,7 @@
 # Design: the Compressarr Presets catalog
 
 Status: draft v2 for review (decisions from the first review are folded in; see section 12). Nothing here is built.
-Target: after 2.2.0 (2.3), or as the last 2.2 feature if wanted.
+Target: 2.2 beta.6 (decided 2026-10-10). The AV1 NVENC GPU check, a prerequisite, is done (beta.6). The public repo and profile files can be created any time before beta.6 ships.
 
 ## 1. Goal
 
