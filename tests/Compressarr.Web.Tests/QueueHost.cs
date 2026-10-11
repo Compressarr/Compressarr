@@ -5,6 +5,7 @@ using Compressarr.Core;
 using Compressarr.Core.Config;
 using Compressarr.Core.Conversion;
 using Compressarr.Core.Diagnostics;
+using Compressarr.Core.Reporting;
 using Compressarr.Web;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -82,6 +83,10 @@ public sealed class QueueHost : IAsyncDisposable
         builder.Services.AddCompressarrWeb();
         builder.Services.RemoveAll<ICpuUsageSampler>();
         builder.Services.AddSingleton<ICpuUsageSampler, NoCpuSampler>();
+        // A pass that finds a problem opens its report in the machine's browser (Report > Open after run defaults to "on error"). A test
+        // that runs a real pass must never do that to whoever is running the tests.
+        builder.Services.RemoveAll<IReportLauncher>();
+        builder.Services.AddSingleton<IReportLauncher, NoReportLauncher>();
 
         var app = builder.Build();
         app.MapCompressarrEndpoints();
@@ -176,6 +181,11 @@ public sealed class QueueHost : IAsyncDisposable
         await _app.DisposeAsync();
         AppPaths.TestOverrideAppDataDirectory = null;
         try { Directory.Delete(Root, recursive: true); } catch { /* best-effort temp cleanup */ }
+    }
+
+    private sealed class NoReportLauncher : IReportLauncher
+    {
+        public void Open(string reportFilePath) { }
     }
 
     private sealed class NoCpuSampler : ICpuUsageSampler
