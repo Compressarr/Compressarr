@@ -97,6 +97,11 @@ public sealed class FFmpegProfile
     [JsonIgnore]
     public bool IsBuiltIn { get; set; }
 
+    /// <summary>True for a profile the user added from a catalog: locked like a built-in, but deletable. Not stored here (the
+    /// catalog file holds it).</summary>
+    [JsonIgnore]
+    public bool IsCatalog { get; set; }
+
     public FFmpegProfile Clone()
     {
         var copy = (FFmpegProfile)MemberwiseClone();

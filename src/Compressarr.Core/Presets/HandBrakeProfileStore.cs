@@ -10,7 +10,7 @@ namespace Compressarr.Core.Presets;
 /// <summary>One HandBrake profile Compressarr knows about: a built-in that ships inside the app
 /// (locked), or one of the user's own (created, duplicated or imported). Definition is the full
 /// HandBrake preset node, kept exactly as stored so nothing the editor doesn't show is lost.</summary>
-public sealed record HandBrakeProfile(string Name, string? FileFormat, bool IsBuiltIn, JsonObject Definition);
+public sealed record HandBrakeProfile(string Name, string? FileFormat, bool IsBuiltIn, JsonObject Definition, bool IsCatalog = false);
 
 /// <summary>
 /// Compressarr's own HandBrake profile catalog - the only preset source Compressarr ever uses.
@@ -33,6 +33,17 @@ public interface IHandBrakeProfileStore
     /// <summary>Set when the user's profile file exists but could not be read - the profiles in it
     /// are then not offered (and no write will overwrite it). Null when everything is fine.</summary>
     string? UserFileError { get; }
+
+    /// <summary>Names of catalog profiles whose stored copy no longer matches what was installed (edited by hand, damaged). They are
+    /// not offered to lanes; deleting and adding them again fixes it.</summary>
+    IReadOnlyList<string> DamagedCatalogProfiles { get; }
+
+    /// <summary>Adds a profile installed from a catalog, with the record of where it came from. The name must be unique among the
+    /// built-ins, the catalog profiles and the user's; a clash throws InvalidOperationException and nothing is written.</summary>
+    void AddCatalogProfile(JsonObject definition, Compressarr.Core.Catalog.InstalledCatalogProfile record);
+
+    /// <summary>Removes a catalog profile (and its record). Built-ins and the user's own can't be removed this way.</summary>
+    void RemoveCatalogProfile(string name);
 
     /// <summary>Appends profiles to the user's file. Names must be non-empty and unique
     /// (case-insensitively) across the built-ins and the user's existing profiles; any clash throws
@@ -58,6 +69,7 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
 {
     internal const string BuiltInFolderName = "Compressarr (built-in)";
     internal const string UserFolderName = "Yours";
+    internal const string CatalogFolderName = "Compressarr (catalog)";
     private const string BundledResourceName = "Compressarr.Core.Assets.compressarr-presets.json";
 
     private static readonly JsonSerializerOptions WriteOptions = new()
@@ -73,6 +85,10 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
     private List<HandBrakeProfile>? _userCache;
     private string? _userError;
 
+    private (DateTime WriteUtc, long Length, DateTime RecordUtc, long RecordLength) _catalogStamp;
+    private List<HandBrakeProfile>? _catalogCache;
+    private List<string> _catalogDamaged = new();
+
     public string? UserFileError
     {
         get
@@ -85,13 +101,63 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
         }
     }
 
+    public IReadOnlyList<string> DamagedCatalogProfiles
+    {
+        get
+        {
+            lock (_gate)
+            {
+                LoadCatalogLocked();
+                return _catalogDamaged.ToList();
+            }
+        }
+    }
+
     public IReadOnlyList<HandBrakeProfile> GetBuiltIns() => _bundled.Value.Profiles;
 
     public IReadOnlyList<HandBrakeProfile> GetAll()
     {
         lock (_gate)
         {
-            return _bundled.Value.Profiles.Concat(LoadUserLocked()).ToList();
+            return _bundled.Value.Profiles.Concat(LoadCatalogLocked()).Concat(LoadUserLocked()).ToList();
+        }
+    }
+
+    public void AddCatalogProfile(JsonObject definition, Compressarr.Core.Catalog.InstalledCatalogProfile record)
+    {
+        lock (_gate)
+        {
+            var existing = LoadCatalogLocked();
+            var user = LoadUserLocked();
+            var name = definition["PresetName"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(name)) throw new InvalidOperationException("A profile needs a name.");
+            if (_bundled.Value.Profiles.Concat(existing).Concat(user).Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"A profile named '{name}' already exists.");
+            }
+
+            // The record first: a record without its profile is harmless, a profile without its record would read as damaged.
+            Compressarr.Core.Catalog.CatalogRecordFile.Add(record with { Name = name, Engine = "handbrake", DefinitionSha = Compressarr.Core.Catalog.CatalogHash.OfDefinition(definition) });
+            var all = existing.Select(p => (JsonNode)p.Definition.DeepClone()).Append((JsonNode)definition.DeepClone()).ToList();
+            WriteCatalogFileLocked(all);
+            EnsureActiveFileLocked();
+        }
+    }
+
+    public void RemoveCatalogProfile(string name)
+    {
+        lock (_gate)
+        {
+            var existing = LoadCatalogLocked();
+            var index = existing.FindIndex(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+            var damaged = _catalogDamaged.Any(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase));
+            if (index < 0 && !damaged) throw new InvalidOperationException($"There is no catalog profile named '{name}'.");
+
+            // A damaged profile is not in the list above, but its entry is still in the file: keep every other one as it is.
+            var keep = ReadCatalogLeavesLocked().Where(l => !string.Equals(l.Name, name, StringComparison.OrdinalIgnoreCase)).Select(l => (JsonNode)l.Definition.DeepClone()).ToList();
+            WriteCatalogFileLocked(keep);
+            Compressarr.Core.Catalog.CatalogRecordFile.Remove("handbrake", name);
+            EnsureActiveFileLocked();
         }
     }
 
@@ -108,7 +174,7 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
                 throw new InvalidOperationException($"Your profile file could not be read, so nothing was changed: {_userError}");
             }
 
-            var taken = new HashSet<string>(_bundled.Value.Profiles.Concat(existing).Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+            var taken = new HashSet<string>(_bundled.Value.Profiles.Concat(LoadCatalogLocked()).Concat(existing).Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
             var added = new List<JsonObject>();
             foreach (var definition in definitions)
             {
@@ -147,13 +213,15 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
             {
                 throw _bundled.Value.Profiles.Any(p => string.Equals(p.Name, currentName, StringComparison.OrdinalIgnoreCase))
                     ? new InvalidOperationException($"'{currentName}' is a built-in profile and can't be changed. Duplicate it to make your own.")
-                    : new InvalidOperationException($"There is no profile named '{currentName}'.");
+                    : LoadCatalogLocked().Any(p => string.Equals(p.Name, currentName, StringComparison.OrdinalIgnoreCase))
+                        ? new InvalidOperationException($"'{currentName}' is a catalog profile and can't be changed. Duplicate it to make your own.")
+                        : new InvalidOperationException($"There is no profile named '{currentName}'.");
             }
 
             var newName = definition["PresetName"]?.GetValue<string>();
             if (string.IsNullOrWhiteSpace(newName)) throw new InvalidOperationException("A profile needs a name.");
 
-            var clash = _bundled.Value.Profiles.Concat(existing.Where((_, i) => i != index))
+            var clash = _bundled.Value.Profiles.Concat(LoadCatalogLocked()).Concat(existing.Where((_, i) => i != index))
                 .Any(p => string.Equals(p.Name, newName, StringComparison.OrdinalIgnoreCase));
             if (clash) throw new InvalidOperationException($"A profile named '{newName}' already exists.");
 
@@ -199,7 +267,7 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
     private string EnsureActiveFileLocked()
     {
         var path = AppPaths.GetHandBrakeActivePresetsFilePath();
-        var desired = Encoding.UTF8.GetBytes(BuildActiveJson(LoadUserLocked()));
+        var desired = Encoding.UTF8.GetBytes(BuildActiveJson(LoadCatalogLocked(), LoadUserLocked()));
 
         if (File.Exists(path) && File.ReadAllBytes(path).AsSpan().SequenceEqual(desired))
         {
@@ -213,9 +281,10 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
     /// <summary>The generated file: a built-in folder, and a "Yours" folder when the user has any
     /// profiles. Same input always yields byte-identical output (insertion-ordered nodes, fixed
     /// formatting), which is what makes the compare-then-write check meaningful.</summary>
-    private string BuildActiveJson(List<HandBrakeProfile> user)
+    private string BuildActiveJson(List<HandBrakeProfile> catalog, List<HandBrakeProfile> user)
     {
         var folders = new JsonArray { Folder(BuiltInFolderName, _bundled.Value.Profiles) };
+        if (catalog.Count > 0) folders.Add(Folder(CatalogFolderName, catalog));
         if (user.Count > 0) folders.Add(Folder(UserFolderName, user));
 
         var root = new JsonObject { ["PresetList"] = folders };
@@ -256,6 +325,57 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
         return _userCache = HandBrakePresetFile.GetLeaves(root)
             .Select(l => new HandBrakeProfile(l.Name, l.FileFormat, false, l.Definition))
             .ToList();
+    }
+
+    /// <summary>The catalog profiles that are still what was installed. A profile with no record, or whose stored definition no longer
+    /// matches its record, is left out and its name reported in DamagedCatalogProfiles.</summary>
+    private List<HandBrakeProfile> LoadCatalogLocked()
+    {
+        var path = AppPaths.GetCatalogHandBrakeFilePath();
+        var recordPath = AppPaths.GetCatalogRecordsFilePath();
+        var info = File.Exists(path) ? new FileInfo(path) : null;
+        var recordInfo = File.Exists(recordPath) ? new FileInfo(recordPath) : null;
+        var stamp = (info?.LastWriteTimeUtc ?? default, info?.Length ?? 0, recordInfo?.LastWriteTimeUtc ?? default, recordInfo?.Length ?? 0);
+        if (_catalogCache is not null && stamp == _catalogStamp) return _catalogCache;
+
+        _catalogStamp = stamp;
+        _catalogDamaged = new List<string>();
+        if (info is null) return _catalogCache = new List<HandBrakeProfile>();
+
+        var records = Compressarr.Core.Catalog.CatalogRecordFile.Load()
+            .Where(r => string.Equals(r.Engine, "handbrake", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
+        var profiles = new List<HandBrakeProfile>();
+        foreach (var leaf in ReadCatalogLeavesLocked())
+        {
+            if (records.TryGetValue(leaf.Name, out var record) && record.DefinitionSha == Compressarr.Core.Catalog.CatalogHash.OfDefinition(leaf.Definition))
+            {
+                profiles.Add(new HandBrakeProfile(leaf.Name, leaf.FileFormat, false, leaf.Definition, IsCatalog: true));
+            }
+            else
+            {
+                _catalogDamaged.Add(leaf.Name);
+            }
+        }
+
+        return _catalogCache = profiles;
+    }
+
+    private static List<HandBrakePresetFile.Leaf> ReadCatalogLeavesLocked()
+    {
+        var path = AppPaths.GetCatalogHandBrakeFilePath();
+        return File.Exists(path) && HandBrakePresetFile.TryRead(path, out var root, out _)
+            ? HandBrakePresetFile.GetLeaves(root)
+            : new List<HandBrakePresetFile.Leaf>();
+    }
+
+    private void WriteCatalogFileLocked(List<JsonNode> leaves)
+    {
+        var root = new JsonObject { ["PresetList"] = new JsonArray(leaves.ToArray()) };
+        foreach (var (key, value) in _bundled.Value.Header) root[key] = value?.DeepClone();
+
+        WriteAtomically(AppPaths.GetCatalogHandBrakeFilePath(), Encoding.UTF8.GetBytes(root.ToJsonString(WriteOptions)));
+        _catalogCache = null;
     }
 
     private void WriteUserFileLocked(List<JsonNode> leaves)

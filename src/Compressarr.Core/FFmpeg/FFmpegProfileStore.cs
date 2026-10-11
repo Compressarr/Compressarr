@@ -33,6 +33,16 @@ public interface IFFmpegProfileStore
     void ReplaceUserProfile(string currentName, FFmpegProfile profile);
 
     void RemoveUserProfile(string name);
+
+    /// <summary>Names of catalog profiles whose stored copy no longer matches what was installed. They are not offered to lanes.</summary>
+    IReadOnlyList<string> DamagedCatalogProfiles { get; }
+
+    /// <summary>Adds a profile installed from a catalog, with the record of where it came from. The name must be unique among the built-ins,
+    /// the catalog profiles and the user's; a clash throws InvalidOperationException and nothing is written.</summary>
+    void AddCatalogProfile(FFmpegProfile profile, Compressarr.Core.Catalog.InstalledCatalogProfile record);
+
+    /// <summary>Removes a catalog profile (and its record).</summary>
+    void RemoveCatalogProfile(string name);
 }
 
 public sealed class FFmpegProfileStore : IFFmpegProfileStore
@@ -56,6 +66,10 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
     private List<FFmpegProfile>? _userCache;
     private string? _userError;
 
+    private (DateTime WriteUtc, long Length, DateTime RecordUtc, long RecordLength) _catalogStamp;
+    private List<FFmpegProfile>? _catalogCache;
+    private List<string> _catalogDamaged = new();
+
     public string? UserFileError
     {
         get
@@ -70,11 +84,61 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
 
     public IReadOnlyList<FFmpegProfile> GetBuiltIns() => _bundled.Value.Select(p => p.Clone()).ToList();
 
+    public IReadOnlyList<string> DamagedCatalogProfiles
+    {
+        get
+        {
+            lock (_gate)
+            {
+                LoadCatalogLocked();
+                return _catalogDamaged.ToList();
+            }
+        }
+    }
+
     public IReadOnlyList<FFmpegProfile> GetAll()
     {
         lock (_gate)
         {
-            return _bundled.Value.Concat(LoadUserLocked()).Select(p => p.Clone()).ToList();
+            return _bundled.Value.Concat(LoadCatalogLocked()).Concat(LoadUserLocked()).Select(p => p.Clone()).ToList();
+        }
+    }
+
+    public void AddCatalogProfile(FFmpegProfile profile, Compressarr.Core.Catalog.InstalledCatalogProfile record)
+    {
+        lock (_gate)
+        {
+            var existing = LoadCatalogLocked();
+            var user = LoadUserLocked();
+            var name = profile.Name?.Trim();
+            if (string.IsNullOrWhiteSpace(name)) throw new InvalidOperationException("A profile needs a name.");
+            if (_bundled.Value.Concat(existing).Concat(user).Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"A profile named '{name}' already exists.");
+            }
+
+            var copy = profile.Clone();
+            copy.Name = name;
+            copy.IsBuiltIn = false;
+            copy.IsCatalog = false; // stored plain; the flag is set when it is read back
+
+            // The record first: a record without its profile is harmless, a profile without its record would read as damaged.
+            Compressarr.Core.Catalog.CatalogRecordFile.Add(record with { Name = name, Engine = "ffmpeg", DefinitionSha = Compressarr.Core.Catalog.CatalogHash.OfFFmpegProfile(copy) });
+            WriteCatalogLocked(ReadCatalogProfilesLocked().Append(copy).ToList());
+        }
+    }
+
+    public void RemoveCatalogProfile(string name)
+    {
+        lock (_gate)
+        {
+            LoadCatalogLocked();
+            var all = ReadCatalogProfilesLocked();
+            var index = all.FindIndex(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (index < 0) throw new InvalidOperationException($"There is no catalog profile named '{name}'.");
+
+            WriteCatalogLocked(all.Where((_, i) => i != index).ToList());
+            Compressarr.Core.Catalog.CatalogRecordFile.Remove("ffmpeg", name);
         }
     }
 
@@ -88,7 +152,7 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
             var existing = LoadUserLocked();
             EnsureWritableLocked();
 
-            var taken = new HashSet<string>(_bundled.Value.Concat(existing).Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+            var taken = new HashSet<string>(_bundled.Value.Concat(LoadCatalogLocked()).Concat(existing).Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
             var added = new List<FFmpegProfile>();
             foreach (var profile in profiles)
             {
@@ -119,7 +183,7 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
 
             var newName = profile.Name?.Trim();
             if (string.IsNullOrWhiteSpace(newName)) throw new InvalidOperationException("A profile needs a name.");
-            var clash = _bundled.Value.Concat(existing.Where((_, i) => i != index))
+            var clash = _bundled.Value.Concat(LoadCatalogLocked()).Concat(existing.Where((_, i) => i != index))
                 .Any(p => string.Equals(p.Name, newName, StringComparison.OrdinalIgnoreCase));
             if (clash) throw new InvalidOperationException($"A profile named '{newName}' already exists.");
 
@@ -149,7 +213,9 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
     private InvalidOperationException MissingOrLocked(string name, string verb) =>
         _bundled.Value.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
             ? new InvalidOperationException($"'{name}' is a built-in profile and can't be {verb}. Duplicate it to make your own.")
-            : new InvalidOperationException($"There is no profile named '{name}'.");
+            : LoadCatalogLocked().Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
+                ? new InvalidOperationException($"'{name}' is a catalog profile and can't be {verb}. Duplicate it to make your own.")
+                : new InvalidOperationException($"There is no profile named '{name}'.");
 
     private void EnsureWritableLocked()
     {
@@ -186,6 +252,81 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
             _userError = $"Could not read '{path}': {ex.Message}";
             return _userCache = new List<FFmpegProfile>();
         }
+    }
+
+    /// <summary>The catalog profiles that are still what was installed; a profile with no record, or whose stored copy no longer matches its
+    /// record, is left out and reported in DamagedCatalogProfiles.</summary>
+    private List<FFmpegProfile> LoadCatalogLocked()
+    {
+        var path = AppPaths.GetCatalogFFmpegFilePath();
+        var recordPath = AppPaths.GetCatalogRecordsFilePath();
+        var info = File.Exists(path) ? new FileInfo(path) : null;
+        var recordInfo = File.Exists(recordPath) ? new FileInfo(recordPath) : null;
+        var stamp = (info?.LastWriteTimeUtc ?? default, info?.Length ?? 0, recordInfo?.LastWriteTimeUtc ?? default, recordInfo?.Length ?? 0);
+        if (_catalogCache is not null && stamp == _catalogStamp) return _catalogCache;
+
+        _catalogStamp = stamp;
+        _catalogDamaged = new List<string>();
+        if (info is null) return _catalogCache = new List<FFmpegProfile>();
+
+        var records = Compressarr.Core.Catalog.CatalogRecordFile.Load()
+            .Where(r => string.Equals(r.Engine, "ffmpeg", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
+        var profiles = new List<FFmpegProfile>();
+        foreach (var profile in ReadCatalogProfilesLocked())
+        {
+            if (records.TryGetValue(profile.Name, out var record) && record.DefinitionSha == Compressarr.Core.Catalog.CatalogHash.OfFFmpegProfile(profile))
+            {
+                var copy = profile.Clone();
+                copy.IsCatalog = true;
+                profiles.Add(copy);
+            }
+            else
+            {
+                _catalogDamaged.Add(profile.Name);
+            }
+        }
+
+        return _catalogCache = profiles;
+    }
+
+    private static List<FFmpegProfile> ReadCatalogProfilesLocked()
+    {
+        var path = AppPaths.GetCatalogFFmpegFilePath();
+        try
+        {
+            if (!File.Exists(path)) return new List<FFmpegProfile>();
+            return (JsonSerializer.Deserialize<FileShape>(File.ReadAllText(path), Options)?.Profiles ?? new List<FFmpegProfile>())
+                .Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return new List<FFmpegProfile>();
+        }
+    }
+
+    private void WriteCatalogLocked(List<FFmpegProfile> profiles)
+    {
+        var path = AppPaths.GetCatalogFFmpegFilePath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new FileShape { Profiles = profiles }, Options));
+
+        var temp = path + ".tmp";
+        File.WriteAllBytes(temp, bytes);
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(temp, path, overwrite: true);
+                break;
+            }
+            catch (IOException) when (attempt < 5)
+            {
+                Thread.Sleep(100 * attempt);
+            }
+        }
+
+        _catalogCache = null;
     }
 
     private void WriteLocked(List<FFmpegProfile> profiles)

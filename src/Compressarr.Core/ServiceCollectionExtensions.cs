@@ -41,6 +41,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IEncoderResolver, EncoderResolver>();
         services.AddSingleton<IFFmpegCapabilityProbe, FFmpegCapabilityProbe>();
         services.AddSingleton<IFFmpegInstaller, FFmpegInstaller>();
+        services.AddSingleton<Compressarr.Core.Catalog.ICatalogClient, Compressarr.Core.Catalog.CatalogClient>();
+        services.AddSingleton<Compressarr.Core.Catalog.ICatalogService, Compressarr.Core.Catalog.CatalogService>();
         services.AddSingleton<IHandBrakeProfileMigration, HandBrakeProfileMigration>();
         services.AddSingleton<IHandBrakeProfileImporter, HandBrakeProfileImporter>();
         services.AddSingleton<IHandBrakeInstaller, HandBrakeInstaller>();

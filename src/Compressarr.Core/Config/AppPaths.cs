@@ -71,6 +71,16 @@ public static class AppPaths
     /// <summary>The user's own ffmpeg profiles. The built-ins ship inside the app.</summary>
     public static string GetFFmpegProfilesFilePath() => Path.Combine(GetProfilesDirectory(), "ffmpeg-profiles.json");
 
+    /// <summary>The HandBrake profiles the user added from a catalog (the same file shape as handbrake-profiles.json). Locked like the
+    /// built-ins, but deletable; backed up with the rest of the settings.</summary>
+    public static string GetCatalogHandBrakeFilePath() => Path.Combine(GetProfilesDirectory(), "catalog-handbrake.json");
+
+    /// <summary>The ffmpeg profiles the user added from a catalog (the same file shape as ffmpeg-profiles.json).</summary>
+    public static string GetCatalogFFmpegFilePath() => Path.Combine(GetProfilesDirectory(), "catalog-ffmpeg.json");
+
+    /// <summary>Where each installed catalog profile came from and the fingerprint it must still match.</summary>
+    public static string GetCatalogRecordsFilePath() => Path.Combine(GetProfilesDirectory(), "catalog-installed.json");
+
     /// <summary>Where Check/Install puts a managed copy of ffmpeg (and ffprobe) - per user, inside
     /// Compressarr's own folder, so no administrator rights are needed.</summary>
     public static string GetToolsDirectory() => Path.Combine(GetAppDataDirectory(), "tools");
