@@ -212,6 +212,23 @@ public class CatalogServiceTests : AppDataTestBase
     private static CatalogInstallRequest Pick(string family, int version, string? importAs = null) => new(family, version, importAs);
 
     [Fact]
+    public async Task OneNameForBothEngines_InstallsEachOnItsOwn_WhenTheRequestSaysWhichEngine()
+    {
+        _catalog.Add("Both Ways", 1, "handbrake", FakeCatalog.HandBrakeFile("Both Ways v1"));
+        _catalog.Add("Both Ways", 1, "ffmpeg", FakeCatalog.FFmpegFile("Both Ways v1"));
+
+        var results = await Service().InstallAsync(new[]
+        {
+            new CatalogInstallRequest("Both Ways", 1, null, "handbrake"),
+            new CatalogInstallRequest("Both Ways", 1, null, "ffmpeg")
+        }, default);
+
+        Assert.All(results, r => Assert.Equal("installed", r.Status));
+        Assert.True(_hb.GetAll().Single(p => p.Name == "Both Ways v1").IsCatalog);
+        Assert.True(_ff.GetAll().Single(p => p.Name == "Both Ways v1").IsCatalog);
+    }
+
+    [Fact]
     public async Task TheListing_GroupsByFamilyNewestFirst_AndSaysWhatEachVersionIs()
     {
         _catalog.Add("Fam A", 1, "handbrake", FakeCatalog.HandBrakeFile("Fam A v1"));

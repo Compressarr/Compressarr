@@ -21,7 +21,8 @@ public sealed record CatalogView(
 
 /// <summary>What the user ticked: a family and version, and optionally a new name to import it under as a profile of their own (when the catalog
 /// name is already taken).</summary>
-public sealed record CatalogInstallRequest(string Family, int Version, string? ImportAs);
+/// <summary>Engine is optional: a family can exist for both engines at one version (same name, like the built-ins), and then it says which.</summary>
+public sealed record CatalogInstallRequest(string Family, int Version, string? ImportAs, string? Engine = null);
 
 /// <summary>Status is "installed" (added as a catalog profile), "importedAsUser" (added under the user's own name) or "failed".</summary>
 public sealed record CatalogInstallResult(string Family, int Version, string Status, string Name, string? Message);
@@ -115,7 +116,8 @@ public sealed class CatalogService : ICatalogService
         foreach (var request in requests)
         {
             var entry = listing.Document.Profiles.FirstOrDefault(e => string.Equals(e.Family, request.Family, StringComparison.OrdinalIgnoreCase) && e.Version == request.Version
-                && (e.IsHandBrake || e.IsFFmpeg));
+                && (e.IsHandBrake || e.IsFFmpeg)
+                && (string.IsNullOrWhiteSpace(request.Engine) || string.Equals(e.Engine, request.Engine, StringComparison.OrdinalIgnoreCase)));
             if (entry is null)
             {
                 results.Add(new CatalogInstallResult(request.Family, request.Version, "failed", $"{request.Family} v{request.Version}", "That profile is not in the catalog."));

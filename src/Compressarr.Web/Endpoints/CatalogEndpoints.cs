@@ -11,7 +11,7 @@ public static class CatalogEndpoints
 {
     public sealed record InstallRequest(List<InstallItem>? Items);
 
-    public sealed record InstallItem(string Family, int Version, string? ImportAs);
+    public sealed record InstallItem(string Family, int Version, string? ImportAs, string? Engine = null);
 
     public static void MapCatalogEndpoints(this IEndpointRouteBuilder app)
     {
@@ -38,7 +38,7 @@ public static class CatalogEndpoints
 
             try
             {
-                var results = await catalog.InstallAsync(items.Select(i => new CatalogInstallRequest(i.Family, i.Version, i.ImportAs)).ToList(), ct);
+                var results = await catalog.InstallAsync(items.Select(i => new CatalogInstallRequest(i.Family, i.Version, i.ImportAs, i.Engine)).ToList(), ct);
                 handBrake.EnsureActiveFile(); // HandBrake is handed the new profiles with the next encode; this just keeps the file current
                 return Results.Json(new { results });
             }

@@ -7,10 +7,10 @@
 const CATALOG_NEW_KEY = 'compressarr.catalogNew'; // set by a catalog check (this tab, the About page); cleared once the list has been seen
 
 let catalogView = null;
-const catalogPicks = new Map();      // "family|version" -> { family, version, importAs, taken }
+const catalogPicks = new Map();      // "family|version|engine" -> { family, version, engine, importAs, taken }
 const catalogOlderShown = new Set(); // families whose earlier versions are expanded
 
-function catalogKey(family, version) { return `${family}|${version}`; }
+function catalogKey(family, version, engine) { return `${family}|${version}|${engine || ""}`; }
 
 function showCatalogNote() {
   const note = document.getElementById('catalogNote');
@@ -83,7 +83,7 @@ function catalogChips(item) {
 }
 
 function catalogRow(family, item) {
-  const key = catalogKey(item.family, item.version);
+  const key = catalogKey(item.family, item.version, item.engine);
   const pick = catalogPicks.get(key);
   const selectable = item.status === 'new' || item.status === 'nameUsed';
   const engineChip = `<span class="prof-chip ${item.engine === 'ffmpeg' ? 'ff' : ''}">${item.engine === 'ffmpeg' ? 'ffmpeg' : 'HandBrake'}</span>`;
@@ -127,7 +127,7 @@ function updateCatalogCount() {
 }
 
 function findCatalogItem(key) {
-  for (const f of catalogView.families) for (const v of f.versions) if (catalogKey(v.family, v.version) === key) return v;
+  for (const f of catalogView.families) for (const v of f.versions) if (catalogKey(v.family, v.version, v.engine) === key) return v;
   return null;
 }
 
@@ -138,7 +138,7 @@ document.getElementById('catalogTable').addEventListener('change', e => {
   if (!item) return;
   if (e.target.checked) {
     // A taken name offers "Import as" with a suggested new name; the profile is then one of the user's own.
-    catalogPicks.set(key, { family: item.family, version: item.version, importAs: item.status === 'nameUsed' ? item.suggestedName : '', taken: item.status === 'nameUsed' });
+    catalogPicks.set(key, { family: item.family, version: item.version, engine: item.engine, importAs: item.status === 'nameUsed' ? item.suggestedName : '', taken: item.status === 'nameUsed' });
   } else {
     catalogPicks.delete(key);
   }
@@ -165,7 +165,7 @@ document.getElementById('catalogSelectShown').addEventListener('click', () => {
   // Only profiles that can simply be added: not ones already installed, with a taken name, deprecated, or needing a newer Compressarr.
   for (const f of catalogView?.families || []) {
     for (const v of f.versions) {
-      if (v.status === 'new' && !v.deprecated) catalogPicks.set(catalogKey(v.family, v.version), { family: v.family, version: v.version, importAs: '', taken: false });
+      if (v.status === 'new' && !v.deprecated) catalogPicks.set(catalogKey(v.family, v.version, v.engine), { family: v.family, version: v.version, engine: v.engine, importAs: '', taken: false });
     }
   }
   renderCatalog();
@@ -180,7 +180,7 @@ async function installFromCatalog() {
     return;
   }
 
-  const items = picks.map(p => ({ family: p.family, version: p.version, importAs: p.taken ? p.importAs.trim() : null }));
+  const items = picks.map(p => ({ family: p.family, version: p.version, engine: p.engine, importAs: p.taken ? p.importAs.trim() : null }));
   const res = await fetch('/api/catalog/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
