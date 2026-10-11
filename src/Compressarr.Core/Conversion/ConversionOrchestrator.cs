@@ -733,7 +733,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
 
         foreach (var entry in orphaned)
         {
-            _logger.Log($"Resume entry for '{entry.FullName}' belongs to a lane that no longer exists - removing it.", LogSeverity.Error);
+            _logger.Log($"Resume entry for '{entry.FullName}' belongs to a lane that no longer exists - removing it.", LogSeverity.Info);
             resumeState.Remove(entry);
         }
         _resumeStore.Save(resumeState, resumeFilePath);
