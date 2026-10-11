@@ -12,7 +12,7 @@ namespace Compressarr.Web.Endpoints;
 public static class FFmpegEndpoints
 {
     // The encoders worth showing as chips, in the order a reader looks for them.
-    private static readonly string[] ChipEncoders = { "libx265", "libx264", "libsvtav1", "eac3", "aac", "ac3", "libopus", "hevc_nvenc" };
+    private static readonly string[] ChipEncoders = { "libx265", "libx264", "libsvtav1", "eac3", "aac", "ac3", "libopus", "hevc_nvenc", "av1_nvenc" };
 
     /// <summary>The channel a call asks for (?channel=stable|latest - the Encoder page passes its not-yet-saved choice), else
     /// the saved one.</summary>
@@ -41,7 +41,15 @@ public static class FFmpegEndpoints
             var caps = await probe.DetectAsync(path, ct);
             if (caps is null) return Results.Json(new { found = false });
 
-            var chips = ChipEncoders.Select(e => new { name = e, ok = e == "hevc_nvenc" ? caps.CanUse(e) : caps.Has(e), note = e == "hevc_nvenc" && caps.Has(e) ? (caps.NvencSessionOk == true ? "NVIDIA GPU session OK" : "no NVIDIA GPU session") : null }).ToList();
+            // A hardware encoder is ticked only when a GPU session really opens for it; AV1 is its own test (RTX 40-series or newer).
+            var chips = ChipEncoders.Select(e => new
+            {
+                name = e,
+                ok = e.EndsWith("_nvenc", StringComparison.Ordinal) ? caps.CanUse(e) : caps.Has(e),
+                note = e.EndsWith("_nvenc", StringComparison.Ordinal) && caps.Has(e)
+                    ? (caps.SessionOk(e) == true ? "NVIDIA GPU session OK" : e == "av1_nvenc" ? "no NVIDIA GPU session for AV1 (needs an RTX 40-series or newer)" : "no NVIDIA GPU session")
+                    : null
+            }).ToList();
             var warnings = profiles.GetAll()
                 .Select(p => (p.Name, Missing: FFmpegProfileRequirements.Missing(p, caps)))
                 .Where(x => x.Missing.Count > 0)

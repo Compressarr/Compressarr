@@ -5,14 +5,24 @@ namespace Compressarr.Core.FFmpeg;
 
 /// <summary>What the installed ffmpeg can do, found by asking it once: its version, the encoders it
 /// was built with, and - for NVENC - whether a GPU session really opens (a build can list
-/// hevc_nvenc on a machine with no NVIDIA GPU).</summary>
-public sealed record FFmpegCapabilities(string? Version, IReadOnlySet<string> Encoders, bool? NvencSessionOk, string? BuildNote)
+/// hevc_nvenc on a machine with no NVIDIA GPU). <paramref name="NvencSessionOk"/> is the H.265 test;
+/// <paramref name="GpuSessions"/> holds the result for an encoder that needs its own test, because a GPU
+/// can open one NVENC encoder and not another (AV1 encoding needs an RTX 40-series or newer).</summary>
+public sealed record FFmpegCapabilities(string? Version, IReadOnlySet<string> Encoders, bool? NvencSessionOk, string? BuildNote,
+    IReadOnlyDictionary<string, bool>? GpuSessions = null)
 {
+    /// <summary>The NVENC encoders that get a session test of their own.</summary>
+    public static readonly string[] SessionTested = { "hevc_nvenc", "av1_nvenc" };
+
     public bool Has(string encoder) => Encoders.Contains(encoder);
+
+    /// <summary>Whether a GPU session opened for this NVENC encoder: its own test when it has one, otherwise the H.265 test
+    /// (the H.264 encoder runs on any GPU the H.265 one does). Null when nothing was tested.</summary>
+    public bool? SessionOk(string encoder) => GpuSessions is not null && GpuSessions.TryGetValue(encoder, out var ok) ? ok : NvencSessionOk;
 
     /// <summary>The hardware encoders a profile can only use if this returns true.</summary>
     public bool CanUse(string encoder) => encoder.EndsWith("_nvenc", StringComparison.Ordinal)
-        ? Has(encoder) && NvencSessionOk == true
+        ? Has(encoder) && SessionOk(encoder) == true
         : Has(encoder);
 }
 
@@ -61,7 +71,9 @@ public static class FFmpegProfileRequirements
         if (!caps.CanUse(profile.VideoCodec))
         {
             missing.Add(profile.VideoCodec.EndsWith("_nvenc", StringComparison.Ordinal) && caps.Has(profile.VideoCodec)
-                ? $"{profile.VideoCodec} (no NVIDIA GPU session could be opened)"
+                ? profile.VideoCodec == "av1_nvenc"
+                    ? "av1_nvenc (no NVIDIA GPU session could be opened for AV1 - it needs an RTX 40-series or newer)"
+                    : $"{profile.VideoCodec} (no NVIDIA GPU session could be opened)"
                 : profile.VideoCodec);
         }
 
@@ -107,23 +119,26 @@ public sealed class FFmpegCapabilityProbe : IFFmpegCapabilityProbe
 
         var set = FFmpegCapabilityParser.ParseEncoders(encoders.Output);
 
-        bool? nvenc = null;
-        if (set.Contains("hevc_nvenc"))
+        // A one-frame throwaway encode per NVENC encoder that needs its own answer: it only works when a GPU session
+        // actually opens, and a GPU that opens H.265 may not open AV1 (that needs an RTX 40-series or newer).
+        var sessions = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var encoder in FFmpegCapabilities.SessionTested)
         {
-            // A one-frame throwaway encode: it only works when a GPU session actually opens.
+            if (!set.Contains(encoder)) continue;
             var test = await RunAsync(ffmpegPath, new[]
             {
                 "-hide_banner", "-nostdin", "-f", "lavfi", "-i", "nullsrc=s=256x256:d=0.2",
-                "-c:v", "hevc_nvenc", "-f", "null", "-"
+                "-c:v", encoder, "-f", "null", "-"
             }, cancellationToken);
-            nvenc = test is { ExitCode: 0 };
+            sessions[encoder] = test is { ExitCode: 0 };
         }
 
         return new FFmpegCapabilities(
             FFmpegCapabilityParser.ParseVersion(version.Output),
             set,
-            nvenc,
-            FFmpegCapabilityParser.ParseBuildNote(version.Output));
+            sessions.TryGetValue("hevc_nvenc", out var hevcOk) ? hevcOk : null,
+            FFmpegCapabilityParser.ParseBuildNote(version.Output),
+            sessions);
     }
 
     private sealed record Result(int ExitCode, string Output);

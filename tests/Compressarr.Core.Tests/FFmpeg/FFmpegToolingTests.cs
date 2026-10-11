@@ -84,6 +84,39 @@ public class FFmpegToolingTests : IDisposable
     private static FFmpegCapabilities Caps(bool? nvenc, params string[] encoders) =>
         new("7.1", new HashSet<string>(encoders, StringComparer.OrdinalIgnoreCase), nvenc, "GPL build");
 
+    private static FFmpegCapabilities GpuCaps(bool hevc, bool av1, params string[] encoders) =>
+        new("7.1", new HashSet<string>(encoders, StringComparer.OrdinalIgnoreCase), hevc, "GPL build",
+            new Dictionary<string, bool> { ["hevc_nvenc"] = hevc, ["av1_nvenc"] = av1 });
+
+    [Fact]
+    public void AV1NvencHasItsOwnGpuSession_BecauseAnOlderGpuOpensH265ButNotAV1()
+    {
+        var olderGpu = GpuCaps(hevc: true, av1: false, "hevc_nvenc", "av1_nvenc", "h264_nvenc");
+        var newerGpu = GpuCaps(hevc: true, av1: true, "hevc_nvenc", "av1_nvenc", "h264_nvenc");
+
+        Assert.True(olderGpu.CanUse("hevc_nvenc"));
+        Assert.False(olderGpu.CanUse("av1_nvenc"));        // listed in the build, H.265 works, AV1 does not
+        Assert.True(olderGpu.CanUse("h264_nvenc"));        // no test of its own: it follows the H.265 one
+        Assert.True(newerGpu.CanUse("av1_nvenc"));
+        Assert.False(GpuCaps(false, false, "hevc_nvenc", "av1_nvenc").CanUse("av1_nvenc")); // no NVIDIA GPU at all
+        Assert.False(GpuCaps(true, true, "hevc_nvenc").CanUse("av1_nvenc"));                // a build without the AV1 encoder
+    }
+
+    [Fact]
+    public void AnAV1NvencProfile_OnAGpuWithoutAV1_IsFlaggedWithTheRealReason()
+    {
+        var profile = new FFmpegProfile { Name = "AV1 GPU", VideoCodec = "av1_nvenc", AudioCodec = "eac3" };
+        var olderGpu = GpuCaps(hevc: true, av1: false, "hevc_nvenc", "av1_nvenc", "eac3");
+        var newerGpu = GpuCaps(hevc: true, av1: true, "hevc_nvenc", "av1_nvenc", "eac3");
+
+        var missing = FFmpegProfileRequirements.Missing(profile, olderGpu);
+
+        Assert.Contains(missing, m => m.Contains("no NVIDIA GPU session") && m.Contains("RTX 40-series"));
+        Assert.Empty(FFmpegProfileRequirements.Missing(profile, newerGpu));
+        // An H.265 profile on the same older GPU is fine.
+        Assert.Empty(FFmpegProfileRequirements.Missing(new FFmpegProfile { Name = "H265 GPU", VideoCodec = "hevc_nvenc", AudioCodec = "eac3" }, olderGpu));
+    }
+
     [Fact]
     public void NvencNeedsARealGpuSession_NotJustTheEncoderInTheBuild()
     {
