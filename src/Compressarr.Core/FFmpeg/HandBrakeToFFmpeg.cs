@@ -24,7 +24,9 @@ public static class HandBrakeToFFmpeg
             Description = form.Description,
             Chapters = form.ChapterMarkers,
             Optimize = form.Optimize,
-            FallbackHandBrakePreset = handBrakeName,
+            // None: a Dolby Vision / HDR10+ file is refused rather than re-encoded by a profile the user didn't choose. They can
+            // name a HandBrake fallback in the editor.
+            FallbackHandBrakePreset = "",
             AudioLanguages = SplitList(form.AudioLanguages),
             AudioTracks = form.AudioTracks == "all" ? "all" : "first",
             SubtitleLanguages = SplitList(form.SubtitleLanguages),

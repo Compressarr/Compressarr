@@ -303,7 +303,7 @@ public class FFmpegToolingTests : IDisposable
         (JsonObject)new Compressarr.Core.Presets.HandBrakeProfileStore().GetBuiltIns().Single(p => p.Name == name).Definition.DeepClone();
 
     [Fact]
-    public void Convert_SdHd_CarriesTheRecipe_AndPointsTheFallbackAtTheOriginal()
+    public void Convert_SdHd_CarriesTheRecipe_AndLeavesTheFallbackNone()
     {
         var conversion = HandBrakeToFFmpeg.Convert("Compressarr SD-HD", BuiltInHandBrake("Compressarr SD-HD"));
         var p = conversion.Profile;
@@ -315,7 +315,7 @@ public class FFmpegToolingTests : IDisposable
         Assert.Equal(("first", "all"), (p.AudioTracks, p.SubtitleTracks));
         Assert.Equal("auto", p.Crop);
         Assert.Equal("auto", p.Deinterlace);             // HandBrake's decomb
-        Assert.Equal("Compressarr SD-HD", p.FallbackHandBrakePreset);
+        Assert.Equal("", p.FallbackHandBrakePreset);     // Dolby Vision / HDR10+ files are refused unless the user picks one
         Assert.Contains(conversion.NotCarried, n => n.Contains("Decomb"));
         Assert.NotEmpty(conversion.Carried);
     }

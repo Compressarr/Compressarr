@@ -311,7 +311,7 @@ public class FFmpegEndpointTests
         var saved = await GetProfileAsync(host, "Compressarr SD-HD 2");
         Assert.False(saved["builtIn"]!.GetValue<bool>());
         Assert.Equal("libx265", saved["profile"]!["videoCodec"]!.GetValue<string>());
-        Assert.Equal("Compressarr SD-HD", saved["profile"]!["fallbackHandBrakePreset"]!.GetValue<string>());
+        Assert.Equal("", saved["profile"]!["fallbackHandBrakePreset"]!.GetValue<string>());
         Assert.Equal(HttpStatusCode.NotFound, (await host.Client.PostAsJsonAsync("/api/profiles/handbrake/Nope/duplicate-as-ffmpeg", new JsonObject())).StatusCode);
     }
 
