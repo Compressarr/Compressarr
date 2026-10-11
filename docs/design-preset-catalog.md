@@ -359,6 +359,10 @@ on real clips (this machine has an RTX 4070 and a CPU to test with) before anyth
    rename-as-user name per row), delete reusing the profile delete endpoints with the in-use rule.
 6. UI: `From Catalog` tab between the other two, `Importing from:` line, status chips, the `Import as:` field, `catalog` tag,
    deprecation and version chips; the About page card and the Profiles-page note (6.4).
+   The Profiles page's "Where profiles are stored" panel also gets a fourth box, **Catalog (downloaded)**: the folder
+   (`%AppData%CompressarrProfilescatalog`, a `handbrake` and an `ffmpeg` subfolder), locked like the built-ins but deletable,
+   included in the backups, and handed to HandBrake in its generated copy with the built-ins and the user's own. (A Community box
+   waits until community sources exist, section 8.)
 7. Repo scaffolding in `Compressarr-Presets` (release workflow, CI check that a published file's hash and version never
    change); archive `Handbrake-Custom-Presets` and link it from the new README.
 8. Tests: checksum mismatch, validator rejection, name collisions (built-in, user, catalog) and rename-as-user, offline,
