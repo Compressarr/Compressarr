@@ -36,6 +36,9 @@ public static class AnnouncementReader
     public const int MaxTitleLength = 120;
     public const int MaxTextLength = 1000;
 
+    /// <summary>The GitHub accounts whose pages a link may point at: the Compressarr organization, and the account the project moved from.</summary>
+    private static readonly string[] GitHubOwners = { "Compressarr", "MrWizardCT" };
+
     private static readonly string[] Kinds = { "release", "beta", "catalog", "notice" };
 
     public static AnnouncementParseResult Parse(string? json)
@@ -104,7 +107,8 @@ public static class AnnouncementReader
             string.IsNullOrEmpty(minVersion) ? null : minVersion, string.IsNullOrEmpty(maxVersion) ? null : maxVersion, expires);
     }
 
-    /// <summary>https only, and only the Compressarr GitHub page (github.com/MrWizardCT) or compressarr.tv.</summary>
+    /// <summary>https only, and only the Compressarr GitHub page (github.com/Compressarr; github.com/MrWizardCT, where the project used to live,
+    /// is still accepted so older announcements keep working) or compressarr.tv.</summary>
     public static bool LinkAllowed(string? link)
     {
         if (string.IsNullOrWhiteSpace(link) || !Uri.TryCreate(link, UriKind.Absolute, out var uri)) return false;
@@ -113,8 +117,9 @@ public static class AnnouncementReader
         var host = uri.Host.ToLowerInvariant();
         if (host == "github.com")
         {
-            return uri.AbsolutePath.Equals("/MrWizardCT", StringComparison.Ordinal)
-                || uri.AbsolutePath.StartsWith("/MrWizardCT/", StringComparison.Ordinal);
+            return GitHubOwners.Any(owner =>
+                uri.AbsolutePath.Equals("/" + owner, StringComparison.Ordinal)
+                || uri.AbsolutePath.StartsWith("/" + owner + "/", StringComparison.Ordinal));
         }
 
         return host == "compressarr.tv" || host.EndsWith(".compressarr.tv", StringComparison.Ordinal);

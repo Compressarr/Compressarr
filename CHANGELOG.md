@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to Compressarr are documented in this file. Pre-release/RC builds leading up
-to v1.0.0 are omitted here - see [GitHub Releases](https://github.com/MrWizardCT/Compressarr/releases)
+to v1.0.0 are omitted here - see [GitHub Releases](https://github.com/Compressarr/Compressarr/releases)
 for that full history.
 
 > [!NOTE]
@@ -11,9 +11,11 @@ for that full history.
 
 ## [Unreleased]
 
+- **Compressarr has a new home on GitHub: github.com/Compressarr/Compressarr** (the organization), with the preset catalog and the announcements next to it. Update checks, announcements and every link in the app use the new address. The old github.com/MrWizardCT/... addresses keep redirecting, so earlier versions keep working.
+
 - **Update channel: Stable, or Stable and beta.** A new Settings > Updates choice sets which releases the update check offers. Stable (the default) is real releases only, as before. Stable and beta offers the highest version of any release, so a 2.2 beta counts as newer than 2.1.x. The check now compares versions including their beta tag, so someone on a beta is told when the final release is out.
 
-- **Announcements.** A bell in the top bar lights up when the Compressarr project has posted news (releases, betas, the 2.2 release) in the last 30 days that you have not seen; click it to read them. The messages come from a public GitHub repo (MrWizardCT/Compressarr-Announcements), are fetched once at start-up and then about daily, and are plain text with at most a link to the Compressarr GitHub page or compressarr.tv. Nothing about you or your computer is sent. It is on by default and can be turned off in Settings > Announcements, which stops the requests completely.
+- **Announcements.** A bell in the top bar lights up when the Compressarr project has posted news (releases, betas, the 2.2 release) in the last 30 days that you have not seen; click it to read them. The messages come from a public GitHub repo (Compressarr/Compressarr-Announcements), are fetched once at start-up and then about daily, and are plain text with at most a link to the Compressarr GitHub page or compressarr.tv. Nothing about you or your computer is sent. It is on by default and can be turned off in Settings > Announcements, which stops the requests completely.
 
 - **With "Maintain" a converted file is no longer converted again on every pass.** Maintain leaves the source in the Input folder, but the finished file was forgotten at the end of the pass and then found again as new, so the same file was re-encoded over and over. Compressarr now remembers a converted file whose source was kept, by its size and date: it stays out of the queue and is not encoded again while it is unchanged. Put a different file at the same path (or edit it) and it is converted as new; delete the kept source yourself and it is forgotten.
 
@@ -1097,7 +1099,7 @@ for that full history.
 - True cross-lane queue priority: dragging a file in the Monitor page's queue can now move it
   ahead of files in a *different* Lane, not just within its own Lane - the order shown is exactly
   the order files will be processed in, regardless of which Lane each one belongs to.
-- A [detailed GitHub Wiki](https://github.com/MrWizardCT/Compressarr/wiki) with a full walkthrough
+- A [detailed GitHub Wiki](https://github.com/Compressarr/Compressarr/wiki) with a full walkthrough
   of every page, written for people new to Compressarr.
 
 ### Changed
@@ -1226,7 +1228,7 @@ for that full history.
 - True cross-lane queue priority: dragging a file in the Monitor page's queue can now move it
   ahead of files in a *different* Lane, not just within its own Lane - the order shown is exactly
   the order files will be processed in, regardless of which Lane each one belongs to.
-- A [detailed GitHub Wiki](https://github.com/MrWizardCT/Compressarr/wiki) with a full walkthrough
+- A [detailed GitHub Wiki](https://github.com/Compressarr/Compressarr/wiki) with a full walkthrough
   of every page, written for people new to Compressarr.
 
 ### Changed
@@ -1346,7 +1348,7 @@ for that full history.
 - True cross-lane queue priority: dragging a file in the Monitor page's queue can now move it
   ahead of files in a *different* Lane, not just within its own Lane - the order shown is exactly
   the order files will be processed in, regardless of which Lane each one belongs to.
-- A [detailed GitHub Wiki](https://github.com/MrWizardCT/Compressarr/wiki) with a full walkthrough
+- A [detailed GitHub Wiki](https://github.com/Compressarr/Compressarr/wiki) with a full walkthrough
   of every page, written for people new to Compressarr.
 
 ### Changed
@@ -1450,7 +1452,7 @@ for that full history.
 - True cross-lane queue priority: dragging a file in the Monitor page's queue can now move it
   ahead of files in a *different* Lane, not just within its own Lane - the order shown is exactly
   the order files will be processed in, regardless of which Lane each one belongs to.
-- A [detailed GitHub Wiki](https://github.com/MrWizardCT/Compressarr/wiki) with a full walkthrough
+- A [detailed GitHub Wiki](https://github.com/Compressarr/Compressarr/wiki) with a full walkthrough
   of every page, written for people new to Compressarr.
 
 ### Changed
@@ -1605,7 +1607,7 @@ monitoring, and history live in the browser.
 - Self-contained HTML run reports and a rolling history view
 - Optional "Start with Windows"
 
-v1.1 (PowerShell) is preserved on the [`1.x`](https://github.com/MrWizardCT/Compressarr/tree/1.x) branch.
+v1.1 (PowerShell) is preserved on the [`1.x`](https://github.com/Compressarr/Compressarr/tree/1.x) branch.
 
 ## [1.1.0] - 2026-08-29
 

@@ -34,7 +34,7 @@ public interface IAnnouncementService
 
 public sealed class AnnouncementService : IAnnouncementService, IDisposable
 {
-    internal const string DefaultUrl = "https://raw.githubusercontent.com/MrWizardCT/Compressarr-Announcements/main/announcements.json";
+    internal const string DefaultUrl = "https://raw.githubusercontent.com/Compressarr/Compressarr-Announcements/main/announcements.json";
     private const int MaxReadMarks = 500;
 
     private readonly IHttpClientFactory _httpClientFactory;

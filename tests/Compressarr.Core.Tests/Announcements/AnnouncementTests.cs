@@ -81,13 +81,17 @@ public class AnnouncementReaderTests
     }
 
     [Theory]
-    [InlineData("https://github.com/MrWizardCT/Compressarr/releases/tag/v2.2.0", true)]
-    [InlineData("https://github.com/MrWizardCT", true)]
+    [InlineData("https://github.com/Compressarr/Compressarr/releases/tag/v2.2.0", true)]
+    [InlineData("https://github.com/Compressarr", true)]
+    [InlineData("https://github.com/MrWizardCT", true)]                       // where the project used to live
+    [InlineData("https://github.com/MrWizardCT/Compressarr/releases", true)]
     [InlineData("https://compressarr.tv", true)]
     [InlineData("https://www.compressarr.tv/news", true)]
     [InlineData("http://compressarr.tv", false)]                              // not https
     [InlineData("https://github.com/SomeoneElse/Compressarr", false)]          // not the project's page
     [InlineData("https://github.com/MrWizardCT-evil/x", false)]                // a look-alike path
+    [InlineData("https://github.com/Compressarr-evil/x", false)]
+    [InlineData("https://github.com/CompressarrFake/x", false)]
     [InlineData("https://compressarr.tv.evil.example/", false)]               // a look-alike host
     [InlineData("https://evilcompressarr.tv/", false)]
     [InlineData("https://user:pass@compressarr.tv/", false)]

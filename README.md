@@ -4,7 +4,7 @@
 
 <sub><i>Because size matters.</i></sub>
 
-**[compressarr.tv](https://compressarr.tv)** · **[Wiki (full setup guide)](https://github.com/MrWizardCT/Compressarr/wiki)**
+**[compressarr.tv](https://compressarr.tv)** · **[Wiki (full setup guide)](https://github.com/Compressarr/Compressarr/wiki)**
 
 <br clear="left">
 
@@ -144,7 +144,7 @@ right on the row so you can verify it without waiting for the schedule.
 
 ## Installation
 
-1. Pick which installer you want from the [Releases](https://github.com/MrWizardCT/Compressarr/releases)
+1. Pick which installer you want from the [Releases](https://github.com/Compressarr/Compressarr/releases)
    page - both install and behave identically, the only difference is whether the .NET runtime
    comes bundled:
    - **`Compressarr-Setup-x.x.x.exe`** (smaller download) - requires the **.NET 10 ASP.NET Core
@@ -178,7 +178,7 @@ right on the row so you can verify it without waiting for the schedule.
    > SmartScreen shows "Windows protected your PC," click **More info**, then **Run anyway**.
    > Every release is also scanned with [VirusTotal](https://www.virustotal.com/) as part of
    > publishing it - the scan link is at the bottom of that release's notes on the
-   > [Releases](https://github.com/MrWizardCT/Compressarr/releases) page, if you'd like to check
+   > [Releases](https://github.com/Compressarr/Compressarr/releases) page, if you'd like to check
    > it independently.
 4. Launch Compressarr from the Start Menu - it runs as a tray icon only, with no window of its
    own. Right-click the tray icon for **Open Web UI**, or just browse to
