@@ -78,11 +78,11 @@ checkUpdateBtn.addEventListener('click', async () => {
     if (!dto.checkedOk) {
       updateStatus.textContent = `Couldn't check for updates: ${dto.error}`;
     } else if (dto.hasUpdate) {
-      updateStatus.textContent = `A new version is available: ${dto.latestVersion}.`;
+      updateStatus.textContent = `A new version is available: ${dto.latestVersion}${dto.latestVersion.includes('-') ? ' (beta)' : ''}.`;
       downloadUpdateBtn.href = dto.releaseUrl;
       downloadUpdateBtn.classList.remove('hidden');
     } else {
-      updateStatus.textContent = `You're up to date (latest release: ${dto.latestVersion}).`;
+      updateStatus.textContent = `You're up to date (latest ${dto.channel === 'Beta' ? 'release or beta' : 'release'}: ${dto.latestVersion}).`;
       updateStatusClearTimer = setTimeout(() => { updateStatus.textContent = ''; }, 4000);
     }
   } catch (err) {

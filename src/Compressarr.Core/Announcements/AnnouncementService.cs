@@ -1,5 +1,6 @@
 using System.Net;
 using Compressarr.Core.Config;
+using Compressarr.Core.Updates;
 
 namespace Compressarr.Core.Announcements;
 
@@ -51,7 +52,7 @@ public sealed class AnnouncementService : IAnnouncementService, IDisposable
     private DateTimeOffset _nextDue = DateTimeOffset.MinValue;
 
     public AnnouncementService(IHttpClientFactory httpClientFactory, IConfigStore configStore, IAnnouncementStateStore state)
-        : this(httpClientFactory, configStore, state, TimeProvider.System, TimeSpan.FromHours(24), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(5), DefaultUrl, InstalledVersion)
+        : this(httpClientFactory, configStore, state, TimeProvider.System, TimeSpan.FromHours(24), TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(5), DefaultUrl, AppVersion.Installed)
     {
     }
 
@@ -68,17 +69,6 @@ public sealed class AnnouncementService : IAnnouncementService, IDisposable
         _tick = tick;
         _url = url;
         _appVersion = appVersion;
-    }
-
-    /// <summary>The running version including a pre-release tag ("2.2.0-beta.5"), which the numeric assembly version drops.</summary>
-    private static AppVersion? InstalledVersion()
-    {
-        var informational = typeof(AnnouncementService).Assembly
-            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
-            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
-            .Select(a => a.InformationalVersion)
-            .FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
-        return AppVersion.Parse(informational) ?? AppVersion.Parse(typeof(AnnouncementService).Assembly.GetName().Version?.ToString());
     }
 
     private bool Enabled() => _configStore.Load(AppPaths.GetConfigFilePath()).Announcements.Enabled;

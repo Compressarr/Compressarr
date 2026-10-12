@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using Compressarr.Core.Announcements;
 using Compressarr.Core.Config;
+using Compressarr.Core.Updates;
 
 namespace Compressarr.Core.Tests.Announcements;
 

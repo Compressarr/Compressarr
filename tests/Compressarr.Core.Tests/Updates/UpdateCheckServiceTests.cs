@@ -1,4 +1,5 @@
 using System.Net;
+using Compressarr.Core.Config;
 using Compressarr.Core.Updates;
 
 namespace Compressarr.Core.Tests.Updates;
@@ -22,6 +23,15 @@ file sealed class FakeHttpClientFactory : IHttpClientFactory
     private readonly HttpMessageHandler _handler;
     public FakeHttpClientFactory(HttpMessageHandler handler) => _handler = handler;
     public HttpClient CreateClient(string name) => new(_handler);
+}
+
+file sealed class ChannelConfigStore : IConfigStore
+{
+    private readonly CompressarrConfig _config = new();
+    public ChannelConfigStore(UpdateChannel channel) => _config.UpdateCheck.Channel = channel;
+    public CompressarrConfig Load(string path) => _config;
+    public void Save(CompressarrConfig config, string path) { }
+    public T Update<T>(string path, Func<CompressarrConfig, T> mutate) => mutate(_config);
 }
 
 public class UpdateCheckServiceTests
@@ -175,5 +185,94 @@ public class UpdateCheckServiceTests
 
         Assert.Equal(countAtStop, handler.CallCount);
         Assert.False(service.IsRunning);
+    }
+
+    // ---- the update channel (Settings > Updates) ----
+
+    private static string Release(string tag, bool prerelease = false, bool draft = false) =>
+        $$"""{ "tag_name": "{{tag}}", "html_url": "https://github.com/MrWizardCT/Compressarr/releases/tag/{{tag}}", "prerelease": {{(prerelease ? "true" : "false")}}, "draft": {{(draft ? "true" : "false")}} }""";
+
+    private static UpdateCheckService Channelled(HttpMessageHandler handler, UpdateChannel channel, string installed) =>
+        new(new FakeHttpClientFactory(handler), TimeProvider.System, TimeSpan.FromHours(24), new ChannelConfigStore(channel), () => AppVersion.Parse(installed));
+
+    private static HttpMessageHandler ListOf(params string[] releases) =>
+        new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[" + string.Join(",", releases) + "]") });
+
+    [Fact]
+    public async Task Stable_AsksForTheLatestRealRelease_AndBetaAsksForTheWholeList()
+    {
+        var urls = new List<string>();
+        var handler = new FakeHttpMessageHandler(request =>
+        {
+            urls.Add(request.RequestUri!.AbsolutePath + request.RequestUri.Query);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(request.RequestUri.AbsolutePath.EndsWith("/latest") ? Release("v2.1.10") : "[" + Release("v2.1.10") + "]") };
+        });
+
+        var stable = await Channelled(handler, UpdateChannel.Stable, "2.1.9").CheckNowAsync();
+        var beta = await Channelled(handler, UpdateChannel.Beta, "2.1.9").CheckNowAsync();
+
+        Assert.Equal("/repos/MrWizardCT/Compressarr/releases/latest", urls[0]);
+        Assert.Equal("/repos/MrWizardCT/Compressarr/releases?per_page=100", urls[1]);
+        Assert.Equal(("Stable", "Beta"), (stable.Channel, beta.Channel));
+    }
+
+    [Fact]
+    public async Task Beta_OffersTheHighestVersionOnEitherList_SoABetaOfTheNextVersionBeatsTheCurrentStable()
+    {
+        var handler = ListOf(Release("v2.1.10"), Release("v2.2.0-beta.6", prerelease: true), Release("v3.0.0", draft: true), Release("catalog-2026.10.11"));
+
+        var result = await Channelled(handler, UpdateChannel.Beta, "2.1.9").CheckNowAsync();
+
+        Assert.True(result.CheckedOk);
+        Assert.True(result.HasUpdate);
+        Assert.Equal("v2.2.0-beta.6", result.LatestVersion);      // not the draft, not the unrelated tag, not 2.1.10
+        Assert.EndsWith("/releases/tag/v2.2.0-beta.6", result.ReleaseUrl);
+    }
+
+    [Theory]
+    [InlineData("2.2.0-beta.5", true)]     // an older beta is told about the newer one
+    [InlineData("2.2.0-beta.6", false)]    // the same beta is up to date
+    [InlineData("2.2.0", false)]           // a final release is above its own betas
+    public async Task Beta_ComparesPreReleasesAsVersions(string installed, bool expected)
+    {
+        var handler = ListOf(Release("v2.1.10"), Release("v2.2.0-beta.6", prerelease: true));
+
+        var result = await Channelled(handler, UpdateChannel.Beta, installed).CheckNowAsync();
+
+        Assert.Equal(expected, result.HasUpdate);
+    }
+
+    [Fact]
+    public async Task Beta_AFinalReleaseBeatsItsBetas()
+    {
+        var handler = ListOf(Release("v2.2.0-beta.6", prerelease: true), Release("v2.2.0"), Release("v2.1.10"));
+
+        var result = await Channelled(handler, UpdateChannel.Beta, "2.2.0-beta.6").CheckNowAsync();
+
+        Assert.True(result.HasUpdate);
+        Assert.Equal("v2.2.0", result.LatestVersion);
+    }
+
+    [Theory]
+    [InlineData("2.1.9", "v2.1.10", true)]
+    [InlineData("2.2.0-beta.5", "v2.1.10", false)]   // a 2.2 beta is not told to go back to 2.1
+    [InlineData("2.2.0-beta.5", "v2.2.0", true)]     // ...but is told when 2.2.0 itself is out (the plain-number check could not say so)
+    [InlineData("2.2.0", "v2.2.0", false)]
+    public async Task Stable_ComparesTheInstalledVersionIncludingItsPreReleaseTag(string installed, string latestTag, bool expected)
+    {
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Release(latestTag)) });
+
+        var result = await Channelled(handler, UpdateChannel.Stable, installed).CheckNowAsync();
+
+        Assert.Equal(expected, result.HasUpdate);
+    }
+
+    [Fact]
+    public async Task Beta_AListWithNothingRecognisable_IsAQuietNoUpdate()
+    {
+        var result = await Channelled(ListOf(Release("catalog-1"), Release("nightly")), UpdateChannel.Beta, "2.1.9").CheckNowAsync();
+
+        Assert.True(result.CheckedOk);
+        Assert.False(result.HasUpdate);
     }
 }

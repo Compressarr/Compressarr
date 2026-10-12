@@ -94,6 +94,7 @@ function fillForm(dto) {
   document.getElementById('queueEtaFormat').value = dto.queueEtaFormat;
   document.getElementById('runAtLogin').checked = dto.runAtLogin;
   document.getElementById('announcementsEnabled').checked = dto.announcementsEnabled;
+  document.getElementById('updateChannel').value = dto.updateChannel || 'Stable';
   document.getElementById('postExecCmd').value = dto.postExecCmd;
   document.getElementById('postExecArgs').value = dto.postExecArgs;
   document.getElementById('sonarrEnabled').checked = dto.sonarr.enabled;
@@ -160,6 +161,7 @@ function readForm() {
     webPort: parseInt(document.getElementById('webPort').value, 10) || 1212,
     runAtLogin: document.getElementById('runAtLogin').checked,
     announcementsEnabled: document.getElementById('announcementsEnabled').checked,
+    updateChannel: document.getElementById('updateChannel').value,
     backupFolderPath: document.getElementById('backupFolderPath').value,
     backupIntervalDays: parseInt(document.getElementById('backupIntervalDays').value, 10) || 7,
     backupRetentionDays: parseInt(document.getElementById('backupRetentionDays').value, 10) || 28,

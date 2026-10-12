@@ -37,6 +37,9 @@ public sealed class CompressarrConfig
     public RepeatSettings Repeat { get; set; } = new();
     public StartupSettings Startup { get; set; } = new();
 
+    /// <summary>Which releases the update check offers (stable only, or betas too).</summary>
+    public UpdateCheckSettings UpdateCheck { get; set; } = new();
+
     /// <summary>Short news items from the Compressarr project (2.1.10 on). On by default.</summary>
     public AnnouncementSettings Announcements { get; set; } = new();
     public ArrSettings Arrs { get; set; } = new();
@@ -206,6 +209,21 @@ public enum QueueEtaDisplayFormat
 {
     DateTime,
     Duration
+}
+
+/// <summary>Which releases "update available" is based on.</summary>
+public enum UpdateChannel
+{
+    /// <summary>Real releases only (GitHub's latest non-pre-release). The default.</summary>
+    Stable,
+
+    /// <summary>The highest version among all releases, pre-releases (betas) included. A beta of the next version beats the current stable.</summary>
+    Beta
+}
+
+public sealed class UpdateCheckSettings
+{
+    public UpdateChannel Channel { get; set; } = UpdateChannel.Stable;
 }
 
 public sealed class AnnouncementSettings
