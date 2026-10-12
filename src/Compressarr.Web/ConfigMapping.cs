@@ -42,6 +42,7 @@ internal static class ConfigMapping
         WebPort: config.Web.Port,
         RunAtLogin: config.Startup.RunAtLogin,
         AnnouncementsEnabled: config.Announcements.Enabled,
+        UpdateChannel: config.UpdateCheck.Channel.ToString(),
         BackupFolderPath: config.Backup.FolderPath,
         BackupIntervalDays: config.Backup.IntervalDays,
         BackupRetentionDays: config.Backup.RetentionDays,
@@ -83,6 +84,8 @@ internal static class ConfigMapping
         config.Web.Port = dto.WebPort;
         config.Startup.RunAtLogin = dto.RunAtLogin;
         config.Announcements.Enabled = dto.AnnouncementsEnabled;
+        // An unknown or missing value (an older page) falls back to the safe default.
+        config.UpdateCheck.Channel = Enum.TryParse<UpdateChannel>(dto.UpdateChannel, ignoreCase: true, out var updateChannel) ? updateChannel : UpdateChannel.Stable;
         config.Backup.FolderPath = dto.BackupFolderPath;
         config.Backup.IntervalDays = dto.BackupIntervalDays;
         config.Backup.RetentionDays = dto.BackupRetentionDays;

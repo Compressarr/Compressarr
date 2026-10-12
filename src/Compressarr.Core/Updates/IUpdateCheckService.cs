@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Compressarr.Core.Config;
 
 namespace Compressarr.Core.Updates;
 
@@ -8,7 +9,8 @@ public sealed record UpdateCheckResult(
     string LatestVersion,
     string ReleaseUrl,
     bool HasUpdate,
-    DateTimeOffset CheckedAt);
+    DateTimeOffset CheckedAt,
+    string Channel = "Stable");
 
 /// <summary>Drives the GitHub releases check on a background loop for the app's whole lifetime,
 /// same always-on posture as IBackupScheduler/IDigestScheduler. Runs its first check immediately
@@ -49,19 +51,28 @@ public sealed class UpdateCheckService : IUpdateCheckService, IDisposable
 
     public UpdateCheckResult? LastResult { get; private set; }
 
-    public UpdateCheckService(IHttpClientFactory httpClientFactory)
-        : this(httpClientFactory, TimeProvider.System, TimeSpan.FromHours(24))
+    public UpdateCheckService(IHttpClientFactory httpClientFactory, IConfigStore? configStore = null)
+        : this(httpClientFactory, TimeProvider.System, TimeSpan.FromHours(24), configStore)
     {
     }
 
     // Internal ctor lets tests drive the loop with a tiny check interval and a fake clock instead
     // of waiting a real day between ticks - same pattern BackupScheduler/DigestScheduler use.
-    internal UpdateCheckService(IHttpClientFactory httpClientFactory, TimeProvider timeProvider, TimeSpan checkInterval)
+    internal UpdateCheckService(IHttpClientFactory httpClientFactory, TimeProvider timeProvider, TimeSpan checkInterval,
+        IConfigStore? configStore = null, Func<AppVersion?>? installed = null)
     {
         _httpClientFactory = httpClientFactory;
         _timeProvider = timeProvider;
         _checkInterval = checkInterval;
+        _configStore = configStore;
+        _installed = installed ?? AppVersion.Installed;
     }
+
+    private readonly IConfigStore? _configStore;
+    private readonly Func<AppVersion?> _installed;
+
+    /// <summary>The channel the user chose in Settings (stable releases only, or betas too). Stable when no config is available.</summary>
+    public UpdateChannel CurrentChannel() => _configStore?.Load(AppPaths.GetConfigFilePath()).UpdateCheck.Channel ?? UpdateChannel.Stable;
 
     public bool IsRunning => _cts is not null;
 
@@ -97,8 +108,10 @@ public sealed class UpdateCheckService : IUpdateCheckService, IDisposable
 
     public async Task<UpdateCheckResult> CheckNowAsync()
     {
-        var installed = typeof(UpdateCheckService).Assembly.GetName().Version ?? new Version(0, 0, 0);
+        var installed = _installed();
         var checkedAt = _timeProvider.GetUtcNow();
+        var channel = CurrentChannel();
+        var channelName = channel.ToString();
 
         try
         {
@@ -106,28 +119,51 @@ public sealed class UpdateCheckService : IUpdateCheckService, IDisposable
             client.Timeout = TimeSpan.FromSeconds(10);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Compressarr-UpdateChecker");
 
-            var response = await client.GetAsync($"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases/latest");
+            // Stable: GitHub's own "latest release", which never is a pre-release. Beta: every release, and the highest version wins - so a
+            // beta of the next version (2.2.0-beta.6) is newer than the current stable (2.1.10), and a final 2.2.0 beats its own betas.
+            var url = channel == UpdateChannel.Beta
+                ? $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases?per_page=100"
+                : $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases/latest";
+
+            var response = await client.GetAsync(url);
             if (!response.IsSuccessStatusCode)
             {
-                var failed = new UpdateCheckResult(false, $"GitHub returned HTTP {(int)response.StatusCode}.", "", "", false, checkedAt);
+                var failed = new UpdateCheckResult(false, $"GitHub returned HTTP {(int)response.StatusCode}.", "", "", false, checkedAt, channelName);
                 LastResult = failed;
                 return failed;
             }
 
             using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            var tagName = doc.RootElement.TryGetProperty("tag_name", out var tagProp) ? tagProp.GetString() ?? "" : "";
-            var releaseUrl = doc.RootElement.TryGetProperty("html_url", out var urlProp) ? urlProp.GetString() ?? "" : "";
+            var releases = doc.RootElement.ValueKind == JsonValueKind.Array ? doc.RootElement.EnumerateArray().ToList() : new List<JsonElement> { doc.RootElement };
 
-            var latestVersionText = tagName.TrimStart('v', 'V');
-            var hasUpdate = Version.TryParse(latestVersionText, out var latest) && latest > installed;
+            string tagName = "", releaseUrl = "";
+            AppVersion? latest = null;
+            foreach (var release in releases)
+            {
+                if (release.ValueKind != JsonValueKind.Object) continue;
+                if (release.TryGetProperty("draft", out var draft) && draft.ValueKind == JsonValueKind.True) continue;
 
-            var result = new UpdateCheckResult(true, null, tagName, releaseUrl, hasUpdate, checkedAt);
+                var tag = release.TryGetProperty("tag_name", out var tagProp) ? tagProp.GetString() ?? "" : "";
+                var parsed = AppVersion.Parse(tag);
+                if (parsed is null) continue; // not one of ours (a tag that is not a version)
+                if (latest is null || parsed.CompareTo(latest) > 0)
+                {
+                    latest = parsed;
+                    tagName = tag;
+                    releaseUrl = release.TryGetProperty("html_url", out var urlProp) ? urlProp.GetString() ?? "" : "";
+                }
+            }
+
+            // Compared as versions with their pre-release tag, not as plain numbers: 2.2.0-beta.5 is older than 2.2.0 and older than 2.2.0-beta.6.
+            var hasUpdate = latest is not null && installed is not null && latest.CompareTo(installed) > 0;
+
+            var result = new UpdateCheckResult(true, null, tagName, releaseUrl, hasUpdate, checkedAt, channelName);
             LastResult = result;
             return result;
         }
         catch (Exception ex)
         {
-            var failed = new UpdateCheckResult(false, ex.Message, "", "", false, checkedAt);
+            var failed = new UpdateCheckResult(false, ex.Message, "", "", false, checkedAt, channelName);
             LastResult = failed;
             return failed;
         }

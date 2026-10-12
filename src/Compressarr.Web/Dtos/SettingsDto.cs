@@ -36,6 +36,7 @@ public sealed record SettingsDto(
     int WebPort,
     bool RunAtLogin,
     bool AnnouncementsEnabled,
+    string UpdateChannel,
     string BackupFolderPath,
     int BackupIntervalDays,
     int BackupRetentionDays,

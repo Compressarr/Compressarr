@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
+using Compressarr.Core.Config;
 using Compressarr.Core.Updates;
 
 namespace Compressarr.Web.Endpoints;
@@ -35,8 +36,13 @@ public static class AboutEndpoints
         // startup, then roughly daily), no network call of its own. Falls back to one inline live
         // check only if the service hasn't completed one yet at all (e.g. this request landed
         // before Start()'s first check finished).
-        app.MapGet("/api/about/update-status", async (IUpdateCheckService updateCheckService) =>
-            Results.Json(ToDto(updateCheckService.LastResult ?? await updateCheckService.CheckNowAsync())));
+        // A cached result from the other channel is stale the moment the Settings choice changes, so it is checked again.
+        app.MapGet("/api/about/update-status", async (IUpdateCheckService updateCheckService, IConfigStore configStore) =>
+        {
+            var channel = configStore.Load(AppPaths.GetConfigFilePath()).UpdateCheck.Channel.ToString();
+            var last = updateCheckService.LastResult;
+            return Results.Json(ToDto(last is not null && last.Channel == channel ? last : await updateCheckService.CheckNowAsync()));
+        });
 
         // The About page's explicit "Check for Updates" button - always performs a real,
         // on-demand GitHub check (not the cache above), since that's what clicking a button
@@ -61,6 +67,7 @@ public static class AboutEndpoints
         error = result.Error,
         latestVersion = result.LatestVersion,
         releaseUrl = result.ReleaseUrl,
-        hasUpdate = result.HasUpdate
+        hasUpdate = result.HasUpdate,
+        channel = result.Channel
     };
 }

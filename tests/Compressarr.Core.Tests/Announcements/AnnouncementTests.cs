@@ -3,6 +3,7 @@ using System.Text;
 using Compressarr.Core.Announcements;
 using Compressarr.Core.Config;
 using Compressarr.Core.Tests.Presets;
+using Compressarr.Core.Updates;
 
 namespace Compressarr.Core.Tests.Announcements;
 
