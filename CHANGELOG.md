@@ -11,6 +11,11 @@ for that full history.
 
 ## [Unreleased]
 
+- **The license now ships with the program.** The installer shows an information page about the GNU General Public License (v3; nothing
+  to accept), and installs the full license text (`LICENSE`) and a list of the open-source components Compressarr is built with
+  (`THIRD-PARTY-NOTICES.txt`) in the install folder. The About page has a License line linking to both and to the source code, and a
+  HandBrakeCLI that Compressarr downloads gets a short note beside it saying it is GPL software and where its source is.
+
 - **Compressarr has a new home on GitHub: github.com/Compressarr/Compressarr** (the organization), with the preset catalog and the announcements next to it. Update checks, announcements and every link in the app use the new address. The old github.com/MrWizardCT/... addresses keep redirecting, so earlier versions keep working.
 
 - **Update channel: Stable, or Stable and beta.** A new Settings > Updates choice sets which releases the update check offers. Stable (the default) is real releases only, as before. Stable and beta offers the highest version of any release, so a 2.2 beta counts as newer than 2.1.x. The check now compares versions including their beta tag, so someone on a beta is told when the final release is out.

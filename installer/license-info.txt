@@ -1,0 +1,23 @@
+Compressarr is free software
+
+Compressarr is licensed under the GNU General Public License, version 3
+(GPLv3). You do not have to accept it to install or use Compressarr - the
+license only grants you rights. In short: you may use, study, share and
+change Compressarr. If you pass on a copy, or a modified version, you must
+give the same freedoms to the next person and make the source code available
+under the same license.
+
+    Compressarr, Copyright (C) 2026 Mark Wasserman
+    This program comes with ABSOLUTELY NO WARRANTY. This is free software,
+    and you are welcome to redistribute it under the conditions of the GPLv3.
+
+Source code:    https://github.com/Compressarr/Compressarr
+Full license:   installed with the program (LICENSE), and at
+                https://www.gnu.org/licenses/gpl-3.0.html
+
+Compressarr uses other open-source components. They are listed, with their
+licenses, in THIRD-PARTY-NOTICES.txt in the install folder.
+
+Compressarr does not contain HandBrake. If you choose to download it from
+inside Compressarr, it is stored in your own Compressarr data folder and stays
+under its own license (GPLv2).

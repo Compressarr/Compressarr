@@ -172,6 +172,7 @@ public sealed class HandBrakeInstaller : IHandBrakeInstaller
 
             var destPath = Path.Combine(installDir, "HandBrakeCLI.exe");
             File.Copy(exePath, destPath, overwrite: true);
+            WriteLicenseNotice(installDir);
             progress?.Report("HandBrakeCLI installed.");
             return destPath;
         }
@@ -182,6 +183,29 @@ public sealed class HandBrakeInstaller : IHandBrakeInstaller
     }
 
     [SupportedOSPlatform("macos")]
+    /// <summary>HandBrake is GPL software that Compressarr downloads on the user's behalf; a short note beside it says
+    /// what it is, which license it is under and where its source is (the release archive carries no license file).</summary>
+    internal static void WriteLicenseNotice(string installDir)
+    {
+        try
+        {
+            File.WriteAllLines(Path.Combine(installDir, "LICENSE-NOTICE.txt"), new[]
+            {
+                "HandBrakeCLI",
+                "",
+                "This program is HandBrake, downloaded by Compressarr from the official HandBrake release page. It is free software",
+                "under the GNU General Public License, version 2. HandBrake is not part of Compressarr.",
+                "",
+                "Project and source code: https://github.com/HandBrake/HandBrake",
+                "License: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html"
+            });
+        }
+        catch (IOException)
+        {
+            // A note beside the program is a courtesy; never fail an install over it.
+        }
+    }
+
     private static async Task<string> InstallFromMacDmgAsync(string dmgPath, string installDir, IProgress<string>? progress)
     {
         progress?.Report("Mounting disk image...");

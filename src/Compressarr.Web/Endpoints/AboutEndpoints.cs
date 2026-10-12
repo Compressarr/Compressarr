@@ -17,6 +17,11 @@ public static class AboutEndpoints
             version = InstalledVersionString
         }));
 
+        // The GPL text and the third-party notices, installed next to the program (see Compressarr.Desktop.csproj),
+        // for the About page's links. Plain text; 404 when running somewhere they were not copied to.
+        app.MapGet("/api/about/license", () => ServeBundledText("LICENSE"));
+        app.MapGet("/api/about/notices", () => ServeBundledText("THIRD-PARTY-NOTICES.txt"));
+
         // The toolbar's ambient indicator (nav.js, on every page load) - purely reads
         // IUpdateCheckService's own background-checked cache (refreshed immediately on app
         // startup, then roughly daily), no network call of its own. Falls back to one inline live
@@ -36,6 +41,12 @@ public static class AboutEndpoints
         // cache as a side effect, so the toolbar indicator picks up the same fresh result too.
         app.MapGet("/api/about/check-update", async (IUpdateCheckService updateCheckService) =>
             Results.Json(ToDto(await updateCheckService.CheckNowAsync())));
+    }
+
+    private static IResult ServeBundledText(string fileName)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, fileName);
+        return File.Exists(path) ? Results.File(File.ReadAllBytes(path), "text/plain; charset=utf-8") : Results.NotFound();
     }
 
     private static string FormatVersion(Version? version) =>

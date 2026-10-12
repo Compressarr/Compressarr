@@ -658,3 +658,7 @@ as-is, with no warranty of any kind - use it at your own risk.
 Compressarr is licensed under the [GNU General Public License v3.0](LICENSE).
 
 Copyright (C) 2026 Mark Wasserman
+
+The components Compressarr is built with, and their licenses, are listed in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt);
+both files are installed with the program and linked from its About page. HandBrake is not part of Compressarr -
+if you download it from inside it, it stays under its own license.

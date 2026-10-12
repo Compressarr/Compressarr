@@ -114,4 +114,22 @@ public class HandBrakeInstallerTests
         Assert.NotNull(capturedRequest);
         Assert.NotEmpty(capturedRequest!.Headers.UserAgent);
     }
+
+    [Fact]
+    public void ADownloadedHandBrake_GetsALicenseNoteBesideIt_AndAnUnwritableFolderNeverFailsTheInstall()
+    {
+        var dir = Directory.CreateTempSubdirectory("compressarr-hb-note-").FullName;
+        try
+        {
+            HandBrakeInstaller.WriteLicenseNotice(dir);
+
+            var note = File.ReadAllText(Path.Combine(dir, "LICENSE-NOTICE.txt"));
+            Assert.Contains("GNU General Public License, version 2", note);
+            Assert.Contains("https://github.com/HandBrake/HandBrake", note);
+            Assert.Contains("not part of Compressarr", note);
+
+            HandBrakeInstaller.WriteLicenseNotice(Path.Combine(dir, "does", "not", "exist")); // a missing folder is a courtesy that failed, not an error
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
 }

@@ -41,6 +41,18 @@
     <None Include="Assets\CompressarrLogo.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+
+    <!-- The GPL text and the third-party notices travel next to the program (build output and publish
+         folder, so the installer carries them into the install folder), and the About page serves them from
+         there. One copy of each, at the repository root. -->
+    <None Include="..\..\LICENSE" Link="LICENSE">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <None Include="..\..\THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
   </ItemGroup>
 
   <!-- Windows-only toast notification source, excluded from the plain net10.0 (macOS/Linux) build

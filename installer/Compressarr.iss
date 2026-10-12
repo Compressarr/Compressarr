@@ -68,6 +68,10 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 ; compression setting changed) before landing this. Installer size grows accordingly.
 Compression=none
 WizardStyle=modern
+; Compressarr is GPLv3: that license grants rights and needs no acceptance to install or run, so this is an
+; information page (no "I accept" gate - which LicenseFile would add). The license text itself (LICENSE) and the
+; third-party notices are installed with the program; see THIRD-PARTY-NOTICES.txt.
+InfoBeforeFile=license-info.txt
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 ; Fallback only - PrepareToInstall below force-kills Compressarr.Desktop.exe directly and runs
