@@ -89,7 +89,7 @@ and an `ffmpeg-presets.json`-style profile object. No new profile format is inve
   "schema": 1,
   "catalog": {
     "name": "Compressarr Presets",
-    "maintainer": "MrWizardCT",
+    "maintainer": "Compressarr",
     "url": "https://github.com/Compressarr/Compressarr-Presets"
   },
   "updated": "2026-10-12",
@@ -104,7 +104,7 @@ and an `ffmpeg-presets.json`-style profile object. No new profile format is inve
       "description": "x265 10-bit for UHD HDR, keeping HDR10 metadata; Dolby Vision and HDR10+ passed through.",
       "changelog": "First release.",
       "published": "2026-10-12",
-      "author": "MrWizardCT",
+      "author": "Compressarr",
       "sourceUrl": null,
       "deprecated": null,
       "requires": ["libx265"]
