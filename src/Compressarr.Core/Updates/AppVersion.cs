@@ -46,6 +46,9 @@ public sealed class AppVersion : IComparable<AppVersion>
         return new AppVersion(numbers, pre);
     }
 
+    /// <summary>True for a beta or other pre-release ("2.2.0-beta.5"), false for a final release ("2.2.0").</summary>
+    public bool IsPreRelease => _pre.Length > 0;
+
     public int CompareTo(AppVersion? other)
     {
         if (other is null) return 1;

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using Compressarr.Core.Config;
 
 namespace Compressarr.Web.Tests;
 
@@ -17,34 +18,34 @@ public class UpdateChannelSettingTests
     }
 
     [Fact]
-    public async Task TheUpdateChannel_IsStableByDefault_AndTheChoiceIsKept()
+    public async Task TheUpdateChannel_StartsAtTheDefaultForThisRelease_AndTheChoiceIsKept()
     {
         await using var host = await QueueHost.StartAsync(Lane1);
         var settings = await Settings(host);
-        Assert.Equal("Stable", settings["updateChannel"]!.GetValue<string>());
-
-        settings["updateChannel"] = "Beta";
-        await Save(host, settings);
-        Assert.Equal("Beta", (await Settings(host))["updateChannel"]!.GetValue<string>());
+        Assert.Equal(UpdateCheckSettings.DefaultChannel.ToString(), settings["updateChannel"]!.GetValue<string>());
 
         settings["updateChannel"] = "Stable";
         await Save(host, settings);
         Assert.Equal("Stable", (await Settings(host))["updateChannel"]!.GetValue<string>());
+
+        settings["updateChannel"] = "Beta";
+        await Save(host, settings);
+        Assert.Equal("Beta", (await Settings(host))["updateChannel"]!.GetValue<string>());
     }
 
     [Theory]
     [InlineData("nightly")]
     [InlineData("")]
-    public async Task AnUnknownChannel_FallsBackToStable_NeverToBeta(string value)
+    public async Task AnUnknownChannel_FallsBackToTheDefault(string value)
     {
         await using var host = await QueueHost.StartAsync(Lane1);
         var settings = await Settings(host);
-        settings["updateChannel"] = "Beta";
+        settings["updateChannel"] = "Stable";
         await Save(host, settings);
 
         settings["updateChannel"] = value;
         await Save(host, settings);
 
-        Assert.Equal("Stable", (await Settings(host))["updateChannel"]!.GetValue<string>());
+        Assert.Equal(UpdateCheckSettings.DefaultChannel.ToString(), (await Settings(host))["updateChannel"]!.GetValue<string>());
     }
 }

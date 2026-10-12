@@ -291,7 +291,12 @@ public enum UpdateChannel
 
 public sealed class UpdateCheckSettings
 {
-    public UpdateChannel Channel { get; set; } = UpdateChannel.Stable;
+    /// <summary>What an install with no saved choice uses. While 2.2 is in beta this is Beta, so beta testers are offered each new beta.
+    /// <b>At the 2.2.0 final release, change this to Stable</b> - a test (UpdateChannelDefaultTests) fails once the version loses its
+    /// pre-release tag until you do, so it cannot be forgotten. An install that has saved a choice keeps it.</summary>
+    public const UpdateChannel DefaultChannel = UpdateChannel.Beta;
+
+    public UpdateChannel Channel { get; set; } = DefaultChannel;
 }
 
 public sealed class AnnouncementSettings

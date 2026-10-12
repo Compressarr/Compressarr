@@ -84,8 +84,8 @@ internal static class ConfigMapping
         config.Web.Port = dto.WebPort;
         config.Startup.RunAtLogin = dto.RunAtLogin;
         config.Announcements.Enabled = dto.AnnouncementsEnabled;
-        // An unknown or missing value (an older page) falls back to the safe default.
-        config.UpdateCheck.Channel = Enum.TryParse<UpdateChannel>(dto.UpdateChannel, ignoreCase: true, out var updateChannel) ? updateChannel : UpdateChannel.Stable;
+        // An unknown or missing value (an older page) falls back to the default for this release.
+        config.UpdateCheck.Channel = Enum.TryParse<UpdateChannel>(dto.UpdateChannel, ignoreCase: true, out var updateChannel) ? updateChannel : UpdateCheckSettings.DefaultChannel;
         config.Backup.FolderPath = dto.BackupFolderPath;
         config.Backup.IntervalDays = dto.BackupIntervalDays;
         config.Backup.RetentionDays = dto.BackupRetentionDays;
