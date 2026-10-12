@@ -256,6 +256,64 @@ public class RunOrchestratorTests : IDisposable
         MoviePreset = "Any Preset"
     };
 
+    private (CompressarrConfig Config, string Input) MakeMaintainConfig(string fileName)
+    {
+        var input = Path.Combine(_tempDir, "Maintain_Input");
+        var output = Path.Combine(_tempDir, "Maintain_Output");
+        Directory.CreateDirectory(input);
+        Directory.CreateDirectory(output);
+        File.WriteAllText(Path.Combine(input, fileName), "video");
+
+        var config = new CompressarrConfig { Processing = new ProcessingSettings { MoveFiles = false, ClearTitleMetadata = false, DeleteAfterConvert = DeleteAfterConvertMode.Maintain } };
+        config.HandBrake.CliPath = Path.Combine(_tempDir, "HandBrakeCLI.exe");
+        config.HandBrake.PresetsPath = Path.Combine(_tempDir, "presets.json");
+        config.Logging.LogFilePath = Path.Combine(_tempDir, "Logs");
+        config.Report.ReportPath = Path.Combine(_tempDir, "Reports");
+        config.Lanes.Add(MakeLane("lane", "Lane", input, output));
+        return (config, input);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_WithMaintain_ASourceThatWasConverted_IsNotConvertedAgainOnTheNextPass()
+    {
+        // Maintain leaves every source in Input. Before, the finished entry was wiped at the end of the pass and the file
+        // was found again as brand new, so the same file was converted on every single pass.
+        var (config, input) = MakeMaintainConfig("a.mkv");
+        var processRunner = new RecordingProcessRunner();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, processRunner);
+
+        var first = await orchestrator.RunOnceAsync(config);
+        var second = await orchestrator.RunOnceAsync(config);
+        var third = await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(1, first!.TotalFiles);
+        Assert.Equal(0, second?.TotalFiles ?? 0);
+        Assert.Equal(0, third?.TotalFiles ?? 0);
+        Assert.Single(processRunner.ProcessedInOrder);
+        Assert.True(File.Exists(Path.Combine(input, "a.mkv"))); // the source is still there, as asked
+        var remembered = Assert.Single(new JsonResumeStateStore().Load(resumeFilePath));
+        Assert.Equal(ResumeStatus.Completed, remembered.Status);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_WithMaintain_AFileReplacedByADifferentOne_IsConvertedAgain_AndAForgottenSourceIsForgotten()
+    {
+        var (config, input) = MakeMaintainConfig("a.mkv");
+        var processRunner = new RecordingProcessRunner();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, processRunner);
+        await orchestrator.RunOnceAsync(config);
+
+        File.WriteAllText(Path.Combine(input, "a.mkv"), "a different, longer video than before"); // replaced by another file
+        var again = await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(1, again!.TotalFiles);
+        Assert.Equal(2, processRunner.ProcessedInOrder.Count);
+
+        File.Delete(Path.Combine(input, "a.mkv")); // the user cleans the kept source up themselves
+        await orchestrator.RunOnceAsync(config);
+        Assert.False(File.Exists(resumeFilePath)); // nothing left to remember
+    }
+
     [Fact]
     public async Task RunOnceAsync_CrossLaneOrder_InterleavesAcrossLanes_NotLaneByLane()
     {

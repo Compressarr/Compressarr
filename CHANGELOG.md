@@ -9,6 +9,10 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
+## [Unreleased]
+
+- **With "Maintain" a converted file is no longer converted again on every pass.** Maintain leaves the source in the Input folder, but the finished file was forgotten at the end of the pass and then found again as new, so the same file was re-encoded over and over. Compressarr now remembers a converted file whose source was kept, by its size and date: it stays out of the queue and is not encoded again while it is unchanged. Put a different file at the same path (or edit it) and it is converted as new; delete the kept source yourself and it is forgotten.
+
 ## [2.1.9] - 2026-10-10
 
 > [!TIP]

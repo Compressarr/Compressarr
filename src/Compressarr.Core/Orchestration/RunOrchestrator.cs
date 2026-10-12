@@ -369,7 +369,10 @@ public sealed class RunOrchestrator : IRunOrchestrator
         var stillOutstanding = resumeState.Any(e => e.Status != ResumeStatus.Completed);
         if (!stillOutstanding && File.Exists(resumeFilePath))
         {
-            File.Delete(resumeFilePath);
+            // Nothing left to do. A converted file whose source was kept (Maintain) is still remembered, or it would be converted
+            // again on the next pass; everything else is forgotten as before.
+            var kept = resumeState.Where(ResumeKeeping.StillNeeded).ToList();
+            if (kept.Count == 0) File.Delete(resumeFilePath); else _resumeStore.Save(kept, resumeFilePath);
         }
 
         RetentionCleaner.CleanUp(_trash, logFilePath, new[] { ".log", ".txt" }, config.Logging.RetentionDays, "log");

@@ -357,6 +357,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             {
                 retryDestPath = _fileRouter.RouteFile(encodedFilePath, desiredFileName, retryIsTv, tvShowBasePath, movieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision);
                 entry.Status = ResumeStatus.Completed;
+ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
                 entry.EncodedFilePath = null;
                 entry.EncodedFileDesiredName = null;
                 entry.LastRetryFailureMessage = null;
@@ -394,6 +395,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
                 // Configured to skip, not an error - the file just stays put; nothing left to
                 // retry, so this is as resolved as it's going to get.
                 entry.Status = ResumeStatus.Completed;
+ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
                 entry.EncodedFilePath = null;
                 entry.EncodedFileDesiredName = null;
                 entry.LastRetryFailureMessage = null;
@@ -535,6 +537,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
                     {
                         _companionFiles.CleanUpEmptySourceFolder(sourceDirectory, inputPath, config.Processing.VidTypes, config.Processing.DeleteAfterConvert, config.Processing.UnmatchedCompanionAction);
                         entry.Status = ResumeStatus.Completed;
+ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
                         entry.PendingCompanionSourceDirectory = null;
                         entry.PendingCompanionVideoDestPath = null;
                     }
@@ -603,6 +606,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             if (!Directory.Exists(sourceDirectory))
             {
                 entry.Status = ResumeStatus.Completed;
+ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
                 entry.PendingCompanionSourceDirectory = null;
                 entry.PendingCompanionVideoDestPath = null;
                 entry.LastRetryFailureMessage = null;
@@ -635,6 +639,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
                     _companionFiles.CleanUpEmptySourceFolder(sourceDirectory, inputPath, config.Processing.VidTypes, config.Processing.DeleteAfterConvert, config.Processing.UnmatchedCompanionAction);
                     _logger.Log($"  Retried source folder cleanup for '{desiredFileName}' - succeeded.");
                     entry.Status = ResumeStatus.Completed;
+ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
                     entry.PendingCompanionSourceDirectory = null;
                     entry.PendingCompanionVideoDestPath = null;
                     entry.LastRetryFailureMessage = null;
@@ -763,6 +768,10 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
                 });
                 addedUntracked = true;
             }
+            else if (ResumeKeeping.IsConvertedAndUnchanged(existing, f))
+            {
+                // Converted already and its source was kept (Maintain): the same file still sitting there is not new work.
+            }
             else if (!laneHadPending
                 && !existing.HeldAfterFailure
                 && existing.Status is not ResumeStatus.Pending
@@ -802,7 +811,10 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         else
         {
             // A file held after an encode failure is shown with its ERROR badge but is not work to do.
-            videoFiles = scanned.Where(f => !resumeState.Any(e => e.LaneId == lane.Id && e.HeldAfterFailure && string.Equals(e.FullName, f.FullName, StringComparison.OrdinalIgnoreCase))).ToList();
+            videoFiles = scanned
+                .Where(f => !resumeState.Any(e => e.LaneId == lane.Id && e.HeldAfterFailure && string.Equals(e.FullName, f.FullName, StringComparison.OrdinalIgnoreCase)))
+                .Where(f => !ResumeKeeping.AlreadyConverted(resumeState, lane.Id, f)) // converted already, source kept (Maintain) and unchanged
+                .ToList();
             _resumeStore.Save(resumeState, resumeFilePath);
         }
 
@@ -1250,6 +1262,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             else
             {
                 resumeEntry.Status = ResumeStatus.Completed;
+ResumeKeeping.NoteKeptSource(resumeEntry, config.Processing.DeleteAfterConvert);
             }
         }
         else
