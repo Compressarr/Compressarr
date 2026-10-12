@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to Compressarr are documented in this file. Pre-release/RC builds leading up
-to v1.0.0 are omitted here - see [GitHub Releases](https://github.com/MrWizardCT/Compressarr/releases)
+to v1.0.0 are omitted here - see [GitHub Releases](https://github.com/Compressarr/Compressarr/releases)
 for that full history.
 
 > [!NOTE]
@@ -12,11 +12,11 @@ for that full history.
 ## [2.2.0-beta.6] - Unreleased
 
 > [!NOTE]
-> Changes since [2.2.0-beta.5](https://github.com/MrWizardCT/Compressarr/releases/tag/v2.2.0-beta.5)
+> Changes since [2.2.0-beta.5](https://github.com/Compressarr/Compressarr/releases/tag/v2.2.0-beta.5)
 > only - everything else is in the entries below.
 
 ### Added
-- **A preset catalog: more profiles without a new Compressarr release.** Profiles > Import > **From Catalog** (between "From installed HandBrake" and "From a presets file") reads the official catalog, https://github.com/MrWizardCT/Compressarr-Presets, which is shown on screen as "Importing from:". You tick the profiles you want and Import: nothing is added automatically and nothing is checked on a timer (the catalog is read when you open the tab, or press Check for Updates on the new **Preset catalog** card on the About page). Catalog profiles are tagged with a lock and "catalog" and are locked like the built-ins (View and Duplicate), but can be deleted - refused, naming the lane, while a lane uses one. Every download is checked against the SHA-256 the catalog lists and the same validators as any other profile before it is stored, and a stored profile that no longer matches what was installed is not offered to lanes (the Profiles page says so). Published versions never change: a profile is named `<name> vN`, a newer version is added next to the old one (marked "newer version", never an update), and a version can be marked deprecated with a reason. If a catalog name is already taken (a built-in, one of yours, another catalog profile) the row offers **Import as:** a new name (default `<name> (copy)`), and it is saved as one of your own profiles. Built-in profiles are not in the catalog. The profiles you add are included in the automatic backups and in Export/Import configuration, and a restore brings them back with no network. The Profiles page's storage panel has a **Catalog (downloaded)** box. The first catalog has four profiles: **Compressarr UHD HEVC (HDR) v1** (x265 10-bit RF 22, keeps Dolby Vision, HDR10+ and HDR10), **Compressarr HD Quality v1** (x265 10-bit RF 20), **Compressarr Compatibility (H.264) v1** (your original VeryFastDDtoAAC: x264 8-bit, MP4, AAC, 30 fps cap; SDR only) and **Compressarr AV1 (NVENC) v1** (cq 34, needs an RTX 40-series or newer).
+- **A preset catalog: more profiles without a new Compressarr release.** Profiles > Import > **From Catalog** (between "From installed HandBrake" and "From a presets file") reads the official catalog, https://github.com/Compressarr/Compressarr-Presets, which is shown on screen as "Importing from:". You tick the profiles you want and Import: nothing is added automatically and nothing is checked on a timer (the catalog is read when you open the tab, or press Check for Updates on the new **Preset catalog** card on the About page). Catalog profiles are tagged with a lock and "catalog" and are locked like the built-ins (View and Duplicate), but can be deleted - refused, naming the lane, while a lane uses one. Every download is checked against the SHA-256 the catalog lists and the same validators as any other profile before it is stored, and a stored profile that no longer matches what was installed is not offered to lanes (the Profiles page says so). Published versions never change: a profile is named `<name> vN`, a newer version is added next to the old one (marked "newer version", never an update), and a version can be marked deprecated with a reason. If a catalog name is already taken (a built-in, one of yours, another catalog profile) the row offers **Import as:** a new name (default `<name> (copy)`), and it is saved as one of your own profiles. Built-in profiles are not in the catalog. The profiles you add are included in the automatic backups and in Export/Import configuration, and a restore brings them back with no network. The Profiles page's storage panel has a **Catalog (downloaded)** box. The first catalog has four profiles: **Compressarr UHD HEVC (HDR) v1** (x265 10-bit RF 22, keeps Dolby Vision, HDR10+ and HDR10), **Compressarr HD Quality v1** (x265 10-bit RF 20), **Compressarr Compatibility (H.264) v1** (your original VeryFastDDtoAAC: x264 8-bit, MP4, AAC, 30 fps cap; SDR only) and **Compressarr AV1 (NVENC) v1** (cq 34, needs an RTX 40-series or newer).
 - **AV1 on an NVIDIA GPU is checked on its own.** The Encoder page's capability check opened a one-frame GPU session for H.265 only, so an ffmpeg profile using `av1_nvenc` could look fine on a GPU that can't encode AV1 (it needs an RTX 40-series or newer) and then fail mid-run. `av1_nvenc` now has its own test and its own chip on the Encoder page (ticked only when a session really opens), and an AV1 NVENC profile on a GPU without AV1 is flagged on Profiles and Lanes with the real reason.
 - **HandBrake lanes no longer re-encode an HDR file with a profile that would lose the HDR.** Before an encode, a lane running a HandBrake profile whose video encoder can't be relied on for HDR reads the file (with ffprobe). An H.264 profile can only produce SDR, so an HDR10, HLG, Dolby Vision or HDR10+ file would come out with washed-out colours; a hardware encoder (NVEnc, QSV, AMF) can't keep Dolby Vision or HDR10+. Such a file is left alone and reported as ERROR 114 (it stays in the queue with its ERROR badge, like other refusals) instead of being re-encoded and replacing the original. HandBrake profiles that keep everything (x265 and SVT-AV1 with Dolby Vision / HDR10+ passthrough on) are never probed, so they pay nothing, and a profile that has switched dynamic-metadata passthrough off has already said it doesn't want it. A lane that really wants it can tick **Allow HDR files to lose their HDR** (under Advanced on the Lanes page); that never covers a Dolby Vision profile 5 file, which would show wrong colours. If ffprobe isn't installed the check is skipped with one note in the log (install ffmpeg on the Encoder page to turn it on). It also applies to a file an ffmpeg lane hands to a HandBrake fallback profile.
 - **An ffmpeg profile can now encode Dolby Vision / HDR10+ files anyway.** The profile editor's Dolby Vision & HDR10+ section is a three-way choice: refuse the file (the default), encode it with a HandBrake profile, or **encode it anyway without Dolby Vision / HDR10+**. The last drops the dynamic metadata, so the output is plain HDR10 (the file's HDR10 base layer) and the original is replaced by that lesser copy; choosing it asks for confirmation, the log says what was dropped, and the report tag reads "ffmpeg (Dolby Vision dropped)" or "ffmpeg (HDR10+ dropped)". A Dolby Vision profile 5 file has no HDR10 base layer and would show wrong colours without the Dolby Vision data, so it is still refused (ERROR 112, with that reason). A named HandBrake profile always wins over "encode anyway", and a broken one is never quietly replaced by it. Preview decisions says which of the three will happen to the file you preview.
@@ -44,8 +44,9 @@ for that full history.
 - **Importing or restoring the wrong or a damaged file is refused in plain words.** A truncated export, an empty file, text, or a damaged backup zip now says the file looks damaged or cut short (no more temp-file paths or "Central Directory corrupt"), and nothing is changed. A valid JSON file that has none of Compressarr's settings - an empty `{}`, or another program's file such as HandBrake's presets.json - used to import "successfully" and reset every lane and setting to defaults; it is now refused.
 - **With "Maintain" a converted file is no longer converted again on every pass.** Maintain leaves the source in the Input folder, but the finished file was forgotten at the end of the pass and then found again as new, so the same file was re-encoded over and over. Compressarr now remembers a converted file whose source was kept, by its size and date: it stays out of the queue and is not encoded again while it is unchanged. Put a different file at the same path (or edit it) and it is converted as new; delete the kept source yourself and it is forgotten.
 - **The "Where profiles are stored" cards on the Profiles page sit in two rows of two** (one column on a narrow screen), instead of three and one.
-- **Announcements.** A bell in the top bar lights up when the Compressarr project has posted news (releases, betas, catalog releases) in the last 30 days that you have not seen; click it to read them. The messages come from a public GitHub repo (MrWizardCT/Compressarr-Announcements), are fetched once at start-up and then about daily, and are plain text with at most a link to the Compressarr GitHub page or compressarr.tv. Nothing about you or your computer is sent. It is on by default and can be turned off in Settings > Announcements, which stops the requests completely. A new install does not show news from before it was installed.
+- **Announcements.** A bell in the top bar lights up when the Compressarr project has posted news (releases, betas, catalog releases) in the last 30 days that you have not seen; click it to read them. The messages come from a public GitHub repo (Compressarr/Compressarr-Announcements), are fetched once at start-up and then about daily, and are plain text with at most a link to the Compressarr GitHub page or compressarr.tv. Nothing about you or your computer is sent. It is on by default and can be turned off in Settings > Announcements, which stops the requests completely. A new install does not show news from before it was installed.
 - **Update channel: Stable, or Stable and beta.** A new Settings > Updates choice sets which releases the update check offers. Stable is real releases only, as before. **During the 2.2 betas the default is Stable and beta**, so testers are offered each new beta (2.2.0 final will go back to Stable by default; a choice you have saved is kept). Stable and beta offers the highest version of any release, so a 2.2 beta counts as newer than 2.1.x and a final 2.2.0 counts as newer than its betas. This also fixes the check for beta users: it compared plain numbers, so someone on 2.2.0-beta.5 was never told that 2.2.0 itself was out.
+- **Compressarr has a new home on GitHub: github.com/Compressarr/Compressarr** (the organization), with the preset catalog and the announcements in Compressarr-Presets and Compressarr-Announcements next to it. Update checks, the catalog, announcements and every link in the app use the new address. The old github.com/MrWizardCT/... addresses keep redirecting, so earlier versions keep working.
 - **Your own profiles are tagged "user" on the Profiles page**, the way the shipped ones are tagged "built-in", so the two are easy to tell apart.
 - **The destructive Maintenance buttons on Settings are under Advanced.** Clear Logs, Clear History, Purge Logs & Reports,
   Clear All, Reset Lanes and Clear Configuration are hidden until Advanced is on. Reset Resume File and Clean Up Now stay
@@ -54,7 +55,7 @@ for that full history.
 ## [2.2.0-beta.5] - 2026-10-10
 
 > [!NOTE]
-> Changes since [2.2.0-beta.4](https://github.com/MrWizardCT/Compressarr/releases/tag/v2.2.0-beta.4)
+> Changes since [2.2.0-beta.4](https://github.com/Compressarr/Compressarr/releases/tag/v2.2.0-beta.4)
 > only - everything else is in the entries below.
 
 ### Changed
@@ -81,7 +82,7 @@ for that full history.
 ## [2.2.0-beta.4] - 2026-10-08
 
 > [!NOTE]
-> Changes since [2.2.0-beta.3](https://github.com/MrWizardCT/Compressarr/releases/tag/v2.2.0-beta.3)
+> Changes since [2.2.0-beta.3](https://github.com/Compressarr/Compressarr/releases/tag/v2.2.0-beta.3)
 > only - everything else is in the entries below.
 
 ### Added
@@ -112,7 +113,7 @@ for that full history.
 ## [2.2.0-beta.3] - 2026-10-07
 
 > [!NOTE]
-> Changes since [2.2.0-beta.2](https://github.com/MrWizardCT/Compressarr/releases/tag/v2.2.0-beta.2)
+> Changes since [2.2.0-beta.2](https://github.com/Compressarr/Compressarr/releases/tag/v2.2.0-beta.2)
 > only - everything else is in the entries below.
 
 ### Fixed
@@ -128,7 +129,7 @@ for that full history.
 ## [2.2.0-beta.2] - 2026-10-06
 
 > [!WARNING]
-> **Pre-release (beta).** The stable release is still [2.1.8](https://github.com/MrWizardCT/Compressarr/releases/tag/v2.1.8).
+> **Pre-release (beta).** The stable release is still [2.1.8](https://github.com/Compressarr/Compressarr/releases/tag/v2.1.8).
 > This build changes where encoding profiles live and adds an optional second encoder - a
 > [test plan](docs/test-plan-2.2.html) is included.
 
@@ -408,7 +409,7 @@ for that full history.
 
 > [!WARNING]
 > **Pre-release (beta).** Please try it on a real install and tell us what you find - the stable
-> release is still [2.1.8](https://github.com/MrWizardCT/Compressarr/releases/tag/v2.1.8).
+> release is still [2.1.8](https://github.com/Compressarr/Compressarr/releases/tag/v2.1.8).
 
 > [!TIP]
 > **What's new in 2.2.0-beta.1:** an optional **day/night Scheduler** (encode priority by time of
@@ -1505,7 +1506,7 @@ for that full history.
 - True cross-lane queue priority: dragging a file in the Monitor page's queue can now move it
   ahead of files in a *different* Lane, not just within its own Lane - the order shown is exactly
   the order files will be processed in, regardless of which Lane each one belongs to.
-- A [detailed GitHub Wiki](https://github.com/MrWizardCT/Compressarr/wiki) with a full walkthrough
+- A [detailed GitHub Wiki](https://github.com/Compressarr/Compressarr/wiki) with a full walkthrough
   of every page, written for people new to Compressarr.
 
 ### Changed
@@ -1634,7 +1635,7 @@ for that full history.
 - True cross-lane queue priority: dragging a file in the Monitor page's queue can now move it
   ahead of files in a *different* Lane, not just within its own Lane - the order shown is exactly
   the order files will be processed in, regardless of which Lane each one belongs to.
-- A [detailed GitHub Wiki](https://github.com/MrWizardCT/Compressarr/wiki) with a full walkthrough
+- A [detailed GitHub Wiki](https://github.com/Compressarr/Compressarr/wiki) with a full walkthrough
   of every page, written for people new to Compressarr.
 
 ### Changed
@@ -1754,7 +1755,7 @@ for that full history.
 - True cross-lane queue priority: dragging a file in the Monitor page's queue can now move it
   ahead of files in a *different* Lane, not just within its own Lane - the order shown is exactly
   the order files will be processed in, regardless of which Lane each one belongs to.
-- A [detailed GitHub Wiki](https://github.com/MrWizardCT/Compressarr/wiki) with a full walkthrough
+- A [detailed GitHub Wiki](https://github.com/Compressarr/Compressarr/wiki) with a full walkthrough
   of every page, written for people new to Compressarr.
 
 ### Changed
@@ -1858,7 +1859,7 @@ for that full history.
 - True cross-lane queue priority: dragging a file in the Monitor page's queue can now move it
   ahead of files in a *different* Lane, not just within its own Lane - the order shown is exactly
   the order files will be processed in, regardless of which Lane each one belongs to.
-- A [detailed GitHub Wiki](https://github.com/MrWizardCT/Compressarr/wiki) with a full walkthrough
+- A [detailed GitHub Wiki](https://github.com/Compressarr/Compressarr/wiki) with a full walkthrough
   of every page, written for people new to Compressarr.
 
 ### Changed
@@ -2013,7 +2014,7 @@ monitoring, and history live in the browser.
 - Self-contained HTML run reports and a rolling history view
 - Optional "Start with Windows"
 
-v1.1 (PowerShell) is preserved on the [`1.x`](https://github.com/MrWizardCT/Compressarr/tree/1.x) branch.
+v1.1 (PowerShell) is preserved on the [`1.x`](https://github.com/Compressarr/Compressarr/tree/1.x) branch.
 
 ## [1.1.0] - 2026-08-29
 

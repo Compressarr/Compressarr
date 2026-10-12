@@ -52,7 +52,7 @@ public class UpdateCheckServiceTests
     }
 
     private static string ReleaseJson(string tag) => $$"""
-        { "tag_name": "{{tag}}", "html_url": "https://github.com/MrWizardCT/Compressarr/releases/tag/{{tag}}" }
+        { "tag_name": "{{tag}}", "html_url": "https://github.com/Compressarr/Compressarr/releases/tag/{{tag}}" }
         """;
 
     // The installed version at test time is whatever this test assembly's own <Version> is
@@ -76,7 +76,7 @@ public class UpdateCheckServiceTests
         Assert.True(result.CheckedOk);
         Assert.True(result.HasUpdate);
         Assert.Equal(FutureTag, result.LatestVersion);
-        Assert.Equal($"https://github.com/MrWizardCT/Compressarr/releases/tag/{FutureTag}", result.ReleaseUrl);
+        Assert.Equal($"https://github.com/Compressarr/Compressarr/releases/tag/{FutureTag}", result.ReleaseUrl);
     }
 
     [Fact]
@@ -190,7 +190,7 @@ public class UpdateCheckServiceTests
     // ---- the update channel (Settings > Updates) ----
 
     private static string Release(string tag, bool prerelease = false, bool draft = false) =>
-        $$"""{ "tag_name": "{{tag}}", "html_url": "https://github.com/MrWizardCT/Compressarr/releases/tag/{{tag}}", "prerelease": {{(prerelease ? "true" : "false")}}, "draft": {{(draft ? "true" : "false")}} }""";
+        $$"""{ "tag_name": "{{tag}}", "html_url": "https://github.com/Compressarr/Compressarr/releases/tag/{{tag}}", "prerelease": {{(prerelease ? "true" : "false")}}, "draft": {{(draft ? "true" : "false")}} }""";
 
     private static UpdateCheckService Channelled(HttpMessageHandler handler, UpdateChannel channel, string installed) =>
         new(new FakeHttpClientFactory(handler), TimeProvider.System, TimeSpan.FromHours(24), new ChannelConfigStore(channel), () => AppVersion.Parse(installed));
@@ -211,8 +211,8 @@ public class UpdateCheckServiceTests
         var stable = await Channelled(handler, UpdateChannel.Stable, "2.1.9").CheckNowAsync();
         var beta = await Channelled(handler, UpdateChannel.Beta, "2.1.9").CheckNowAsync();
 
-        Assert.Equal("/repos/MrWizardCT/Compressarr/releases/latest", urls[0]);
-        Assert.Equal("/repos/MrWizardCT/Compressarr/releases?per_page=100", urls[1]);
+        Assert.Equal("/repos/Compressarr/Compressarr/releases/latest", urls[0]);
+        Assert.Equal("/repos/Compressarr/Compressarr/releases?per_page=100", urls[1]);
         Assert.Equal(("Stable", "Beta"), (stable.Channel, beta.Channel));
     }
 

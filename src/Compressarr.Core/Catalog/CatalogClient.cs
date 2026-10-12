@@ -31,13 +31,13 @@ public sealed class CatalogClient : ICatalogClient
 {
     /// <summary>The one catalog Compressarr ships with. Fixed in the app: there is no field to change it, so a profile can only come from
     /// somewhere the user can see in the dialog ("Importing from:").</summary>
-    public static readonly CatalogSource Official = new("official", "Compressarr Presets", "https://github.com/MrWizardCT/Compressarr-Presets", CatalogSourceKind.Official);
+    public static readonly CatalogSource Official = new("official", "Compressarr Presets", "https://github.com/Compressarr/Compressarr-Presets", CatalogSourceKind.Official);
 
     /// <summary>For development and tests only: a folder (or an http(s) base address) holding catalog.json and the profile files, used instead of
     /// the official catalog. Environment variable COMPRESSARR_CATALOG_SOURCE.</summary>
     public const string OverrideVariable = "COMPRESSARR_CATALOG_SOURCE";
 
-    private const string Owner = "MrWizardCT";
+    private const string Owner = "Compressarr";
     private const string Repository = "Compressarr-Presets";
     private const long MaxCatalogBytes = 2 * 1024 * 1024;
     private const long MaxProfileBytes = 1024 * 1024;

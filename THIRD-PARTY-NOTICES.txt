@@ -4,7 +4,7 @@ Compressarr - third-party notices
 Compressarr is licensed under the GNU General Public License, version 3 (see the
 LICENSE file in this folder). It is built with, and ships, the open-source
 components listed below. Their copyright notices and license terms follow.
-Source for Compressarr itself: https://github.com/MrWizardCT/Compressarr
+Source for Compressarr itself: https://github.com/Compressarr/Compressarr
 
 HandBrake and ffmpeg are NOT part of Compressarr and are not included in it. If you
 choose to download them from inside Compressarr, they are fetched from their

@@ -1,12 +1,12 @@
 # Design: the Compressarr Presets catalog
 
-Status: built in beta.6 (the first catalog, four profiles, is published at https://github.com/MrWizardCT/Compressarr-Presets) (decisions from the first review are folded in; see section 12). Nothing here is built.
+Status: built in beta.6 (the first catalog, four profiles, is published at https://github.com/Compressarr/Compressarr-Presets) (decisions from the first review are folded in; see section 12). Nothing here is built.
 Target: 2.2 beta.6 (decided 2026-10-10). The AV1 NVENC GPU check, a prerequisite, is done (beta.6). The public repo and profile files can be created any time before beta.6 ships.
 
 ## 1. Goal
 
 Let users add new encoding profiles without waiting for a Compressarr release, from a separate GitHub repo
-(`MrWizardCT/Compressarr-Presets`), while never changing a profile a user already has. Build the import so that the
+(`Compressarr/Compressarr-Presets`), while never changing a profile a user already has. Build the import so that the
 source it reads from is a visible, replaceable thing, so importing from someone else's repo (and later publishing back)
 is an extension, not a rewrite.
 
@@ -90,7 +90,7 @@ and an `ffmpeg-presets.json`-style profile object. No new profile format is inve
   "catalog": {
     "name": "Compressarr Presets",
     "maintainer": "MrWizardCT",
-    "url": "https://github.com/MrWizardCT/Compressarr-Presets"
+    "url": "https://github.com/Compressarr/Compressarr-Presets"
   },
   "updated": "2026-10-12",
   "profiles": [
@@ -145,7 +145,7 @@ middle:
 
 `From installed HandBrake` | **`From Catalog`** | `From a presets file`
 
-- The tab shows **`Importing from: Compressarr Presets - https://github.com/MrWizardCT/Compressarr-Presets`** at the top, built from
+- The tab shows **`Importing from: Compressarr Presets - https://github.com/Compressarr/Compressarr-Presets`** at the top, built from
   the source's `catalog` block and URL (see section 8). It is always shown, so it is always clear where profiles come from.
 - A **Load catalog** step (or automatic on opening the tab) fetches `catalog.json`. Offline or unreachable: a clear message;
   nothing else changes.

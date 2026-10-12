@@ -11,7 +11,7 @@ under the same license.
     This program comes with ABSOLUTELY NO WARRANTY. This is free software,
     and you are welcome to redistribute it under the conditions of the GPLv3.
 
-Source code:    https://github.com/MrWizardCT/Compressarr
+Source code:    https://github.com/Compressarr/Compressarr
 Full license:   installed with the program (LICENSE), and at
                 https://www.gnu.org/licenses/gpl-3.0.html
 

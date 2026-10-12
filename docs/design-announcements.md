@@ -1,7 +1,7 @@
 # Design: announcements
 
 Status: built for 2.2 (2026-10-11), with a port to 2.1.10. Decisions were confirmed on 2026-10-11 (section 11). The repo is
-https://github.com/MrWizardCT/Compressarr-Announcements (empty at first).
+https://github.com/Compressarr/Compressarr-Announcements (empty at first).
 Target: 2.2 and 2.1.10. It does not touch the encoding engine.
 
 ## 1. Goal
@@ -35,7 +35,7 @@ Three places were considered:
 
 | Option | For | Against |
 |---|---|---|
-| **A. A small dedicated public repo** (for example `MrWizardCT/Compressarr-Announcements`) holding one `announcements.json` | One file to edit; no code in the repo to confuse it with; any commit publishes; raw files have no API rate limit; history shows what was said when | One more repo |
+| **A. A small dedicated public repo** (for example `Compressarr/Compressarr-Announcements`) holding one `announcements.json` | One file to edit; no code in the repo to confuse it with; any commit publishes; raw files have no API rate limit; history shows what was said when | One more repo |
 | B. A file in the main `Compressarr` repo | No new repo | Mixes messages with source; a commit to the code repo is a publish; the file shows up in every clone |
 | C. GitHub Discussions or Issues through the API | Rich text, comments | Unauthenticated API limit of 60 requests an hour per IP (a shared network could hit it); the format is not ours; harder to validate |
 
@@ -58,7 +58,7 @@ costs almost nothing.
       "kind": "beta",
       "title": "Compressarr 2.2.0-beta.6 is out",
       "text": "Adds the preset catalog, ffmpeg download channel and HDR guards. Beta builds are optional.",
-      "link": "https://github.com/MrWizardCT/Compressarr/releases/tag/v2.2.0-beta.6",
+      "link": "https://github.com/Compressarr/Compressarr/releases/tag/v2.2.0-beta.6",
       "important": false,
       "minAppVersion": null,
       "maxAppVersion": "2.2.0-beta.5",
@@ -176,7 +176,7 @@ fresh install with old messages in the file.
 2. **Marking read:** opening the panel marks everything read.
 3. **Timing:** both lines - the 2.2 betas and 2.1.10.
 4. **Reaching 2.1 users:** yes, it ships in 2.1.10 so they can be told about 2.2.
-5. **Allowed link hosts:** the Compressarr GitHub page (`github.com/MrWizardCT/...`) and `compressarr.tv` (and its subdomains), https only.
+5. **Allowed link hosts:** the Compressarr GitHub page (`github.com/Compressarr/...`; `github.com/MrWizardCT/...` is also accepted since the project moved to the Compressarr organization) and `compressarr.tv` (and its subdomains), https only.
 6. **Default:** on.
 7. **`important`:** only affects the order in the list.
 

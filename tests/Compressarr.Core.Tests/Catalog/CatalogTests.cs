@@ -460,9 +460,9 @@ public class CatalogClientTests : IDisposable
         Assert.Equal("Compressarr Presets", listing.Source.Name);
         Assert.Equal(CatalogSourceKind.Official, listing.Source.Kind);
         Assert.Equal("profile bytes", Encoding.UTF8.GetString(bytes));
-        Assert.Contains("https://api.github.com/repos/MrWizardCT/Compressarr-Presets/releases/latest", handler.Urls);
-        Assert.Contains("https://raw.githubusercontent.com/MrWizardCT/Compressarr-Presets/catalog-2026.10.11/catalog.json", handler.Urls);
-        Assert.Contains("https://raw.githubusercontent.com/MrWizardCT/Compressarr-Presets/catalog-2026.10.11/profiles/handbrake/f-v1.json", handler.Urls);
+        Assert.Contains("https://api.github.com/repos/Compressarr/Compressarr-Presets/releases/latest", handler.Urls);
+        Assert.Contains("https://raw.githubusercontent.com/Compressarr/Compressarr-Presets/catalog-2026.10.11/catalog.json", handler.Urls);
+        Assert.Contains("https://raw.githubusercontent.com/Compressarr/Compressarr-Presets/catalog-2026.10.11/profiles/handbrake/f-v1.json", handler.Urls);
     }
 
     [Fact]

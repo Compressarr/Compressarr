@@ -4,7 +4,7 @@
 
 <sub><i>Because size matters.</i></sub>
 
-**[compressarr.tv](https://compressarr.tv)** · **[Wiki (full setup guide)](https://github.com/MrWizardCT/Compressarr/wiki)**
+**[compressarr.tv](https://compressarr.tv)** · **[Wiki (full setup guide)](https://github.com/Compressarr/Compressarr/wiki)**
 
 <br clear="left">
 
@@ -12,7 +12,7 @@
 > **This is the 2.2 beta (2.2.0-beta.1).** It adds an optional **day/night Scheduler**, **lane
 > assignment** ("land this file in a different lane's library"), and keeps a file's place in the
 > queue when FileBot renames it - see [What's new in 2.2](#whats-new-in-22-beta) below. It is a
-> pre-release: the stable release is [v2.1.8](https://github.com/MrWizardCT/Compressarr/releases/tag/v2.1.8).
+> pre-release: the stable release is [v2.1.8](https://github.com/Compressarr/Compressarr/releases/tag/v2.1.8).
 > Your settings and queue carry over in both directions (everything new is optional and additive).
 
 A complete, end-to-end batch video conversion workflow - from the moment a file lands in a
@@ -189,7 +189,7 @@ right on the row so you can verify it without waiting for the schedule.
 
 ## Installation
 
-1. Pick which installer you want from the [Releases](https://github.com/MrWizardCT/Compressarr/releases)
+1. Pick which installer you want from the [Releases](https://github.com/Compressarr/Compressarr/releases)
    page - both install and behave identically, the only difference is whether the .NET runtime
    comes bundled:
    - **`Compressarr-Setup-x.x.x.exe`** (smaller download) - requires the **.NET 10 ASP.NET Core
@@ -223,7 +223,7 @@ right on the row so you can verify it without waiting for the schedule.
    > SmartScreen shows "Windows protected your PC," click **More info**, then **Run anyway**.
    > Every release is also scanned with [VirusTotal](https://www.virustotal.com/) as part of
    > publishing it - the scan link is at the bottom of that release's notes on the
-   > [Releases](https://github.com/MrWizardCT/Compressarr/releases) page, if you'd like to check
+   > [Releases](https://github.com/Compressarr/Compressarr/releases) page, if you'd like to check
    > it independently.
 4. Launch Compressarr from the Start Menu - it runs as a tray icon only, with no window of its
    own. Right-click the tray icon for **Open Web UI**, or just browse to

@@ -15,7 +15,7 @@ public class AnnouncementEndpointTests
     /// <summary>Puts a fetched file in this host's announcement store, as the background service would after a successful check.</summary>
     private static void Seed(QueueHost host, params (string Id, int DaysAgo)[] items)
     {
-        var entries = string.Join(",", items.Select(i => $$"""{ "id": "{{i.Id}}", "date": "{{DaysAgo(i.DaysAgo)}}", "title": "Title {{i.Id}}", "kind": "beta", "link": "https://github.com/MrWizardCT/Compressarr/releases" }"""));
+        var entries = string.Join(",", items.Select(i => $$"""{ "id": "{{i.Id}}", "date": "{{DaysAgo(i.DaysAgo)}}", "title": "Title {{i.Id}}", "kind": "beta", "link": "https://github.com/Compressarr/Compressarr/releases" }"""));
         host.Services.GetRequiredService<IAnnouncementStateStore>().Update(s =>
         {
             s.CachedJson = $$"""{ "schema": 1, "announcements": [ {{entries}} ] }""";
@@ -42,7 +42,7 @@ public class AnnouncementEndpointTests
         Assert.True(view["enabled"]!.GetValue<bool>());
         Assert.Equal(new[] { "newer", "older" }, view["items"]!.AsArray().Select(i => i!["id"]!.GetValue<string>()).ToArray());
         Assert.Equal(2, view["unread"]!.GetValue<int>());
-        Assert.Equal("https://github.com/MrWizardCT/Compressarr/releases", view["items"]![0]!["link"]!.GetValue<string>());
+        Assert.Equal("https://github.com/Compressarr/Compressarr/releases", view["items"]![0]!["link"]!.GetValue<string>());
     }
 
     [Fact]

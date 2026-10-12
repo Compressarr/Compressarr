@@ -39,7 +39,7 @@ public sealed class UpdateCheckService : IUpdateCheckService, IDisposable
 {
     // Same repo AboutEndpoints already pointed at - see its own comment for why this is a plain
     // constant rather than derived from anything.
-    private const string RepoOwner = "MrWizardCT";
+    private const string RepoOwner = "Compressarr";
     private const string RepoName = "Compressarr";
 
     private readonly IHttpClientFactory _httpClientFactory;

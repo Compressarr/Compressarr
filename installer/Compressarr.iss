@@ -43,7 +43,7 @@
 #define MyAppName "Compressarr"
 #define MyAppVersion "2.2.0-beta.5"
 #define MyAppPublisher "Mark Wasserman"
-#define MyAppURL "https://github.com/MrWizardCT/Compressarr"
+#define MyAppURL "https://github.com/Compressarr/Compressarr"
 #define MyAppExeName "Compressarr.Desktop.exe"
 
 [Setup]
