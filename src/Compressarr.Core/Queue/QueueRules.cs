@@ -339,6 +339,10 @@ public static class QueueRules
                 });
                 addedUntracked = true;
             }
+            else if (ResumeKeeping.IsConvertedAndUnchanged(existing, f))
+            {
+                // Converted already and its source was kept (Maintain): the same file still sitting there is not new work.
+            }
             else if (!laneHadPending
                 && !existing.HeldAfterFailure
                 && existing.Status is not ResumeStatus.Pending

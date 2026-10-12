@@ -1,3 +1,4 @@
+using Compressarr.Core.Config;
 using System.Text.Json;
 
 namespace Compressarr.Core.Conversion;
@@ -34,6 +35,36 @@ public enum ResumeStatus
     /// Completed and nothing ever came back to finish the deferred cleanup, potentially leaving an
     /// empty source folder behind forever.</summary>
     CleanupPending
+}
+
+/// <summary>The rules for a source that was converted and deliberately left where it was (Settings > Processing > Maintain).</summary>
+public static class ResumeKeeping
+{
+    private static readonly TimeSpan TimeTolerance = TimeSpan.FromSeconds(2); // file systems round last-write times differently
+
+    /// <summary>Notes the source's size and time on a Completed entry when the mode keeps the source. Does nothing otherwise.</summary>
+    public static void NoteKeptSource(ResumeEntry entry, DeleteAfterConvertMode mode)
+    {
+        if (mode != DeleteAfterConvertMode.Maintain || !File.Exists(entry.FullName)) return;
+        var info = new FileInfo(entry.FullName);
+        entry.KeptSourceSize = info.Length;
+        entry.KeptSourceModifiedUtc = info.LastWriteTimeUtc;
+    }
+
+    /// <summary>True when this Completed entry is the very file now found at its path: converted already, left in place, unchanged.</summary>
+    public static bool IsConvertedAndUnchanged(ResumeEntry entry, FileInfo found) =>
+        entry.Status == ResumeStatus.Completed
+        && entry.KeptSourceSize == found.Length
+        && entry.KeptSourceModifiedUtc is { } kept
+        && (found.LastWriteTimeUtc - kept).Duration() <= TimeTolerance;
+
+    /// <summary>A Completed entry still worth remembering: its kept source is still there, so forgetting it would convert that file again.</summary>
+    public static bool StillNeeded(ResumeEntry entry) =>
+        entry.Status == ResumeStatus.Completed && entry.KeptSourceSize.HasValue && File.Exists(entry.FullName);
+
+    /// <summary>Whether this file, found in a scan, was already converted with its source kept (so it is not work to do).</summary>
+    public static bool AlreadyConverted(IEnumerable<ResumeEntry> state, string laneId, FileInfo found) =>
+        state.Any(e => e.LaneId == laneId && string.Equals(e.FullName, found.FullName, StringComparison.OrdinalIgnoreCase) && IsConvertedAndUnchanged(e, found));
 }
 
 public sealed class ResumeEntry
@@ -119,6 +150,15 @@ public sealed class ResumeEntry
     /// a new error report on every poll - the user investigates first, then uses Remove on the row to
     /// queue it afresh. Other Error entries (an abort, a missing preset) are still retried by rescans.</summary>
     public bool HeldAfterFailure { get; set; }
+
+    /// <summary>Set when this entry finished (Completed) and its source was deliberately left in the Input folder
+    /// (Settings > Processing > "Maintain"): the size the source had. A rescan that finds the same file, unchanged,
+    /// leaves the entry alone instead of queueing it again - otherwise a kept source is converted again on every
+    /// pass, forever. A different file at the same path (another size or time) is a new arrival, as before.</summary>
+    public long? KeptSourceSize { get; set; }
+
+    /// <summary>The last-write time the kept source had. See <see cref="KeptSourceSize"/>.</summary>
+    public DateTime? KeptSourceModifiedUtc { get; set; }
 
     /// <summary>Set when this entry was created purely as bookkeeping for a queue-control action
     /// (reorder/skip/preset-override/remove) on a file the current pass hadn't tracked yet, rather
@@ -219,10 +259,11 @@ public sealed class JsonResumeStateStore : IResumeStateStore
     public void DeleteIfComplete(List<ResumeEntry> state, string path)
     {
         var hasOutstanding = state.Any(e => e.Status is ResumeStatus.Pending or ResumeStatus.Error or ResumeStatus.MoveFailed or ResumeStatus.CompanionMoveFailed or ResumeStatus.CleanupPending);
-        if (!hasOutstanding && File.Exists(path))
-        {
-            File.Delete(path);
-        }
+        if (hasOutstanding || !File.Exists(path)) return;
+
+        // Nothing left to do - but a converted file whose source was kept must stay remembered, or it is converted again.
+        var kept = state.Where(ResumeKeeping.StillNeeded).ToList();
+        if (kept.Count == 0) File.Delete(path); else Save(kept, path);
     }
 
     public T Update<T>(string path, Func<List<ResumeEntry>, T> mutate)

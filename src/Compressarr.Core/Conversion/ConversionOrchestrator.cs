@@ -319,7 +319,10 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         else
         {
             // A file held after an encode failure is shown with its ERROR badge but is not work to do.
-            videoFiles = scanned.Where(f => !resumeState.Any(e => e.LaneId == lane.Id && e.HeldAfterFailure && string.Equals(e.FullName, f.FullName, StringComparison.OrdinalIgnoreCase))).ToList();
+            videoFiles = scanned
+                .Where(f => !resumeState.Any(e => e.LaneId == lane.Id && e.HeldAfterFailure && string.Equals(e.FullName, f.FullName, StringComparison.OrdinalIgnoreCase)))
+                .Where(f => !ResumeKeeping.AlreadyConverted(resumeState, lane.Id, f)) // converted already, source kept (Maintain) and unchanged
+                .ToList();
             _resumeStore.Save(resumeState, resumeFilePath);
         }
 
