@@ -83,9 +83,9 @@ public static class BackupEndpoints
                 {
                     imported = configStore.Load(tempPath);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    // ex.Message names the throwaway temp file the upload was parsed from, which means nothing to the person importing.
+                    // The exception message names the throwaway temp file the upload was parsed from, which means nothing to the person importing.
                     return Results.BadRequest(new { message = "That file isn't a valid Compressarr export - it looks damaged or cut short. Nothing was changed." });
                 }
 
