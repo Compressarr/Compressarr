@@ -85,7 +85,16 @@ public static class BackupEndpoints
                 }
                 catch (Exception ex)
                 {
-                    return Results.BadRequest(new { message = $"That file isn't a valid Compressarr config: {ex.Message}" });
+                    // ex.Message names the throwaway temp file the upload was parsed from, which means nothing to the person importing.
+                    return Results.BadRequest(new { message = "That file isn't a valid Compressarr export - it looks damaged or cut short. Nothing was changed." });
+                }
+
+                // Valid JSON is not enough: an empty object or another program's file would load as all defaults and wipe the lanes.
+                JsonNode? parsedRoot = null;
+                try { parsedRoot = JsonNode.Parse(raw); } catch (JsonException) { }
+                if (!ConfigFileShape.LooksLikeAConfig(parsedRoot))
+                {
+                    return Results.BadRequest(new { message = "That file doesn't look like a Compressarr export (none of Compressarr's settings are in it), so nothing was changed." });
                 }
 
                 configStore.Save(imported, AppPaths.GetConfigFilePath());

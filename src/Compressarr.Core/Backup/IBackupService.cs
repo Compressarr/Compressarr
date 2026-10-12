@@ -155,7 +155,8 @@ public sealed class BackupService : IBackupService
             Directory.CreateDirectory(tempDir);
             try
             {
-                ZipFile.ExtractToDirectory(zipPath, tempDir, overwriteFiles: true);
+                try { ZipFile.ExtractToDirectory(zipPath, tempDir, overwriteFiles: true); }
+                catch (InvalidDataException) { return new BackupResult(false, null, "That backup file is damaged or incomplete, so nothing was restored."); }
 
                 // Settings/lanes go through the same validate + merge-over-defaults path
                 // /api/settings/import already uses (load the extracted file through IConfigStore,
@@ -165,7 +166,15 @@ public sealed class BackupService : IBackupService
                 var extractedSettings = Path.Combine(tempDir, "compressarr.settings.json");
                 if (File.Exists(extractedSettings))
                 {
-                    restoredConfig = _configStore.Load(extractedSettings);
+                    try
+                    {
+                        if (!ConfigFileShape.LooksLikeAConfig(System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(extractedSettings)))) throw new InvalidDataException("no settings");
+                        restoredConfig = _configStore.Load(extractedSettings);
+                    }
+                    catch (Exception e) when (e is InvalidDataException or System.Text.Json.JsonException or InvalidOperationException)
+                    {
+                        return new BackupResult(false, null, "The settings inside that backup are damaged or empty, so nothing was restored.");
+                    }
                     _configStore.Save(restoredConfig, AppPaths.GetConfigFilePath());
                 }
 
