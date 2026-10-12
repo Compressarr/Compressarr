@@ -95,7 +95,13 @@ public static class FFmpegPlanner
         if (profile.Chapters && probe.ChapterCount > 0) plan.Notes.Add($"{probe.ChapterCount} chapter marker(s) are kept.");
         if (probe.HasDynamicHdrMetadata)
         {
-            plan.Notes.Add($"{probe.DynamicHdrName} dynamic metadata found - ffmpeg can't carry it over (the file is normally handed to HandBrake).");
+            // What happens to such a file depends on the profile, so the Preview says which, not a general rule.
+            var outcome = !string.IsNullOrWhiteSpace(profile.FallbackHandBrakePreset)
+                ? $"the file is handed to HandBrake with '{profile.FallbackHandBrakePreset}'"
+                : profile.AllowDroppingDynamicHdr && probe.DynamicHdrCanBeDropped
+                    ? "the profile is set to encode anyway, so it is dropped and the HDR10 base layer is kept"
+                    : "this profile has no HandBrake fallback, so the file is left alone and reported as an error";
+            plan.Notes.Add($"{probe.DynamicHdrName} dynamic metadata found - ffmpeg can't carry it over: {outcome}.");
         }
         else if (video.IsHdr)
         {

@@ -432,7 +432,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
                     _logger.Log($"  {probe.DynamicHdrName} detected - ffmpeg would drop it, so this file is encoded by HandBrake with '{fallback}' instead of '{presetName}'.");
                     binding = handBrake;
                     presetName = fallback;
-                    encoderLabel = "HandBrake (Dolby Vision fallback)";
+                    encoderLabel = $"HandBrake ({probe.DynamicHdrName} fallback)";
                     _progress.FileStarted(lane.Id, i, fileCount, file.Name, file.FullName, presetName, beginSizeGb);
                 }
                 else if (fallback is null && _encoders.AllowsDroppingDynamicHdr(presetName) && probe.DynamicHdrCanBeDropped)

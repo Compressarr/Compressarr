@@ -180,6 +180,24 @@ public class FFmpegPlanningTests : Presets.AppDataTestBase
     }
 
     [Fact]
+    public void TheHdr10PlusNote_SaysWhatThisProfileWillDoWithTheFile()
+    {
+        var probe = FFprobeParser.Parse(FFmpegFixtures.UhdHdr10Rip, FFmpegFixtures.Hdr10PlusFrames);
+        var profile = Builtin("Compressarr SD-HD");
+
+        var refused = string.Join(" ", FFmpegPlanner.Plan(profile, probe)!.Notes);
+        profile.AllowDroppingDynamicHdr = true;
+        var dropped = string.Join(" ", FFmpegPlanner.Plan(profile, probe)!.Notes);
+        profile.AllowDroppingDynamicHdr = false;
+        profile.FallbackHandBrakePreset = "Compressarr SD-HD";
+        var handedOver = string.Join(" ", FFmpegPlanner.Plan(profile, probe)!.Notes);
+
+        Assert.Contains("no HandBrake fallback", refused);
+        Assert.Contains("encode anyway", dropped);
+        Assert.Contains("handed to HandBrake with 'Compressarr SD-HD'", handedOver);
+    }
+
+    [Fact]
     public void Audio_DtsHdIsToldApartFromPlainDts()
     {
         var plain = new MediaStream { Codec = "dts", CodecProfile = "DTS" };

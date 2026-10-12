@@ -307,7 +307,7 @@ public class EncoderEngineTests : IDisposable
 
         var result = await RunAsync(rig);
 
-        Assert.Equal("HandBrake (Dolby Vision fallback)", result.EncoderLabel);
+        Assert.Equal("HandBrake (HDR10+ fallback)", result.EncoderLabel);
         Assert.Single(rig.Resolver.HandBrake.Requests);
         Assert.Contains(rig.Logger.Logs, l => l.Message.Contains("HDR10+ detected"));
     }
