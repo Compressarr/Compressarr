@@ -65,6 +65,7 @@ function navIcon(name) {
 
 const CPU_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"></rect><line x1="6" y1="10" x2="3" y2="10"></line><line x1="6" y1="14" x2="3" y2="14"></line><line x1="18" y1="10" x2="21" y2="10"></line><line x1="18" y1="14" x2="21" y2="14"></line><line x1="10" y1="6" x2="10" y2="3"></line><line x1="14" y1="6" x2="14" y2="3"></line><line x1="10" y1="18" x2="10" y2="21"></line><line x1="14" y1="18" x2="14" y2="21"></line></svg>';
 const ADVANCED_ICON = '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>';
+const BELL_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>';
 const UPDATE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><polyline points="16 12 12 8 8 12"></polyline><line x1="12" y1="16" x2="12" y2="8"></line></svg>';
 
 function renderNav(activePage) {
@@ -138,6 +139,7 @@ function renderNav(activePage) {
     <span class="toolbar-spacer"></span>
     ${hasAdvanced ? `<div class="page-actions toolbar-advanced"><span class="tb-sep"></span><button type="button" id="advancedBtn" aria-pressed="false" title="Show advanced options">${ADVANCED_ICON}Advanced</button></div>` : ''}
     <div class="toolbar-global-status">
+      <button type="button" id="announcementsBtn" class="toolbar-bell hidden" title="Announcements" aria-label="Announcements">${BELL_ICON}<span class="bell-dot hidden"></span></button>
       <a id="updateLink" class="toolbar-update hidden" target="_blank" rel="noopener" title="Update available">${UPDATE_ICON}</a>
       <span class="status-dot" id="statusDot"></span>
       <span id="monitoringState"></span>
@@ -232,6 +234,15 @@ function renderNav(activePage) {
   registerServiceWorker();
   initInstallPrompt();
   checkForUpdate();
+  loadAnnouncements();
+}
+
+// The announcements bell (see announcements.js) - loaded after the toolbar exists, so it can find its button.
+function loadAnnouncements() {
+  if (!document.getElementById('announcementsBtn')) return;
+  const script = document.createElement('script');
+  script.src = '/announcements.js';
+  document.body.appendChild(script);
 }
 
 // ---- PWA: service worker registration + install support. Best-effort and must never break page

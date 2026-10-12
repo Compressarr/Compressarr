@@ -88,6 +88,7 @@ function fillForm(dto) {
   document.getElementById('pollIntervalSeconds').value = dto.pollIntervalSeconds;
   document.getElementById('queueEtaFormat').value = dto.queueEtaFormat;
   document.getElementById('runAtLogin').checked = dto.runAtLogin;
+  document.getElementById('announcementsEnabled').checked = dto.announcementsEnabled;
   document.getElementById('postExecCmd').value = dto.postExecCmd;
   document.getElementById('postExecArgs').value = dto.postExecArgs;
   document.getElementById('sonarrEnabled').checked = dto.sonarr.enabled;
@@ -150,6 +151,7 @@ function readForm() {
     },
     webPort: parseInt(document.getElementById('webPort').value, 10) || 1212,
     runAtLogin: document.getElementById('runAtLogin').checked,
+    announcementsEnabled: document.getElementById('announcementsEnabled').checked,
     backupFolderPath: document.getElementById('backupFolderPath').value,
     backupIntervalDays: parseInt(document.getElementById('backupIntervalDays').value, 10) || 7,
     backupRetentionDays: parseInt(document.getElementById('backupRetentionDays').value, 10) || 28,

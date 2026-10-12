@@ -195,3 +195,25 @@ loadAbout();
 loadCatalogSource();
 loadHandBrakeVersion();
 loadFfmpegVersion();
+
+// Whether announcements are on, and when they were last checked - the checkbox itself is on the Settings page.
+(async () => {
+  const el = document.getElementById('announcementsStatus');
+  if (!el) return;
+  try {
+    const view = await (await fetch('/api/announcements')).json();
+    el.textContent = '';
+    if (!view.enabled) {
+      el.append('Off. ');
+    } else {
+      el.append(view.lastCheckedUtc ? `On - last checked ${new Date(view.lastCheckedUtc).toLocaleString()}. ` : 'On - not checked yet. ');
+      if (view.needsNewerApp) el.append('A newer Compressarr is needed to read the latest ones. ');
+    }
+    const link = document.createElement('a');
+    link.href = '/index.html';
+    link.textContent = 'Change in Settings';
+    el.append(link);
+  } catch {
+    el.textContent = '-';
+  }
+})();

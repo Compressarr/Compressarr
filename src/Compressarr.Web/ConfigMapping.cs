@@ -41,6 +41,7 @@ internal static class ConfigMapping
         Radarr: new ArrServiceDto(config.Arrs.Radarr.Enabled, config.Arrs.Radarr.Url, config.Arrs.Radarr.ApiKey),
         WebPort: config.Web.Port,
         RunAtLogin: config.Startup.RunAtLogin,
+        AnnouncementsEnabled: config.Announcements.Enabled,
         BackupFolderPath: config.Backup.FolderPath,
         BackupIntervalDays: config.Backup.IntervalDays,
         BackupRetentionDays: config.Backup.RetentionDays,
@@ -81,6 +82,7 @@ internal static class ConfigMapping
         config.Arrs.Radarr = new ArrServiceSettings { Enabled = dto.Radarr.Enabled, Url = dto.Radarr.Url, ApiKey = dto.Radarr.ApiKey };
         config.Web.Port = dto.WebPort;
         config.Startup.RunAtLogin = dto.RunAtLogin;
+        config.Announcements.Enabled = dto.AnnouncementsEnabled;
         config.Backup.FolderPath = dto.BackupFolderPath;
         config.Backup.IntervalDays = dto.BackupIntervalDays;
         config.Backup.RetentionDays = dto.BackupRetentionDays;

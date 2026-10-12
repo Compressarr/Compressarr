@@ -1,8 +1,8 @@
 # Design: announcements
 
-Status: design only, written 2026-10-11. Nothing is built. Decisions are in section 11; the recommended answers are marked there and
-are not yet confirmed.
-Target: not yet decided (2.2 final or 2.3; see section 11). It does not touch the encoding engine.
+Status: built for 2.2 (2026-10-11), with a port to 2.1.10. Decisions were confirmed on 2026-10-11 (section 11). The repo is
+https://github.com/MrWizardCT/Compressarr-Announcements (empty at first).
+Target: 2.2 and 2.1.10. It does not touch the encoding engine.
 
 ## 1. Goal
 
@@ -170,21 +170,15 @@ endpoints and the disabled state. A UI check of the bell, the panel, the dot cle
 items: with the repo reachable, after a post, with the setting off (confirm no request in the network log), offline start, and a
 fresh install with old messages in the file.
 
-## 11. Decisions and open items
+## 11. Decisions (confirmed 2026-10-11)
 
-Recommended answers are marked; none are confirmed yet.
-
-1. **Where the file lives:** a dedicated small repo, read from `main` (section 3, option A). *Recommended.*
-2. **Marking read:** opening the panel marks everything read. *Recommended*; the alternative is per-message "mark read", which is more
-   clicks for little benefit.
-3. **Timing:** 2.2 final or 2.3. It does not touch the engine or storage formats the rest depends on, so it can go in 2.2 once beta.6
-   is out; waiting for 2.3 is equally safe. *No recommendation either way; your call.*
-4. **Reaching 2.1 users:** ship it in 2.1.10 so 2.1 users can be told about 2.2, or leave 2.1 alone. *Recommended if reaching 2.1 users
-   matters to you; otherwise leave it.*
-5. **Allowed link hosts:** `github.com` plus the project's own site; what is the site's domain (the repo has a `website` folder)?
-6. **Default:** on, as you asked. The Settings note and About line are what keep it honest.
-7. **Per-user "important" behaviour:** `important` only affects ordering in the list. Making an important message more visible
-   (a banner) is deliberately left out; revisit only if a real need appears.
+1. **Where the file lives:** a dedicated repo, Compressarr-Announcements, read from `main`.
+2. **Marking read:** opening the panel marks everything read.
+3. **Timing:** both lines - the 2.2 betas and 2.1.10.
+4. **Reaching 2.1 users:** yes, it ships in 2.1.10 so they can be told about 2.2.
+5. **Allowed link hosts:** the Compressarr GitHub page (`github.com/MrWizardCT/...`) and `compressarr.tv` (and its subdomains), https only.
+6. **Default:** on.
+7. **`important`:** only affects the order in the list.
 
 ## 12. Work breakdown
 
