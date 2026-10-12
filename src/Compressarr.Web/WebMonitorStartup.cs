@@ -18,6 +18,7 @@ public static class WebMonitorStartup
         app.MapHistoryEndpoints();
         app.MapBrowseEndpoints();
         app.MapAboutEndpoints();
+        app.MapAnnouncementEndpoints();
         app.MapArrEndpoints();
         app.MapBackupEndpoints();
         app.MapMaintenanceEndpoints();

@@ -44,6 +44,9 @@ public static class AppPaths
         return Path.Combine(fallbackHome, ".config", AppFolderName);
     }
 
+    /// <summary>What Compressarr remembers about announcements on this machine (read marks, the first-look day, the last good copy).</summary>
+    public static string GetAnnouncementsFilePath() => Path.Combine(GetAppDataDirectory(), "compressarr.announcements.json");
+
     public static string GetConfigFilePath() => Path.Combine(GetAppDataDirectory(), "compressarr.settings.json");
 
     public static string GetRunCountFilePath() => Path.Combine(GetAppDataDirectory(), "compressarr.runcount.json");

@@ -175,6 +175,7 @@ file sealed class StaticConfigStore : IConfigStore
 /// only ever drives a single lane, and RunLoopControllerTests mocks IRunOrchestrator entirely.
 /// Uses the real ConversionOrchestrator (not mocked) so these tests exercise the actual
 /// PrepareLane/ProcessOneFileAsync split RunOrchestrator drives in production.</summary>
+[Collection("AppDataOverride")]
 public class RunOrchestratorTests : IDisposable
 {
     private readonly string _tempDir = Directory.CreateTempSubdirectory("compressarr-run-orchestrator-tests-").FullName;

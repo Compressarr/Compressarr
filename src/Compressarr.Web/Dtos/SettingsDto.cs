@@ -38,6 +38,7 @@ public sealed record SettingsDto(
     ArrServiceDto Radarr,
     int WebPort,
     bool RunAtLogin,
+    bool AnnouncementsEnabled,
     string BackupFolderPath,
     int BackupIntervalDays,
     int BackupRetentionDays,

@@ -85,6 +85,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IBackupScheduler, BackupScheduler>();
         services.AddSingleton<IDigestScheduler, DigestScheduler>();
         services.AddSingleton<IUpdateCheckService, UpdateCheckService>();
+        services.AddSingleton<Compressarr.Core.Announcements.IAnnouncementStateStore, Compressarr.Core.Announcements.JsonAnnouncementStateStore>();
+        services.AddSingleton<Compressarr.Core.Announcements.IAnnouncementService, Compressarr.Core.Announcements.AnnouncementService>();
 
         return services;
     }

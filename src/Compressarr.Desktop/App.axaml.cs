@@ -140,6 +140,10 @@ public partial class App : Application
         // shouldn't need to wait out the rest of a day's cache to notice.
         Services.GetRequiredService<Compressarr.Core.Updates.IUpdateCheckService>().Start();
 
+        // Announcements from the project: one request at start-up and then about daily, and only while the Settings checkbox is on
+        // (the service looks at the setting itself, so turning it on or off later needs no restart).
+        Services.GetRequiredService<Compressarr.Core.Announcements.IAnnouncementService>().Start();
+
         base.OnFrameworkInitializationCompleted();
     }
 }

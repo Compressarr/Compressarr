@@ -1569,3 +1569,36 @@ td { font-variant-numeric: tabular-nums; }
   word-break: break-all;
   margin-bottom: 16px;
 }
+
+/* Announcements bell: a plain button in the toolbar, a dot when there is something unseen. Hidden until announcements.js finds them on. */
+.toolbar .toolbar-bell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-right: 10px;
+  padding: 0 12px 0 0;
+  background: none; /* beats the generic .toolbar button box */
+  border: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 0;
+  color: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+}
+.toolbar .toolbar-bell:hover { background: none; border-color: rgba(255, 255, 255, 0.15); color: #ffffff; }
+.toolbar-bell.hidden, .toolbar .toolbar-bell.hidden { display: none; }
+.toolbar-bell svg { width: 16px; height: 16px; flex-shrink: 0; }
+.toolbar-bell:hover { color: #ffffff; }
+.bell-dot { position: absolute; top: -3px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--badge-warning); }
+.bell-dot.hidden { display: none; }
+
+.ann-modal { width: 560px; }
+.ann-list { overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.ann-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--bg); }
+.ann-item.unread { border-left: 3px solid var(--badge-warning); }
+.ann-item.important .ann-title { font-weight: 700; }
+.ann-head { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-dim); }
+.ann-kind { text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.ann-new { background: var(--badge-warning); color: #fff; border-radius: 8px; padding: 0 6px; font-weight: 600; }
+.ann-title { margin-top: 3px; font-size: 14px; font-weight: 600; }
+.ann-text { margin-top: 4px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.ann-link { display: inline-block; margin-top: 6px; font-size: 12.5px; }

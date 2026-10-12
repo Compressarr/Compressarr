@@ -11,6 +11,8 @@ for that full history.
 
 ## [Unreleased]
 
+- **Announcements.** A bell in the top bar lights up when the Compressarr project has posted news (releases, betas, the 2.2 release) in the last 30 days that you have not seen; click it to read them. The messages come from a public GitHub repo (MrWizardCT/Compressarr-Announcements), are fetched once at start-up and then about daily, and are plain text with at most a link to the Compressarr GitHub page or compressarr.tv. Nothing about you or your computer is sent. It is on by default and can be turned off in Settings > Announcements, which stops the requests completely.
+
 - **With "Maintain" a converted file is no longer converted again on every pass.** Maintain leaves the source in the Input folder, but the finished file was forgotten at the end of the pass and then found again as new, so the same file was re-encoded over and over. Compressarr now remembers a converted file whose source was kept, by its size and date: it stays out of the queue and is not encoded again while it is unchanged. Put a different file at the same path (or edit it) and it is converted as new; delete the kept source yourself and it is forgotten.
 
 ## [2.1.9] - 2026-10-10
