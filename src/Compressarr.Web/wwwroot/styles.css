@@ -1763,9 +1763,10 @@ td { font-variant-numeric: tabular-nums; }
 .prof-lock { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; font-size: 11.5px; font-weight: 400; color: var(--text-dim); }
 .prof-lock-icon { width: 12px; height: 12px; }
 .prof-chip { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--accent-dim); color: var(--accent); }
-.prof-where { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; font-size: 12.5px; line-height: 1.5; }
+.prof-where { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; font-size: 12.5px; line-height: 1.5; }
 .prof-where > div { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--bg); }
 .prof-where code { font-size: 11.5px; word-break: break-all; }
+@media (max-width: 700px) { .prof-where { grid-template-columns: 1fr; } }
 .table-wrap { overflow-x: auto; }
 
 /* Profiles page: row actions, import dialog */
