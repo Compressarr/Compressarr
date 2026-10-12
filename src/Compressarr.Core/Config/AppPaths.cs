@@ -78,6 +78,9 @@ public static class AppPaths
     /// <summary>The ffmpeg profiles the user added from a catalog (the same file shape as ffmpeg-profiles.json).</summary>
     public static string GetCatalogFFmpegFilePath() => Path.Combine(GetProfilesDirectory(), "catalog-ffmpeg.json");
 
+    /// <summary>What Compressarr remembers about announcements on this machine (read marks, the first-look day, the last good copy).</summary>
+    public static string GetAnnouncementsFilePath() => Path.Combine(GetAppDataDirectory(), "compressarr.announcements.json");
+
     /// <summary>Where each installed catalog profile came from and the fingerprint it must still match.</summary>
     public static string GetCatalogRecordsFilePath() => Path.Combine(GetProfilesDirectory(), "catalog-installed.json");
 

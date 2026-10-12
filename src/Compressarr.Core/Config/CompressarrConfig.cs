@@ -40,6 +40,9 @@ public sealed class CompressarrConfig
     public ReportSettings Report { get; set; } = new();
     public RepeatSettings Repeat { get; set; } = new();
     public StartupSettings Startup { get; set; } = new();
+
+    /// <summary>Short news items from the Compressarr project (2.2 and 2.1.10 on). On by default.</summary>
+    public AnnouncementSettings Announcements { get; set; } = new();
     public ArrSettings Arrs { get; set; } = new();
     public WebSettings Web { get; set; } = new();
     public BackupSettings Backup { get; set; } = new();
@@ -271,6 +274,12 @@ public enum QueueEtaDisplayFormat
 {
     DateTime,
     Duration
+}
+
+public sealed class AnnouncementSettings
+{
+    /// <summary>When false Compressarr never asks GitHub for announcements and the bell is hidden.</summary>
+    public bool Enabled { get; set; } = true;
 }
 
 public sealed class StartupSettings
