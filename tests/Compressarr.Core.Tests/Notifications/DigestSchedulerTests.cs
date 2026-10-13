@@ -44,7 +44,7 @@ file sealed class FakeNotifier : INotifier
         return Task.FromResult(new NotifyResult(true, "OK"));
     }
 
-    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct) =>
+    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct, string? machineName = null) =>
         Task.FromResult(new NotifyResult(true, "OK"));
 }
 

@@ -41,7 +41,16 @@ public sealed record NotificationEvent(
     int TotalFiles,
     double SavedGb,
     TimeSpan Duration,
-    string? ReportPath);
+    string? ReportPath,
+    string? MachineName = null,
+    bool PrefixMachineName = true)
+{
+    /// <summary>What a person-facing channel shows as the title: "[Machine] Title" when a machine
+    /// name is set, otherwise the title as is. A Custom template places {machine} itself, so it
+    /// sets PrefixMachineName false to avoid showing the name twice. The Generic Webhook ignores
+    /// this and reports Title unchanged plus MachineName as its own field.</summary>
+    public string DisplayTitle => PrefixMachineName ? MachineLabel.Prefix(Title, MachineName) : Title;
+}
 
 /// <summary>One pluggable notification channel type (Discord, Slack, a generic webhook, etc).
 /// Each implementation is stateless and registered as a singleton in DI, resolved as
@@ -67,6 +76,7 @@ public interface INotifier
 
     /// <summary>Sends a short test message using whatever's currently typed into the channel's
     /// fields, even if not yet saved - same "test what's on screen, not what's on disk" behavior
-    /// /api/arr/test already has for Sonarr/Radarr.</summary>
-    Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct);
+    /// /api/arr/test already has for Sonarr/Radarr. machineName is the cleaned name to show in the
+    /// test message's title (or null for none), so the test previews what a real one will look like.</summary>
+    Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct, string? machineName = null);
 }

@@ -24,7 +24,9 @@ public static class NotificationEndpoints
                 config.Notifications.ToastDigestWeeklyDay.ToString(),
                 config.Notifications.MessageStyle.ToString(),
                 config.Notifications.CustomTitleTemplate,
-                config.Notifications.CustomBodyTemplate));
+                config.Notifications.CustomBodyTemplate,
+                config.Notifications.IncludeMachineName,
+                config.Notifications.MachineName));
         });
 
         app.MapPut("/api/notifications/settings", (NotificationSettingsDto dto, IConfigStore configStore) =>
@@ -42,10 +44,17 @@ public static class NotificationEndpoints
                 config.Notifications.MessageStyle = Enum.Parse<NotificationMessageStyle>(dto.MessageStyle);
                 config.Notifications.CustomTitleTemplate = dto.CustomTitleTemplate;
                 config.Notifications.CustomBodyTemplate = dto.CustomBodyTemplate;
+                config.Notifications.IncludeMachineName = dto.IncludeMachineName;
+                config.Notifications.MachineName = MachineLabel.Clean(dto.MachineName);
                 return true;
             });
             return Results.Ok();
         });
+
+        // This computer's own name, offered as a starting point when the user ticks "Include machine
+        // name" - never sent anywhere or saved unless they keep it and press Save.
+        app.MapGet("/api/notifications/machine-name-suggestion", () =>
+            Results.Json(new { name = MachineLabel.Clean(Environment.MachineName) }));
 
         // The built-in styles' actual Title/Body wording, so the Notifications page can preview
         // them without hardcoding the same text a second time in notifications.js - this endpoint
@@ -122,12 +131,14 @@ public static class NotificationEndpoints
 
         // Tests whatever's currently typed into a channel's fields, saved or not - same "test the
         // form, not the file" behavior /api/arr/test already has for Sonarr/Radarr.
-        app.MapPost("/api/notifications/test", async (TestNotifierRequest request, IEnumerable<INotifier> notifiers) =>
+        app.MapPost("/api/notifications/test", async (TestNotifierRequest request, IEnumerable<INotifier> notifiers, IConfigStore configStore) =>
         {
             var notifier = notifiers.FirstOrDefault(n => string.Equals(n.Type, request.Type, StringComparison.OrdinalIgnoreCase));
             if (notifier is null) return Results.Json(new { success = false, message = $"Unknown notification type '{request.Type}'." });
 
-            var result = await notifier.TestAsync(request.Settings, CancellationToken.None);
+            // The saved machine-name choice, so the test message previews what a real one will look like.
+            var machineName = MachineLabel.For(configStore.Load(AppPaths.GetConfigFilePath()).Notifications);
+            var result = await notifier.TestAsync(request.Settings, CancellationToken.None, machineName);
             return Results.Json(new { success = result.Success, message = result.Message });
         });
 
@@ -145,7 +156,7 @@ public static class NotificationEndpoints
 
             var periodLabel = request.Weekly ? "Weekly Digest" : "Daily Digest";
             var summary = DigestTestSummary(configStore, historyStore, pathExpander, request.Weekly);
-            var evt = summary.ToNotificationEvent(periodLabel);
+            var evt = summary.ToNotificationEvent(periodLabel, MachineLabel.For(configStore.Load(AppPaths.GetConfigFilePath()).Notifications));
             var result = await notifier.SendAsync(request.Settings, evt, CancellationToken.None);
             return Results.Json(new { success = result.Success, message = $"{periodLabel}: {result.Message}" });
         });

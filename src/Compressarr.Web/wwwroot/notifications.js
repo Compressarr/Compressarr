@@ -74,12 +74,29 @@ const PREVIEW_SAMPLE = {
   year_files: '1904', year_saved_gb: '1207.5'
 };
 
+// The computer's own name, fetched once, used only to pre-fill an empty Machine name field when the
+// user ticks Include machine name (they can edit it, and nothing is sent until they save).
+let suggestedMachineName = '';
+async function loadSuggestedMachineName() {
+  try {
+    const res = await fetch('/api/notifications/machine-name-suggestion');
+    if (res.ok) suggestedMachineName = (await res.json()).name || '';
+  } catch { /* the field just starts empty */ }
+}
+
+// What the machine name field holds right now, or '' when the box is unticked - the same rule the
+// server applies (it also removes square brackets and caps the length).
+function currentMachineName() {
+  if (!document.getElementById('includeMachineName').checked) return '';
+  return document.getElementById('machineName').value.replace(/[\[\]]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+}
+
 function renderPreviewTemplate(template) {
   let result = template || '';
   for (const [token, value] of Object.entries(PREVIEW_SAMPLE)) {
     result = result.split(`{${token}}`).join(value);
   }
-  return result;
+  return result.split('{machine}').join(currentMachineName());
 }
 
 function updateMessagePreview() {
@@ -87,12 +104,18 @@ function updateMessagePreview() {
   const isCustom = style === 'Custom';
   document.getElementById('customTemplateFields').hidden = !isCustom;
 
+  document.getElementById('machineNameFields').hidden = !document.getElementById('includeMachineName').checked;
+
   const { title, body } = isCustom
     ? { title: document.getElementById('customTitleTemplate').value, body: document.getElementById('customBodyTemplate').value }
     : (messagePresets[style] || { title: '', body: '' });
 
+  // The built-in styles get a "[Name] " prefix; a Custom template places {machine} itself.
+  const machine = currentMachineName();
+  const prefix = !isCustom && machine ? `[${machine}] ` : '';
+
   document.getElementById('messagePreview').textContent =
-    `${renderPreviewTemplate(title)}\n${renderPreviewTemplate(body)}`;
+    `${prefix}${renderPreviewTemplate(title)}\n${renderPreviewTemplate(body)}`;
 }
 
 async function loadMessageFormatSettings() {
@@ -106,6 +129,8 @@ async function loadMessageFormatSettings() {
   document.getElementById('messageStyle').value = dto.messageStyle;
   document.getElementById('customTitleTemplate').value = dto.customTitleTemplate;
   document.getElementById('customBodyTemplate').value = dto.customBodyTemplate;
+  document.getElementById('includeMachineName').checked = !!dto.includeMachineName;
+  document.getElementById('machineName').value = dto.machineName || '';
   updateMessagePreview();
 }
 
@@ -120,7 +145,9 @@ async function saveMessageFormatSettings() {
       ...current,
       messageStyle: document.getElementById('messageStyle').value,
       customTitleTemplate: document.getElementById('customTitleTemplate').value,
-      customBodyTemplate: document.getElementById('customBodyTemplate').value
+      customBodyTemplate: document.getElementById('customBodyTemplate').value,
+      includeMachineName: document.getElementById('includeMachineName').checked,
+      machineName: document.getElementById('machineName').value
     })
   });
   setStatusMessage('Message format saved.', 'success');
@@ -129,7 +156,15 @@ async function saveMessageFormatSettings() {
 document.getElementById('messageStyle').addEventListener('change', updateMessagePreview);
 document.getElementById('customTitleTemplate').addEventListener('input', updateMessagePreview);
 document.getElementById('customBodyTemplate').addEventListener('input', updateMessagePreview);
+document.getElementById('machineName').addEventListener('input', updateMessagePreview);
+document.getElementById('includeMachineName').addEventListener('change', () => {
+  // Ticking the box pre-fills an empty name with this computer's name as a starting point (editable).
+  const field = document.getElementById('machineName');
+  if (document.getElementById('includeMachineName').checked && !field.value.trim()) field.value = suggestedMachineName;
+  updateMessagePreview();
+});
 document.getElementById('messageFormatSaveBtn').addEventListener('click', saveMessageFormatSettings);
+loadSuggestedMachineName();
 
 document.getElementById('toastDigestTestBtn').addEventListener('click', async () => {
   const weeklyFlags = [];

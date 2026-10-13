@@ -36,13 +36,13 @@ public sealed class WebhookNotifier : INotifier
 
     public Task<NotifyResult> SendAsync(IReadOnlyDictionary<string, string> settings, NotificationEvent evt, CancellationToken ct)
     {
-        var body = BuildBody(evt.Title, evt.Body, evt.TotalFiles, evt.SavedGb, evt.Duration, evt.ReportPath, evt.Outcome.ToString());
+        var body = BuildBody(evt.Title, evt.Body, evt.TotalFiles, evt.SavedGb, evt.Duration, evt.ReportPath, evt.Outcome.ToString(), evt.MachineName);
         return Post(settings, body, ct);
     }
 
-    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct)
+    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct, string? machineName = null)
     {
-        var body = BuildBody("Compressarr test notification", "This is a test notification from Compressarr.", 0, 0, TimeSpan.Zero, null, "Test");
+        var body = BuildBody("Compressarr test notification", "This is a test notification from Compressarr.", 0, 0, TimeSpan.Zero, null, "Test", machineName);
         return Post(settings, body, ct);
     }
 
@@ -66,7 +66,7 @@ public sealed class WebhookNotifier : INotifier
         return _sender.PostAsync(url ?? "", method, headers, body, "application/json", ct);
     }
 
-    private static string BuildBody(string title, string message, int totalFiles, double savedGb, TimeSpan duration, string? reportPath, string outcome)
+    private static string BuildBody(string title, string message, int totalFiles, double savedGb, TimeSpan duration, string? reportPath, string outcome, string? machineName)
     {
         var payload = new Dictionary<string, object?>
         {
@@ -84,6 +84,9 @@ public sealed class WebhookNotifier : INotifier
             ["value2"] = message,
             ["value3"] = reportPath
         };
+        // Its own field rather than text in the title: this body is data for another program, so the
+        // existing fields keep their meaning. Only present when the user turned the name on.
+        if (!string.IsNullOrEmpty(machineName)) payload["machine"] = machineName;
         return JsonSerializer.Serialize(payload);
     }
 }

@@ -572,17 +572,23 @@ public sealed class RunOrchestrator : IRunOrchestrator
             var outcome = reportModel.ErrorCount > 0 ? NotificationOutcome.Error
                 : reportModel.WarningCount > 0 ? NotificationOutcome.Warning
                 : NotificationOutcome.Success;
-            var (titleTemplate, bodyTemplate) = config.Notifications.MessageStyle == NotificationMessageStyle.Custom
+            var isCustomStyle = config.Notifications.MessageStyle == NotificationMessageStyle.Custom;
+            var (titleTemplate, bodyTemplate) = isCustomStyle
                 ? (config.Notifications.CustomTitleTemplate, config.Notifications.CustomBodyTemplate)
                 : NotificationMessagePresets.Templates[config.Notifications.MessageStyle];
+            // Null unless "Include machine name" is ticked and a name is set. The built-in styles get it as a
+            // title prefix; a Custom template places {machine} itself, so it is not prefixed on top.
+            var machineName = MachineLabel.For(config.Notifications);
             var notifyEvent = new NotificationEvent(
                 outcome,
-                Title: NotificationMessageRenderer.Render(titleTemplate, outcome, reportModel, reportFilePath),
-                Body: NotificationMessageRenderer.Render(bodyTemplate, outcome, reportModel, reportFilePath),
+                Title: NotificationMessageRenderer.Render(titleTemplate, outcome, reportModel, reportFilePath, machineName),
+                Body: NotificationMessageRenderer.Render(bodyTemplate, outcome, reportModel, reportFilePath, machineName),
                 totalFiles,
                 SavedGb: reportModel.TotalBeforeGb - reportModel.TotalAfterGb,
                 runTime,
-                reportFilePath);
+                reportFilePath,
+                MachineName: machineName,
+                PrefixMachineName: !isCustomStyle);
             await _notificationDispatcher.DispatchAsync(config.Notifications, notifyEvent);
         }
 

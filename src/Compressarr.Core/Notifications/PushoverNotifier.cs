@@ -31,12 +31,12 @@ public sealed class PushoverNotifier : INotifier
     {
         var summary = $"Files: {evt.TotalFiles} | Saved: {evt.SavedGb:0.##} GB | Duration: {NotificationFormatting.FormatDuration(evt.Duration)}";
         var priority = evt.Outcome == NotificationOutcome.Error ? "1" : "0";
-        return Post(settings, evt.Title, $"{evt.Body}\n{summary}", priority, ct);
+        return Post(settings, evt.DisplayTitle, $"{evt.Body}\n{summary}", priority, ct);
     }
 
-    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct)
+    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct, string? machineName = null)
     {
-        return Post(settings, "Compressarr test notification", "This is a test notification from Compressarr.", "0", ct);
+        return Post(settings, MachineLabel.Prefix("Compressarr test notification", machineName), "This is a test notification from Compressarr.", "0", ct);
     }
 
     private async Task<NotifyResult> Post(IReadOnlyDictionary<string, string> settings, string title, string message, string priority, CancellationToken ct)

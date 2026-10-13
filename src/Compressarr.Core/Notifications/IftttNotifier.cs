@@ -29,12 +29,12 @@ public sealed class IftttNotifier : INotifier
 
     public Task<NotifyResult> SendAsync(IReadOnlyDictionary<string, string> settings, NotificationEvent evt, CancellationToken ct)
     {
-        return Post(settings, evt.Title, evt.Body, evt.ReportPath, ct);
+        return Post(settings, evt.DisplayTitle, evt.Body, evt.ReportPath, ct);
     }
 
-    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct)
+    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct, string? machineName = null)
     {
-        return Post(settings, "Compressarr test notification", "This is a test notification from Compressarr.", null, ct);
+        return Post(settings, MachineLabel.Prefix("Compressarr test notification", machineName), "This is a test notification from Compressarr.", null, ct);
     }
 
     private async Task<NotifyResult> Post(IReadOnlyDictionary<string, string> settings, string value1, string value2, string? value3, CancellationToken ct)

@@ -19,8 +19,8 @@ public sealed record DigestSummary(int TotalFiles, double BeginSizeGb, double En
     /// <summary>Shared with IDigestScheduler's real scheduled sends, so a "Test Digest" button
     /// (which fires immediately, bypassing the schedule entirely) produces byte-for-byte the same
     /// shape a real digest would.</summary>
-    public NotificationEvent ToNotificationEvent(string periodLabel) =>
-        new(NotificationOutcome.Success, $"Compressarr {periodLabel}", ToMessage(), TotalFiles, SavedGb, TotalDuration, ReportPath: null);
+    public NotificationEvent ToNotificationEvent(string periodLabel, string? machineName = null) =>
+        new(NotificationOutcome.Success, $"Compressarr {periodLabel}", ToMessage(), TotalFiles, SavedGb, TotalDuration, ReportPath: null, MachineName: machineName);
 }
 
 /// <summary>Builds a DigestSummary from History over a fixed calendar window - not "since the last

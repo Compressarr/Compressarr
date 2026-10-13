@@ -47,12 +47,12 @@ public sealed class NotifiarrNotifier : INotifier
             new { title = "Saved", text = $"{evt.SavedGb:0.##} GB", inline = true },
             new { title = "Duration", text = NotificationFormatting.FormatDuration(evt.Duration), inline = true }
         };
-        return Post(settings, evt.Title, evt.Body, color, fields, ct);
+        return Post(settings, evt.DisplayTitle, evt.Body, color, fields, ct);
     }
 
-    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct)
+    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct, string? machineName = null)
     {
-        return Post(settings, "Compressarr test notification", "This is a test notification from Compressarr.", ColorSuccess, new List<object>(), ct);
+        return Post(settings, MachineLabel.Prefix("Compressarr test notification", machineName), "This is a test notification from Compressarr.", ColorSuccess, new List<object>(), ct);
     }
 
     private async Task<NotifyResult> Post(IReadOnlyDictionary<string, string> settings, string title, string description, string color, List<object> fields, CancellationToken ct)

@@ -103,7 +103,7 @@
             <code>{warning_count}</code> <code>{retries_succeeded}</code> <code>{report_path}</code>
             <code>{today_files}</code> <code>{today_saved_gb}</code> <code>{month_files}</code>
             <code>{month_saved_gb}</code> <code>{year_files}</code> <code>{year_saved_gb}</code>
-            <code>{file_list}</code>
+            <code>{file_list}</code> <code>{machine}</code>
           </p>
           <p style="color: var(--text-dim); font-size: 12.5px; margin: 0 0 10px;">
             <code>{file_list}</code> is the filename(s) processed this run, one per line - the
@@ -111,7 +111,28 @@
             purpose; only include it here if you're comfortable with this channel's destination
             seeing your filenames.
           </p>
+          <p style="color: var(--text-dim); font-size: 12.5px; margin: 0 0 10px;">
+            <code>{machine}</code> is the machine name below, and is empty unless
+            <b>Include machine name</b> is ticked. Put it wherever you want it in the title or body.
+          </p>
         </div>
+        <div class="check-row">
+          <input type="checkbox" id="includeMachineName" />
+          <label for="includeMachineName">Include machine name</label>
+        </div>
+        <div id="machineNameFields" hidden>
+          <div class="field-row">
+            <label for="machineName">Machine name</label>
+            <input type="text" id="machineName" maxlength="40" style="flex: 1;" placeholder="e.g. Basement NAS" />
+          </div>
+        </div>
+        <p style="color: var(--text-dim); font-size: 12.5px; margin: 4px 0 10px;">
+          For when you run Compressarr on more than one machine: the Minimal, Standard and Detailed
+          styles start their title with it, e.g. <code>[Basement NAS] Compressarr run #47 - Success</code>,
+          and so do digests and the Test button. A Custom style places it with <code>{machine}</code>
+          instead. The Generic Webhook gets it as its own <code>machine</code> field. Off by default;
+          it is only sent once you tick this and save.
+        </p>
         <div class="field-row">
           <label>Preview</label>
           <div id="messagePreview" style="flex: 1; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: var(--text-dim); white-space: pre-line;"></div>

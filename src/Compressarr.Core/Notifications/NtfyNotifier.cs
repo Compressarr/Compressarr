@@ -39,12 +39,12 @@ public sealed class NtfyNotifier : INotifier
         };
         var summary = $"Files: {evt.TotalFiles} | Saved: {evt.SavedGb:0.##} GB | Duration: {NotificationFormatting.FormatDuration(evt.Duration)}";
         var message = $"{evt.Body}\n{summary}";
-        return Post(settings, evt.Title, message, priority, tags, ct);
+        return Post(settings, evt.DisplayTitle, message, priority, tags, ct);
     }
 
-    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct)
+    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct, string? machineName = null)
     {
-        return Post(settings, "Compressarr test notification", "This is a test notification from Compressarr.", "3", "white_check_mark", ct);
+        return Post(settings, MachineLabel.Prefix("Compressarr test notification", machineName), "This is a test notification from Compressarr.", "3", "white_check_mark", ct);
     }
 
     private async Task<NotifyResult> Post(IReadOnlyDictionary<string, string> settings, string title, string message, string priority, string tags, CancellationToken ct)

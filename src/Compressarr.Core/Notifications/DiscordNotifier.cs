@@ -36,13 +36,13 @@ public sealed class DiscordNotifier : INotifier
             NotificationOutcome.Warning => ColorWarning,
             _ => ColorSuccess
         };
-        var payload = BuildPayload(evt.Title, evt.Body, color, evt.TotalFiles, evt.SavedGb, evt.Duration);
+        var payload = BuildPayload(evt.DisplayTitle, evt.Body, color, evt.TotalFiles, evt.SavedGb, evt.Duration);
         return Post(settings, payload, ct);
     }
 
-    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct)
+    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct, string? machineName = null)
     {
-        var payload = BuildPayload("Compressarr test notification", "This is a test notification from Compressarr.", ColorSuccess, null, null, null);
+        var payload = BuildPayload(MachineLabel.Prefix("Compressarr test notification", machineName), "This is a test notification from Compressarr.", ColorSuccess, null, null, null);
         return Post(settings, payload, ct);
     }
 

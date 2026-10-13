@@ -29,13 +29,13 @@ public sealed class TelegramNotifier : INotifier
     public Task<NotifyResult> SendAsync(IReadOnlyDictionary<string, string> settings, NotificationEvent evt, CancellationToken ct)
     {
         var summary = $"Files: {evt.TotalFiles} | Saved: {evt.SavedGb:0.##} GB | Duration: {NotificationFormatting.FormatDuration(evt.Duration)}";
-        var text = $"{NotificationFormatting.FormatOutcome(evt.Outcome)}: {evt.Title}\n{evt.Body}\n{summary}";
+        var text = $"{NotificationFormatting.FormatOutcome(evt.Outcome)}: {evt.DisplayTitle}\n{evt.Body}\n{summary}";
         return Post(settings, text, ct);
     }
 
-    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct)
+    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct, string? machineName = null)
     {
-        var text = "Compressarr test notification\nThis is a test notification from Compressarr.";
+        var text = $"{MachineLabel.Prefix("Compressarr test notification", machineName)}\nThis is a test notification from Compressarr.";
         return Post(settings, text, ct);
     }
 

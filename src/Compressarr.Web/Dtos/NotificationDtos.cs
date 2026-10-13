@@ -9,7 +9,9 @@ public sealed record NotificationSettingsDto(
     string ToastDigestWeeklyDay = "Monday",
     string MessageStyle = "Standard",
     string CustomTitleTemplate = "",
-    string CustomBodyTemplate = "");
+    string CustomBodyTemplate = "",
+    bool IncludeMachineName = false,
+    string MachineName = "");
 
 /// <summary>One built-in NotificationMessageStyle's canned Title/Body pair, as sent to the browser
 /// so the Notifications page can preview it without hardcoding the actual wording twice (once in

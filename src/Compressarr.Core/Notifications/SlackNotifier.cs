@@ -32,13 +32,13 @@ public sealed class SlackNotifier : INotifier
             _ => ":white_check_mark:"
         };
         var summary = $"Files: {evt.TotalFiles} | Saved: {evt.SavedGb:0.##} GB | Duration: {NotificationFormatting.FormatDuration(evt.Duration)}";
-        var text = $"{icon} *{Escape(evt.Title)}*\n{Escape(evt.Body)}\n{summary}";
+        var text = $"{icon} *{Escape(evt.DisplayTitle)}*\n{Escape(evt.Body)}\n{summary}";
         return Post(settings, text, ct);
     }
 
-    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct)
+    public Task<NotifyResult> TestAsync(IReadOnlyDictionary<string, string> settings, CancellationToken ct, string? machineName = null)
     {
-        var text = ":white_check_mark: *Compressarr test notification*\nThis is a test notification from Compressarr.";
+        var text = $":white_check_mark: *{Escape(MachineLabel.Prefix("Compressarr test notification", machineName))}*\nThis is a test notification from Compressarr.";
         return Post(settings, text, ct);
     }
 

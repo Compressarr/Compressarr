@@ -398,6 +398,18 @@ public sealed class NotificationSettings
     public string CustomTitleTemplate { get; set; } = "Compressarr run #{run_number} - {outcome}";
     public string CustomBodyTemplate { get; set; } = "{files} file(s) processed, {saved_gb} GB saved.";
 
+    /// <summary>For people running several Compressarr installs: when ticked and MachineName is not
+    /// blank, notifications say which machine they came from - a "[Name] " prefix on the built-in
+    /// styles' titles (and on digests and the test message), the {machine} token in a Custom
+    /// template, and a separate "machine" field in the Generic Webhook's JSON. Off by default, so
+    /// nothing changes for anyone who does not turn it on. Not used by the desktop toast (the user
+    /// is already at the machine). See MachineLabel.</summary>
+    public bool IncludeMachineName { get; set; } = false;
+
+    /// <summary>Only read when IncludeMachineName is ticked. Kept when the box is unticked, so
+    /// ticking it again brings the name back.</summary>
+    public string MachineName { get; set; } = "";
+
     // Digest settings for the toast itself - toast has no Trigger/channel concept, so its own
     // digest schedule lives directly here rather than on a NotificationChannel. Same 7-field shape
     // as NotificationChannel's own digest fields below, see those doc comments for the firing rule.

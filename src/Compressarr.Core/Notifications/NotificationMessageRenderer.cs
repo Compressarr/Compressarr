@@ -11,13 +11,15 @@ namespace Compressarr.Core.Notifications;
 /// contract.</summary>
 public static class NotificationMessageRenderer
 {
-    public static string Render(string template, NotificationOutcome outcome, ReportModel report, string reportFilePath)
+    /// <summary>machineName is the cleaned name for {machine} (null or empty renders nothing). The caller passes it
+    /// only when "Include machine name" is ticked, so an unticked box never leaks a saved name into a template.</summary>
+    public static string Render(string template, NotificationOutcome outcome, ReportModel report, string reportFilePath, string? machineName = null)
     {
         var savedGb = report.TotalBeforeGb - report.TotalAfterGb;
         var savedPct = report.TotalBeforeGb > 0 ? 100 - (report.TotalAfterGb / report.TotalBeforeGb * 100) : 0;
 
         var result = template;
-        foreach (var (token, value) in Tokens(outcome, report, reportFilePath, savedGb, savedPct))
+        foreach (var (token, value) in Tokens(outcome, report, reportFilePath, savedGb, savedPct, machineName))
         {
             result = result.Replace(token, value);
         }
@@ -25,8 +27,9 @@ public static class NotificationMessageRenderer
     }
 
     private static IEnumerable<(string Token, string Value)> Tokens(
-        NotificationOutcome outcome, ReportModel report, string reportFilePath, double savedGb, double savedPct)
+        NotificationOutcome outcome, ReportModel report, string reportFilePath, double savedGb, double savedPct, string? machineName)
     {
+        yield return ("{machine}", machineName ?? "");
         yield return ("{run_number}", report.RunNumber.ToString());
         yield return ("{files}", report.TotalFiles.ToString());
         yield return ("{saved_gb}", savedGb.ToString("0.##"));

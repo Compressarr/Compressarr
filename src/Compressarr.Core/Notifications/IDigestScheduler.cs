@@ -137,7 +137,7 @@ public sealed class DigestScheduler : IDigestScheduler, IDisposable
         {
             var summary = isWeekly ? weeklySummary : dailySummary;
             var periodLabel = isWeekly ? "Weekly Digest" : "Daily Digest";
-            await SendChannelDigestAsync(channel, summary, periodLabel, ct);
+            await SendChannelDigestAsync(channel, summary, periodLabel, MachineLabel.For(config.Notifications), ct);
         }
 
         // A toast with no launch target never showed up at all (including in Action Center) on a
@@ -187,7 +187,7 @@ public sealed class DigestScheduler : IDigestScheduler, IDisposable
     private static TimeOnly ParseTimeOrDefault(string time) =>
         TimeOnly.TryParse(time, out var parsed) ? parsed : new TimeOnly(9, 0);
 
-    private async Task SendChannelDigestAsync(NotificationChannel channel, DigestSummary summary, string periodLabel, CancellationToken ct)
+    private async Task SendChannelDigestAsync(NotificationChannel channel, DigestSummary summary, string periodLabel, string? machineName, CancellationToken ct)
     {
         if (!_notifiersByType.TryGetValue(channel.Type, out var notifier))
         {
@@ -195,7 +195,7 @@ public sealed class DigestScheduler : IDigestScheduler, IDisposable
             return;
         }
 
-        var evt = summary.ToNotificationEvent(periodLabel);
+        var evt = summary.ToNotificationEvent(periodLabel, machineName);
 
         try
         {
