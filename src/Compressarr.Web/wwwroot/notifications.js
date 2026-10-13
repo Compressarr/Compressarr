@@ -250,6 +250,7 @@ function channelCardFromDto(dto) {
       </div>
     </div>
     <div class="lane-body">
+      ${fieldBlocks}
       <div class="digest-divider"></div>
       <div class="digest-row">
         <span class="digest-row-label">Receive Digest:</span>
@@ -274,8 +275,6 @@ function channelCardFromDto(dto) {
         <button type="button" class="digest-save-btn icon-btn save">Save</button>
         <button type="button" class="digest-clear-btn icon-btn">Clear</button>
       </div>
-      <div class="digest-divider"></div>
-      ${fieldBlocks}
     </div>
   `;
 
