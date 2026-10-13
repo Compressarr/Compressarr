@@ -310,4 +310,114 @@ public class PosterServiceTests : AppDataTestBase
         Assert.Equal(0, service.GetCacheInfo().Bytes);
         Assert.False(File.Exists(Path.Combine(AppPaths.GetPostersDirectory(), "index.json")));
     }
+
+    // ---- the cache cleanup --------------------------------------------------------------------------------------------------------
+
+    private HttpResponseMessage ImageOrResults(HttpRequestMessage r) =>
+        r.RequestUri!.Host == "tmdb.test" ? Results("/abcdef12345.jpg") : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[] { 7, 7, 7 }) };
+
+    [Fact]
+    public async Task TheCleanup_RemovesPicturesNotUsedForTheRetentionPeriod_ButKeepsWhatWasLookedUp()
+    {
+        _http.Respond = ImageOrResults;
+        using var service = Service();
+        var id = (await WaitForId(service, On, "Inception (2010).mkv"))!;
+        var picture = (await service.GetImagePathAsync(On, id, "w154"))!;
+        Assert.True(File.Exists(picture));
+
+        _clock.Now = _clock.Now.AddDays(29);
+        Assert.Equal(0, service.CleanUp(30));                       // not old enough yet
+        Assert.True(File.Exists(picture));
+
+        _clock.Now = _clock.Now.AddDays(2);                         // 31 days unused
+        Assert.Equal(1, service.CleanUp(30));
+        Assert.False(File.Exists(picture));
+
+        // The lookup was kept: the title is still known and its picture comes back on demand, with no new search.
+        Assert.Equal(id, service.GetPosterId(On, "Inception (2010).mkv"));
+        Assert.NotNull(await service.GetImagePathAsync(On, id, "w154"));
+        Assert.True(File.Exists(picture));
+        Assert.Equal(1, _http.Requests.Count(r => r.Host == "tmdb.test"));
+    }
+
+    [Fact]
+    public async Task ATitleStillInTheQueue_KeepsItsPicture_BecauseSeeingItAgainCountsAsUse()
+    {
+        _http.Respond = ImageOrResults;
+        using var service = Service();
+        var id = (await WaitForId(service, On, "Inception (2010).mkv"))!;
+        var picture = (await service.GetImagePathAsync(On, id, "w154"))!;
+
+        _clock.Now = _clock.Now.AddDays(20);
+        Assert.Equal(id, service.GetPosterId(On, "Inception (2010).mkv"));   // still queued on day 20
+
+        _clock.Now = _clock.Now.AddDays(20);                                  // 40 days after the download, 20 since it was last seen
+        Assert.Equal(0, service.CleanUp(30));
+        Assert.True(File.Exists(picture));
+    }
+
+    [Fact]
+    public async Task TheCleanup_AlsoRemovesStrayFiles_LeavesAFreshDownloadInProgressAlone_AndDropsOldNotFounds()
+    {
+        _http.Respond = _ => Results();      // TMDb knows no such title
+        using var service = Service();
+        service.GetPosterId(On, "Nobody Knows This (2001).mkv");
+        await WaitFor(() => _http.Requests.Count == 1);
+
+        var directory = Path.Combine(AppPaths.GetPostersDirectory(), "w154");
+        Directory.CreateDirectory(directory);
+        var stray = Path.Combine(directory, "stray12345.jpg");
+        var inProgress = Path.Combine(directory, "downloading1.jpg.tmp");
+        File.WriteAllBytes(stray, new byte[] { 1 });
+        File.WriteAllBytes(inProgress, new byte[] { 1 });
+        var indexFile = Path.Combine(AppPaths.GetPostersDirectory(), "index.json");
+        Assert.Contains("Nobody Knows This", File.ReadAllText(indexFile));
+
+        _clock.Now = _clock.Now.AddDays(31);
+        Assert.Equal(1, service.CleanUp(30));
+        Assert.False(File.Exists(stray));
+        Assert.True(File.Exists(inProgress));                                   // written just now: someone may be downloading it
+        Assert.DoesNotContain("Nobody Knows This", File.ReadAllText(indexFile)); // the stale "not found" is gone
+    }
+
+    [Fact]
+    public async Task ARetentionOfZero_KeepsEverything_LikeLogsAndReports()
+    {
+        _http.Respond = ImageOrResults;
+        using var service = Service();
+        var id = (await WaitForId(service, On, "Inception (2010).mkv"))!;
+        var picture = (await service.GetImagePathAsync(On, id, "w154"))!;
+
+        _clock.Now = _clock.Now.AddDays(365);
+
+        Assert.Equal(0, service.CleanUp(0));
+        Assert.Equal(0, service.CleanUp(-5));
+        Assert.True(File.Exists(picture));
+    }
+
+    [Fact]
+    public async Task TheCleanup_RunsByItselfInTheBackground_AtMostOncePerDay()
+    {
+        _http.Respond = _ => new HttpResponseMessage(HttpStatusCode.NotFound);
+        using var service = Service();
+        var directory = Path.Combine(AppPaths.GetPostersDirectory(), "w154");
+        Directory.CreateDirectory(directory);
+        var first = Path.Combine(directory, "firststray1.jpg");
+        File.WriteAllBytes(first, new byte[] { 1 });
+
+        service.GetPosterId(On, "Inception (2010).mkv");                          // the first request of the day starts the cleanup
+        for (var i = 0; i < 250 && File.Exists(first); i++) await Task.Delay(20);
+        Assert.False(File.Exists(first));
+
+        var second = Path.Combine(directory, "secondstray.jpg");
+        File.WriteAllBytes(second, new byte[] { 1 });
+        service.GetPosterId(On, "Inception (2010).mkv");
+        await Task.Delay(300);
+        Assert.True(File.Exists(second));                                         // same day: not cleaned again
+
+        _clock.Now = _clock.Now.AddHours(25);
+        service.GetPosterId(On, "Inception (2010).mkv");
+        for (var i = 0; i < 250 && File.Exists(second); i++) await Task.Delay(20);
+        Assert.False(File.Exists(second));                                        // the next day it runs again
+    }
 }

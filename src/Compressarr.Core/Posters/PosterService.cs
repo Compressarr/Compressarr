@@ -16,6 +16,8 @@ public sealed record PosterCacheInfo(int Posters, long Bytes, string? Problem);
 /// What leaves the machine: a title (and a year) to api.themoviedb.org, and a poster download from image.tmdb.org - made by Compressarr,
 /// never by the browser. Each show or movie is looked up once and remembered on disk (a poster that was found is kept; "not found" is
 /// remembered for two weeks), and each poster image is downloaded once per size and served from the app's own data folder afterwards.
+/// A picture that has not been used for the log retention period (Settings > Logging & Reports, 30 days by default) is deleted by a
+/// daily background cleanup; what was looked up is kept, so the picture is simply downloaded again if that title comes back.
 ///
 /// Lookups never block a page: GetPosterId answers from memory and, when it does not know the title yet, queues a background lookup, so the
 /// poster appears on a later refresh.
@@ -46,6 +48,9 @@ public sealed partial class PosterService : IPosterService, IDisposable
     private const long MaxImageBytes = 3 * 1024 * 1024;
     private static readonly TimeSpan NotFoundMemory = TimeSpan.FromDays(14);
     private static readonly TimeSpan TransientPause = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan SeenGranularity = TimeSpan.FromDays(1);
+    private static readonly TimeSpan IndexSaveInterval = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan CleanupInterval = TimeSpan.FromDays(1);
 
     [GeneratedRegex(@"^/[A-Za-z0-9_-]{5,64}\.(jpg|jpeg|png)$")]
     private static partial Regex SafePosterPath();
@@ -57,6 +62,9 @@ public sealed partial class PosterService : IPosterService, IDisposable
         public bool IsTv { get; set; }
         public string? PosterPath { get; set; }
         public DateTimeOffset CheckedUtc { get; set; }
+
+        /// <summary>The last day a queued file asked for this poster (null on entries from before this was recorded: CheckedUtc is used).</summary>
+        public DateTimeOffset? LastSeenUtc { get; set; }
     }
 
     private sealed record Work(string Id, PosterQuery Query, string ApiKey);
@@ -69,6 +77,7 @@ public sealed partial class PosterService : IPosterService, IDisposable
     private readonly TimeSpan _gap;
     private readonly string _apiBase;
     private readonly string _imageBase;
+    private readonly Func<int> _retentionDays;
 
     private readonly object _lock = new();
     private Dictionary<string, Entry>? _index;
@@ -78,20 +87,26 @@ public sealed partial class PosterService : IPosterService, IDisposable
     private Task? _worker;
     private DateTimeOffset _pausedUntil;
     private string? _rejectedKey;
+    private bool _indexDirty;
+    private DateTimeOffset _lastIndexSave;
+    private DateTimeOffset _lastCleanup;
+    private bool _cleaning;
 
-    public PosterService(IHttpClientFactory httpFactory)
-        : this(httpFactory, TimeProvider.System, TimeSpan.FromMilliseconds(300), DefaultApiBase, DefaultImageBase)
+    public PosterService(IHttpClientFactory httpFactory, IConfigStore configStore)
+        : this(httpFactory, TimeProvider.System, TimeSpan.FromMilliseconds(300), DefaultApiBase, DefaultImageBase,
+            () => configStore.Load(AppPaths.GetConfigFilePath()).Logging.RetentionDays)
     {
     }
 
-    // Test seam: a fake clock, no pause between lookups and made-up hosts.
-    internal PosterService(IHttpClientFactory httpFactory, TimeProvider time, TimeSpan gap, string apiBase, string imageBase)
+    // Test seam: a fake clock, no pause between lookups, made-up hosts and a fixed retention period (30 days unless a test says otherwise).
+    internal PosterService(IHttpClientFactory httpFactory, TimeProvider time, TimeSpan gap, string apiBase, string imageBase, Func<int>? retentionDays = null)
     {
         _httpFactory = httpFactory;
         _time = time;
         _gap = gap;
         _apiBase = apiBase.TrimEnd('/');
         _imageBase = imageBase.TrimEnd('/');
+        _retentionDays = retentionDays ?? (() => 30);
     }
 
     private static string IndexPath => Path.Combine(AppPaths.GetPostersDirectory(), "index.json");
@@ -105,13 +120,29 @@ public sealed partial class PosterService : IPosterService, IDisposable
         var query = PosterNameParser.Parse(fileName);
         if (query is null) return null;
 
+        MaybeCleanUp();
+
         var id = query.Id;
         lock (_lock)
         {
             if (LoadIndex().TryGetValue(id, out var entry))
             {
-                if (entry.PosterPath is not null) return id;
-                if (_time.GetUtcNow() - entry.CheckedUtc < NotFoundMemory) return null;
+                var now = _time.GetUtcNow();
+                if (entry.PosterPath is not null)
+                {
+                    // Note that this poster is still in use (at most once a day, and the index is written at most every few minutes), so
+                    // the cleanup only ever removes pictures nobody has asked for in a long while.
+                    if (now - (entry.LastSeenUtc ?? entry.CheckedUtc) >= SeenGranularity)
+                    {
+                        entry.LastSeenUtc = now;
+                        _indexDirty = true;
+                        if (now - _lastIndexSave >= IndexSaveInterval) SaveIndex();
+                    }
+
+                    return id;
+                }
+
+                if (now - entry.CheckedUtc < NotFoundMemory) return null;
             }
         }
 
@@ -165,7 +196,8 @@ public sealed partial class PosterService : IPosterService, IDisposable
             {
                 LoadIndex()[work.Id] = new Entry
                 {
-                    Title = work.Query.Title, Year = work.Query.Year, IsTv = work.Query.IsTv, PosterPath = path, CheckedUtc = _time.GetUtcNow()
+                    Title = work.Query.Title, Year = work.Query.Year, IsTv = work.Query.IsTv, PosterPath = path, CheckedUtc = _time.GetUtcNow(),
+                    LastSeenUtc = _time.GetUtcNow()
                 };
                 SaveIndex();
             }
@@ -366,6 +398,84 @@ public sealed partial class PosterService : IPosterService, IDisposable
         return removed;
     }
 
+    // ---- cleanup ------------------------------------------------------------------------------------------------------------------
+
+    /// <summary>At most once a day, started from a poster request (so it only runs while the feature is on), on a background thread.</summary>
+    private void MaybeCleanUp()
+    {
+        lock (_lock)
+        {
+            var now = _time.GetUtcNow();
+            if (_cleaning || now - _lastCleanup < CleanupInterval) return;
+            _cleaning = true;
+            _lastCleanup = now;
+        }
+
+        _ = Task.Run(() =>
+        {
+            try { CleanUp(_retentionDays()); }
+            catch (Exception) { /* a cache cleanup must never matter to anyone */ }
+            finally { lock (_lock) _cleaning = false; }
+        });
+    }
+
+    /// <summary>Deletes the poster pictures whose title has not been in the queue for retentionDays (the same period the logs and reports
+    /// use), plus anything in the cache folder that no title points at. What was looked up is kept, so a title that comes back only needs its
+    /// picture downloaded again; a "not found" answer older than the period is dropped (it would be asked again anyway). A period of 0 or less
+    /// means keep everything, as it does for logs and reports. Pictures are deleted outright, not sent to the Recycle Bin: this is a cache.
+    /// Returns how many picture files were removed.</summary>
+    public int CleanUp(int retentionDays)
+    {
+        if (retentionDays <= 0) return 0;
+
+        var removed = 0;
+        lock (_lock)
+        {
+            var now = _time.GetUtcNow();
+            var cutoff = now - TimeSpan.FromDays(retentionDays);
+            var index = LoadIndex();
+            var changed = false;
+
+            foreach (var stale in index.Where(kv => kv.Value.PosterPath is null && kv.Value.CheckedUtc < cutoff).Select(kv => kv.Key).ToList())
+            {
+                index.Remove(stale);
+                changed = true;
+            }
+
+            var keep = index.Values
+                .Where(e => e.PosterPath is not null && (e.LastSeenUtc ?? e.CheckedUtc) >= cutoff)
+                .Select(e => e.PosterPath!.TrimStart('/'))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var size in ImageSizes)
+            {
+                var sizeDirectory = Path.Combine(AppPaths.GetPostersDirectory(), size);
+                if (!Directory.Exists(sizeDirectory)) continue;
+
+                foreach (var file in Directory.EnumerateFiles(sizeDirectory))
+                {
+                    if (keep.Contains(Path.GetFileName(file))) continue;
+                    // A download in progress writes a .tmp file first; leave a fresh one alone.
+                    if (file.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) && DateTime.UtcNow - File.GetLastWriteTimeUtc(file) < TimeSpan.FromHours(1)) continue;
+
+                    try
+                    {
+                        File.Delete(file);
+                        removed++;
+                    }
+                    catch (IOException)
+                    {
+                        // in use right now: the next daily pass gets it
+                    }
+                }
+            }
+
+            if (changed) SaveIndex();
+        }
+
+        return removed;
+    }
+
     // ---- what is remembered -------------------------------------------------------------------------------------------------------
 
     private Dictionary<string, Entry> LoadIndex()
@@ -394,6 +504,8 @@ public sealed partial class PosterService : IPosterService, IDisposable
             var temp = IndexPath + ".tmp";
             File.WriteAllText(temp, JsonSerializer.Serialize(_index));
             File.Move(temp, IndexPath, overwrite: true);
+            _indexDirty = false;
+            _lastIndexSave = _time.GetUtcNow();
         }
         catch (Exception)
         {
