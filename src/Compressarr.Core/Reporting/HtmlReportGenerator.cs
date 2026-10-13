@@ -23,8 +23,8 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
     public string Generate(ReportModel model)
     {
         var totalFiles = model.Lanes.Sum(l => l.Results.Count);
-        var totalBeg = Math.Round(model.Lanes.Sum(l => l.Results.Sum(r => r.BeginSizeGb)), 3);
-        var totalEnd = Math.Round(model.Lanes.Sum(l => l.Results.Sum(r => r.EndSizeGb)), 3);
+        var totalBeg = Math.Round(model.Lanes.Sum(l => l.Results.Where(r => !r.IsPassthrough).Sum(r => r.BeginSizeGb)), 3);
+        var totalEnd = Math.Round(model.Lanes.Sum(l => l.Results.Where(r => !r.IsPassthrough).Sum(r => r.EndSizeGb)), 3);
         var totalSavings = Math.Round(totalBeg - totalEnd, 3);
         var savingsPct = totalBeg > 0 ? Math.Round(100 - (totalEnd / totalBeg) * 100, 2) : 0;
         var errorCount = model.ErrorCount;
@@ -99,6 +99,7 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
   .warn-text {{ color: #8a6414; }}
   .err-code {{ border-bottom: 1px dotted #a1231e; cursor: help; }}
   .enc-tag {{ font-size: 0.7rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: #fdf3e0; color: #8a6414; white-space: nowrap; }}
+  .pt-tag {{ font-size: 0.7rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: #d6f3ef; color: #0b6b63; white-space: nowrap; }}
   .lane-problem {{ background: #fdeaea; color: #a1231e; padding: 0.4rem 0.75rem; border-radius: 6px; margin: 0.25rem 0; }}
   .summary-grid {{ display: flex; gap: 2rem; flex-wrap: wrap; margin: 1rem 0; }}
   .stat {{ background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem 1.25rem; min-width: 140px; }}
@@ -182,10 +183,12 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
             return;
         }
 
-        var beg = Math.Round(lane.Results.Sum(r => r.BeginSizeGb), 3);
-        var end = Math.Round(lane.Results.Sum(r => r.EndSizeGb), 3);
+        var beg = Math.Round(lane.Results.Where(r => !r.IsPassthrough).Sum(r => r.BeginSizeGb), 3);
+        var end = Math.Round(lane.Results.Where(r => !r.IsPassthrough).Sum(r => r.EndSizeGb), 3);
+        var passedThrough = lane.Results.Count(r => r.IsPassthrough);
+        var passthroughNote = passedThrough > 0 ? $" ({passedThrough} passed through, not counted in the sizes)" : "";
 
-        sb.Append($"<p class=\"muted\">{lane.Results.Count} file(s), {beg} GB &rarr; {end} GB</p>\n");
+        sb.Append($"<p class=\"muted\">{lane.Results.Count} file(s){passthroughNote}, {beg} GB &rarr; {end} GB</p>\n");
         sb.Append("<div class=\"table-wrap\">\n<table>\n  <thead><tr><th>File</th><th>Type</th><th>Preset</th><th>Before</th><th>After</th><th>Savings</th><th>Duration</th><th>Status</th><th>Sonarr/Radarr</th></tr></thead>\n  <tbody>\n");
 
         foreach (var r in lane.Results)
@@ -266,7 +269,10 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
             sb.Append($"<td>{WebUtility.HtmlEncode(r.FileName)}</td>");
             sb.Append($"<td>{WebUtility.HtmlEncode(r.ContentType)}</td>");
             var encoderTag = string.IsNullOrEmpty(r.EncoderLabel) ? "" : $" <span class=\"enc-tag\">{WebUtility.HtmlEncode(r.EncoderLabel)}</span>";
-            sb.Append($"<td>{WebUtility.HtmlEncode(r.PresetName ?? "")}{encoderTag}</td>");
+            // A passed-through file shows the teal Passthrough badge instead of a preset name.
+            sb.Append(r.IsPassthrough
+                ? "<td><span class=\"pt-tag\">Passthrough</span></td>"
+                : $"<td>{WebUtility.HtmlEncode(r.PresetName ?? "")}{encoderTag}</td>");
             sb.Append($"<td>{r.BeginSizeGb} GB</td>");
             sb.Append($"<td>{r.EndSizeGb} GB</td>");
             sb.Append($"<td>{savings} GB</td>");

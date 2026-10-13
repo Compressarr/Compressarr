@@ -282,7 +282,8 @@ async function removeLane(node) {
 }
 
 async function populatePresetList() {
-  const [hb, ff] = await Promise.all([fetch('/api/presets'), fetch('/api/presets?engine=ffmpeg')]);
+  // includePassthrough: a lane can pick "Passthrough (no re-encode)" for its TV and/or Movie preset.
+  const [hb, ff] = await Promise.all([fetch('/api/presets?includePassthrough=1'), fetch('/api/presets?engine=ffmpeg&includePassthrough=1')]);
   presetNamesByEngine = { HandBrake: await hb.json(), FFmpeg: await ff.json() };
 }
 

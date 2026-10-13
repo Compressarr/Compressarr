@@ -67,7 +67,8 @@ public sealed class ReportModel
 
     public int RedirectedCount => RedirectedResults.Count;
 
+    // A passed-through file is listed but its bytes are not counted (nothing was saved), so the run's savings stay the real ones.
     public double TotalBeforeGb =>
- Lanes.Sum(l => l.Results.Sum(r => r.BeginSizeGb));
-    public double TotalAfterGb => Lanes.Sum(l => l.Results.Sum(r => r.EndSizeGb));
+ Lanes.Sum(l => l.Results.Where(r => !r.IsPassthrough).Sum(r => r.BeginSizeGb));
+    public double TotalAfterGb => Lanes.Sum(l => l.Results.Where(r => !r.IsPassthrough).Sum(r => r.EndSizeGb));
 }

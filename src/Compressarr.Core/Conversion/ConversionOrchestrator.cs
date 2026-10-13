@@ -163,6 +163,9 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
     /// tests that build this class directly never need to supply one.</summary>
     private readonly IEncoderResolver? _encoders;
 
+    /// <summary>The "encoder" behind the Passthrough preset: copies the file instead of re-encoding it.</summary>
+    private readonly IEncoderRunner _passthroughRunner;
+
     public ConversionOrchestrator(
         IPathExpander pathExpander,
         IVideoFileScanner scanner,
@@ -178,9 +181,11 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         IResumeStateStore resumeStore,
         IRunProgressReporter progress,
         IConfigStore configStore,
-        IEncoderResolver? encoders = null)
+        IEncoderResolver? encoders = null,
+        IEncoderRunner? passthroughRunner = null)
     {
         _encoders = encoders;
+        _passthroughRunner = passthroughRunner ?? new PassthroughRunner();
         _pathExpander = pathExpander;
         _scanner = scanner;
         _fileBotRunner = fileBotRunner;
@@ -416,7 +421,18 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         string? encoderLabel = binding.Engine == EncoderEngine.FFmpeg ? "ffmpeg" : null;
         MediaProbeResult? sourceProbe = null;
 
-        if (binding.Engine == EncoderEngine.FFmpeg && _encoders is not null)
+        // The Passthrough preset: the file is copied, not re-encoded, so nothing that guards an encode (the ffmpeg / HandBrake HDR checks, the
+        // profile file, an output extension) applies, and everything after the "encode" - routing, the source delete/recycle/keep setting,
+        // companions, Sonarr/Radarr, the title-tag clearing - runs exactly as it does for an encoded file.
+        var isPassthrough = PassthroughPreset.Is(presetName);
+        if (isPassthrough)
+        {
+            binding = binding with { Runner = _passthroughRunner };
+            encoderLabel = "passthrough";
+            _logger.Log("  Passthrough: the file is copied, not re-encoded.");
+        }
+
+        if (!isPassthrough && binding.Engine == EncoderEngine.FFmpeg && _encoders is not null)
         {
             // Stock ffmpeg + libx265 silently drops Dolby Vision / HDR10+ dynamic metadata, so such a
             // file goes to HandBrake (which carries it through) using the ffmpeg profile's fallback
@@ -483,7 +499,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         // The HandBrake side of the same rule (a lane that runs HandBrake, or a file an ffmpeg lane handed to it): an HDR / Dolby Vision
         // file is not re-encoded with a profile whose video encoder would lose the HDR - and then replace the original. A profile
         // whose encoder keeps everything (x265, SVT-AV1 with dynamic metadata on) is never probed, so those lanes pay nothing.
-        if (binding.Engine == EncoderEngine.HandBrake && _encoders is not null
+        if (!isPassthrough && binding.Engine == EncoderEngine.HandBrake && _encoders is not null
             && _encoders.HandBrakeTraits(presetName) is { } hdrTraits && HandBrakeHdrGuard.NeedsProbe(hdrTraits))
         {
             sourceProbe ??= await _encoders.ProbeAsync(config, file.FullName, cancellationToken);
@@ -523,7 +539,8 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             }
         }
 
-        var extension = binding.Presets.GetOutputExtension(presetName, out var extensionWarning);
+        string? extensionWarning = null;
+        var extension = isPassthrough ? file.Extension : binding.Presets.GetOutputExtension(presetName, out extensionWarning);
         if (extensionWarning is not null) _logger.Log(extensionWarning, LogSeverity.Error);
 
         var destFolder = config.Processing.OutSameAsIn ? file.DirectoryName! : outputBase;
@@ -543,7 +560,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         var newFileName = Path.Combine(destFolder, baseName + extension);
         var tempFileName = Path.Combine(destFolder, baseName + ".compressarr-" + Guid.NewGuid().ToString("N")[..8] + extension);
 
-        var logName = $"{baseName}_{timestamp}_{i.ToString().PadLeft(padSize, '0')}_{(binding.Engine == EncoderEngine.FFmpeg ? "FFdetails" : "HBdetails")}.txt";
+        var logName = $"{baseName}_{timestamp}_{i.ToString().PadLeft(padSize, '0')}_{(isPassthrough ? "PTdetails" : binding.Engine == EncoderEngine.FFmpeg ? "FFdetails" : "HBdetails")}.txt";
         var detailLogFile = Path.Combine(logFilePath, logName);
 
         var lastLoggedPercent = -10.0;
@@ -564,7 +581,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
 
         // Brings the generated profile file up to date (a no-op unless a profile changed since it
         // was last written) right before the encoder is started.
-        var presetSource = binding.Presets.PreparePresetSource();
+        var presetSource = isPassthrough ? "" : binding.Presets.PreparePresetSource();
 
         var runResult = await binding.Runner.RunAsync(
             new EncodeRequest(binding.ToolPath, file.FullName, tempFileName, presetSource, presetName, binding.ExtraOptions, detailLogFile, binding.ProbePath),
@@ -707,6 +724,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             ContentType = contentType,
             PresetName = presetName,
             EncoderLabel = encoderLabel,
+            IsPassthrough = isPassthrough,
             BeginSizeGb = beginSizeGb,
             EndSizeGb = endSizeGb,
             Success = overallSuccess,

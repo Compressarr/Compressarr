@@ -276,7 +276,9 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 }
                 _logger.ClearProblem($"lane-no-preset:{lane.Id}");
 
-                if (_encoders is not null && _encoders.NotReadyReason(lane.Engine, config) is { } engineProblem)
+                // A lane whose presets are all Passthrough never starts an encoder, so a missing HandBrake / ffmpeg is not its problem.
+                if (_encoders is not null && !PassthroughPreset.OnlyPassthrough(lane.TvPreset, lane.MoviePreset)
+                    && _encoders.NotReadyReason(lane.Engine, config) is { } engineProblem)
                 {
                     _logger.LogProblem($"lane-encoder:{lane.Id}", $"Skipping lane [{lane.DisplayName}] - {engineProblem}");
                     thisLaneProblems.Add(ReportErrorCode.LaneEncoderNotAvailable);
@@ -424,8 +426,9 @@ public sealed class RunOrchestrator : IRunOrchestrator
             // History totals count only files that actually produced an encode (see CountsTowardTotals); a run
             // in which every file failed is still recorded (it has a report and a run number) with 0 files.
             var counted = allResults.Where(r => r.CountsTowardTotals).ToList();
-            var totalBeg = counted.Sum(r => r.BeginSizeGb);
-            var totalEnd = counted.Sum(r => r.EndSizeGb);
+            // The file count includes a passed-through file; the bytes do not (nothing was saved - see ConversionResult.IsPassthrough).
+            var totalBeg = counted.Where(r => !r.IsPassthrough).Sum(r => r.BeginSizeGb);
+            var totalEnd = counted.Where(r => !r.IsPassthrough).Sum(r => r.EndSizeGb);
             // Mirrors ReportModel.ErrorCount/WarningCount - computed here too since the history
             // record is written before reportModel exists below.
             var errorCount = allResults.Count(r => !r.Success);
@@ -557,8 +560,8 @@ public sealed class RunOrchestrator : IRunOrchestrator
         {
             if (config.Notifications.ToastEnabled)
             {
-                var toastBeg = allResults.Sum(r => r.BeginSizeGb);
-                var toastEnd = allResults.Sum(r => r.EndSizeGb);
+                var toastBeg = allResults.Where(r => !r.IsPassthrough).Sum(r => r.BeginSizeGb);
+                var toastEnd = allResults.Where(r => !r.IsPassthrough).Sum(r => r.EndSizeGb);
 
                 _notifications.NotifyRunComplete(
                     new RunCompletionSummary(totalFiles, toastBeg, toastEnd, runTime),

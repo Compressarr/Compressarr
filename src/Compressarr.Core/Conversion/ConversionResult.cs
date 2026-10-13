@@ -14,6 +14,11 @@ public sealed class ConversionResult
     /// ordinary HandBrake encode, so a HandBrake-only setup's report reads exactly as before.</summary>
     public string? EncoderLabel { get; init; }
 
+    /// <summary>True when the file was passed through (the Passthrough preset): copied and filed like any other, but not re-encoded.
+    /// It still counts as a file in History and the report, but its bytes do not - nothing was saved, and counting them would only dilute
+    /// the real savings.</summary>
+    public bool IsPassthrough { get; init; }
+
     public double BeginSizeGb { get; init; }
     public double EndSizeGb { get; init; }
     public bool Success { get; init; }

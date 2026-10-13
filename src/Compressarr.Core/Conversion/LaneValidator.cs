@@ -60,11 +60,11 @@ public static class LaneValidator
         }
         else
         {
-            if (!string.IsNullOrWhiteSpace(lane.TvPreset) && !presets.PresetExists(lane.TvPreset))
+            if (!string.IsNullOrWhiteSpace(lane.TvPreset) && !PassthroughPreset.Is(lane.TvPreset) && !presets.PresetExists(lane.TvPreset))
             {
                 issues.Add(new ValidationIssue("tvPreset", $"TV preset '{lane.TvPreset}' was not found in Compressarr's profiles - TV episodes in this lane will be skipped."));
             }
-            if (!string.IsNullOrWhiteSpace(lane.MoviePreset) && !presets.PresetExists(lane.MoviePreset))
+            if (!string.IsNullOrWhiteSpace(lane.MoviePreset) && !PassthroughPreset.Is(lane.MoviePreset) && !presets.PresetExists(lane.MoviePreset))
             {
                 issues.Add(new ValidationIssue("moviePreset", $"Movie preset '{lane.MoviePreset}' was not found in Compressarr's profiles - movies in this lane will be skipped."));
             }

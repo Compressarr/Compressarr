@@ -3572,4 +3572,42 @@ public class ConversionOrchestratorTests : IDisposable
         Assert.True(File.Exists(Path.Combine(setup.KidsMovies, "Sesame Street (1969)", "Sesame Street (1969).mkv")));
     }
 
+    [Theory]
+    [InlineData(DeleteAfterConvertMode.Delete, true)]
+    [InlineData(DeleteAfterConvertMode.Maintain, false)]
+    public async Task Passthrough_CopiesToOutput_NeverStartsTheEncoder_AndTheSourceSettingStillApplies(DeleteAfterConvertMode mode, bool sourceIsRemoved)
+    {
+        var inputDir = Path.Combine(_tempDir, "Input");
+        var outputDir = Path.Combine(_tempDir, "Output");
+        Directory.CreateDirectory(inputDir);
+        Directory.CreateDirectory(outputDir);
+        var source = Path.Combine(inputDir, "file1.mkv");
+        File.WriteAllText(source, "source bytes");
+
+        var lane = new LaneConfig { Id = "lane1", DisplayName = "Test Lane", Enabled = true, Input = inputDir, Output = outputDir, MoviePreset = PassthroughPreset.Name };
+        var config = BuildConfig(mode);
+        config.Lanes.Add(lane);
+        var configStore = new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue);
+        var encoder = new FakeProcessRunner();
+        var trash = new RecordingTrashService();
+
+        var orchestrator = new ConversionOrchestrator(
+            new PassThroughPathExpander(), new RealFolderScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), new MetadataService(),
+            encoder, new FileRouter(), new NoOpCompanionFileService(), new NoOpArrUnmonitorService(),
+            trash, new NoOpRunLogger(), new NoOpResumeStateStore(), new NoOpProgressReporter(), configStore);
+
+        var results = await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.True(result.Success);
+        Assert.True(result.IsPassthrough);
+        Assert.Equal("passthrough", result.EncoderLabel);
+        Assert.Equal(0, encoder.CallCount);                                              // the encoder was never started
+        var copy = Assert.Single(Directory.GetFiles(outputDir));
+        Assert.EndsWith(".mkv", copy);                                                   // keeps the source's own extension
+        Assert.Equal("source bytes", File.ReadAllText(copy));
+        Assert.Equal(result.BeginSizeGb, result.EndSizeGb);                              // nothing saved
+        // The Delete / Maintain choice governs the source exactly as it does after an encode.
+        Assert.Equal(sourceIsRemoved ? 1 : 0, trash.Calls.Count(c => c.Path == source));
+    }
 }

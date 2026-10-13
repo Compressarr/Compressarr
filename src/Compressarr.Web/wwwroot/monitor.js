@@ -178,7 +178,7 @@ async function loadQueuePresetNames() {
     const settingsRes = await fetch('/api/settings');
     const settings = await settingsRes.json();
     queueEtaFormat = settings.queueEtaFormat || 'DateTime';
-    const [hb, ff] = await Promise.all([fetch('/api/presets'), fetch('/api/presets?engine=ffmpeg')]);
+    const [hb, ff] = await Promise.all([fetch('/api/presets?includePassthrough=1'), fetch('/api/presets?engine=ffmpeg&includePassthrough=1')]);
     presetNamesByEngine = { HandBrake: await hb.json(), FFmpeg: await ff.json() };
   } catch { /* best-effort - the preset-override dropdown just stays empty if this fails */ }
 }
@@ -248,6 +248,7 @@ function queueDestinationMarker(item) {
 
 // A small encoder tag beside the lane name: ffmpeg rows always; HandBrake rows only when some lane uses ffmpeg.
 function queueEngineChip(item) {
+  if (item.isPassthrough) return ' <span class="queue-chip pt" title="This file is copied, not re-encoded. Everything else (filing, renaming, cleanup) still runs.">Passthrough</span>';
   if (item.engine === 'FFmpeg') return ' <span class="queue-chip ff">ffmpeg</span>';
   return anyFfmpegLane ? ' <span class="queue-chip">HandBrake</span>' : '';
 }
@@ -641,7 +642,8 @@ async function poll() {
   // Run Now works with monitoring on (it skips the countdown) or off (it runs one pass without starting monitoring);
   // it is only unavailable while a pass is already running or monitoring is stopping.
   runNowBtn.disabled = s.isRunning || s.isStopping;
-  togglePauseIsRunning = s.isRunning;
+  // A passthrough copy has no encoder process to freeze, so Pause is not offered while one runs (Abort still works).
+  togglePauseIsRunning = s.isRunning && !s.isPassthrough;
   togglePauseIsPaused = s.isPaused;
   renderPauseButton();
 
@@ -656,7 +658,7 @@ async function poll() {
   document.getElementById('fileLabel').textContent = s.isRenaming
     ? `Renaming files with FileBot in Lane ${s.laneDisplayName}`
     : (s.isRunning && s.laneDisplayName)
-      ? `Compressing File in Lane ${s.laneDisplayName}${s.presetName ? ` using ${s.engine === 'FFmpeg' ? 'ffmpeg profile' : 'preset'} ${s.presetName}` : ''}${s.landsInLaneName ? ` and lands in ${s.landsInLaneName}` : ''}`
+      ? `${s.isPassthrough ? 'Copying' : 'Compressing'} File in Lane ${s.laneDisplayName}${s.isPassthrough ? ' (passthrough, not re-encoded)' : (s.presetName ? ` using ${s.engine === 'FFmpeg' ? 'ffmpeg profile' : 'preset'} ${s.presetName}` : '')}${s.landsInLaneName ? ` and lands in ${s.landsInLaneName}` : ''}`
       : 'Waiting for files';
   document.getElementById('fileValue').textContent = s.isRenaming ? '-' : (s.isRunning ? (s.fileName || '-') : '-');
 

@@ -1203,4 +1203,73 @@ public class RunOrchestratorTests : IDisposable
         Assert.Null(result);
         Assert.Empty(resolver.HandBrake.Requests);
     }
+
+    [Fact]
+    public async Task RunOnceAsync_Passthrough_CopiesInsteadOfEncoding_AndHistoryCountsTheFileButNotItsBytes()
+    {
+        var (config, input) = MakeSingleLaneConfig();
+        config.Lanes[0].MoviePreset = PassthroughPreset.Name;
+        var big = new byte[3 * 1024 * 1024];
+        new Random(1).NextBytes(big);
+        File.WriteAllBytes(Path.Combine(input, "Fight Club (1999).mkv"), big);
+        var processRunner = new RecordingProcessRunner();
+        var history = new NoOpHistoryStore();
+        var (orchestrator, _) = BuildOrchestrator(config, processRunner, historyStore: history);
+
+        var result = await orchestrator.RunOnceAsync(config);
+
+        Assert.Empty(processRunner.ProcessedInOrder);                                       // no encoder was ever started
+        Assert.Equal(1, result!.TotalFiles);
+        var copy = Assert.Single(Directory.GetFiles(config.Lanes[0].Output, "*.mkv"));
+        Assert.Equal(big, await File.ReadAllBytesAsync(copy));                              // a byte-for-byte copy reached the Output step
+        var record = Assert.Single(history.Appended);
+        Assert.Equal(1, record.FileCount);                                                  // history counts the file...
+        Assert.Equal(0, record.BeginSizeGb);                                                // ...but not its bytes
+        Assert.Equal(0, record.EndSizeGb);
+        var report = File.ReadAllText(Assert.Single(Directory.GetFiles(config.Report.ReportPath, "*.html")));
+        Assert.Contains("pt-tag", report);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_AMixedRun_CountsBothFiles_ButOnlyTheEncodedFilesBytes()
+    {
+        var (config, input) = MakeSingleLaneConfig();
+        var data = new byte[3 * 1024 * 1024];
+        var encodedFile = Path.Combine(input, "a-encoded.mkv");
+        var copiedFile = Path.Combine(input, "b-copied.mkv");
+        File.WriteAllBytes(encodedFile, data);
+        File.WriteAllBytes(copiedFile, data);
+        var processRunner = new RecordingProcessRunner();
+        var history = new NoOpHistoryStore();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, processRunner, historyStore: history);
+        new JsonResumeStateStore().Save(new List<ResumeEntry>
+        {
+            new() { LaneId = "lane", FullName = encodedFile, Status = ResumeStatus.Pending, Order = 0 },
+            new() { LaneId = "lane", FullName = copiedFile, Status = ResumeStatus.Pending, Order = 1, PresetOverride = PassthroughPreset.Name }   // one file's own override
+        }, resumeFilePath);
+
+        var result = await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(new[] { "a-encoded.mkv" }, processRunner.ProcessedInOrder);            // only the first went to the encoder
+        Assert.Equal(2, result!.TotalFiles);
+        var record = Assert.Single(history.Appended);
+        Assert.Equal(2, record.FileCount);
+        Assert.Equal(0.003, record.BeginSizeGb);                                            // the encoded file's 3 MB, not 6
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_ALaneThatOnlyPassesThrough_DoesNotNeedAnEncoderToBeInstalled()
+    {
+        var (config, input) = MakeSingleLaneConfig("Inception (2010).mkv");
+        config.Lanes[0].MoviePreset = PassthroughPreset.Name;
+        config.Lanes[0].Engine = EncoderEngine.FFmpeg;                                       // ffmpeg is not installed in this test
+        var resolver = new Compressarr.Core.Tests.Conversion.EngResolver();
+        resolver.NotReady[EncoderEngine.FFmpeg] = "ffmpeg was not found at X.";
+        var (orchestrator, _) = BuildOrchestrator(config, new RecordingProcessRunner(), encoders: resolver);
+
+        var result = await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(1, result!.TotalFiles);
+        Assert.Single(Directory.GetFiles(config.Lanes[0].Output, "*.mkv"));
+    }
 }

@@ -1920,3 +1920,7 @@ pre.ed-cmd { margin: 0; padding: 12px 14px; background: #1d2130; color: #d6dcf0;
 .check-row .lane-switch input[type="checkbox"] { width: 100%; height: 100%; }
 .check-row .lane-switch { margin-right: 2px; }
 .lane-switch:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Passthrough badge: teal, on the queue row (and in the report). */
+.queue-chip.pt { background: color-mix(in srgb, #14b8a6 18%, transparent); color: #0f8f82; border-color: transparent; }
+[data-theme="dark"] .queue-chip.pt { color: #2dd4bf; }
