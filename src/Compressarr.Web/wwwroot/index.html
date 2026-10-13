@@ -269,7 +269,7 @@
             <div class="check-row"><input type="checkbox" id="posterSmaller" /><label for="posterSmaller">Use smaller images<span class="help-tag" tabindex="0" title="Download TMDB's smaller picture sizes: faster and lighter, a little less sharp on a high-resolution screen.">?<span class="help-tip">Download TMDB's smaller picture sizes: faster and lighter, a little less sharp on a high-resolution screen.</span></span></label></div>
           </div>
         </div>
-        <div class="field-with-btn" style="margin-top: 4px;"><span class="muted" id="posterCacheInfo" style="flex: 1;"></span><button id="posterClearBtn">Clear Cached Posters</button></div>
+        <p class="muted" id="posterCacheInfo" style="margin: 4px 0 0;"></p>
         <div class="tmdb-credit">
           <img class="tmdb-logo" src="/assets/tmdb-logo.svg" alt="TMDB" onerror="this.parentNode.classList.add('no-logo');this.remove()" />
           <div class="tmdb-credit-text">
@@ -408,6 +408,10 @@
           <div class="field-row">
             <label>Clean up old logs &amp; reports<span class="help-tag" tabindex="0" title="Runs the same retention cleanup a normal pass already does automatically (using the Log/report retention setting above) right now, instead of waiting for the next one. Removed files go to the Recycle Bin, not a permanent delete.">?<span class="help-tip">Runs the same retention cleanup a normal pass already does automatically (using the Log/report retention setting above) right now, instead of waiting for the next one. Removed files go to the Recycle Bin, not a permanent delete.</span></span></label>
             <button id="cleanupNowBtn">Clean Up Now</button>
+          </div>
+          <div class="field-row">
+            <label>Clear cached posters<span class="help-tag" tabindex="0" title="Deletes every saved queue poster and what was looked up for them. They are downloaded again when needed. Your settings and TMDB key are not touched.">?<span class="help-tip">Deletes every saved queue poster and what was looked up for them. They are downloaded again when needed. Your settings and TMDB key are not touched.</span></span></label>
+            <button id="posterClearBtn">Clear Cached Posters</button>
           </div>
           <div class="maintenance-divider adv-only"></div>
           <div class="field-row adv-only">
