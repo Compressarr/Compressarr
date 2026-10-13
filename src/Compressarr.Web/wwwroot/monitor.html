@@ -38,11 +38,14 @@
         <div class="stat-sub" id="queueEtaValue"></div>
         <button id="runAnywayBtn" class="hidden" style="margin-top: 8px" title="Off-hours only is holding the queue for the daytime window. Start encoding now; the hold returns when the window changes.">Run anyway</button>
       </div>
-      <div class="stat stat-file">
-        <div class="label" id="fileLabel">Waiting for files</div>
-        <div class="value" id="fileValue">-</div>
-        <div class="progress-track"><div class="progress-fill" id="progressFill" style="width: 0%"></div></div>
-        <div class="stat-sub" id="progressSub"></div>
+      <div class="stat stat-file" id="statFile">
+        <span class="job-poster hidden" id="jobPoster"></span>
+        <div class="job-body">
+          <div class="label" id="fileLabel">Waiting for files</div>
+          <div class="value" id="fileValue">-</div>
+          <div class="progress-track"><div class="progress-fill" id="progressFill" style="width: 0%"></div></div>
+          <div class="stat-sub" id="progressSub"></div>
+        </div>
       </div>
     </div>
 

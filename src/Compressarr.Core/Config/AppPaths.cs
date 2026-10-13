@@ -84,6 +84,9 @@ public static class AppPaths
     /// <summary>Where each installed catalog profile came from and the fingerprint it must still match.</summary>
     public static string GetCatalogRecordsFilePath() => Path.Combine(GetProfilesDirectory(), "catalog-installed.json");
 
+    /// <summary>The poster cache: what was looked up on TMDb (index.json) and the downloaded images, by size. Safe to delete.</summary>
+    public static string GetPostersDirectory() => Path.Combine(GetAppDataDirectory(), "posters");
+
     /// <summary>Where Check/Install puts a managed copy of ffmpeg (and ffprobe) - per user, inside
     /// Compressarr's own folder, so no administrator rights are needed.</summary>
     public static string GetToolsDirectory() => Path.Combine(GetAppDataDirectory(), "tools");

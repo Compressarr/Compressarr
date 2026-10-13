@@ -11,7 +11,7 @@ namespace Compressarr.Core.Queue;
 /// name in different subfolders (e.g. two different shows' own "episode.mkv"). Code-review finding:
 /// matching on FileName alone let a skip/remove/preset-override/reorder request silently target the
 /// wrong one of two same-named files, or fail ambiguously.</summary>
-public sealed record UpNextItem(string LaneId, string LaneDisplayName, string FileName, string FullName, double SizeGb, string? Preset, bool IsResumed, bool IsError, bool IsSkipped, bool IsCustomPreset, bool IsFileBotUnmatched, string? DestinationLaneId = null, string? DestinationLaneName = null, bool DestinationMissing = false, EncoderEngine Engine = EncoderEngine.HandBrake);
+public sealed record UpNextItem(string LaneId, string LaneDisplayName, string FileName, string FullName, double SizeGb, string? Preset, bool IsResumed, bool IsError, bool IsSkipped, bool IsCustomPreset, bool IsFileBotUnmatched, string? DestinationLaneId = null, string? DestinationLaneName = null, bool DestinationMissing = false, EncoderEngine Engine = EncoderEngine.HandBrake, string? PosterKey = null);
 
 /// <summary>What the queue display needs to know about the run currently in progress: the full path
 /// of the file being encoded (excluded from the waiting list) and, per lane, whether that lane

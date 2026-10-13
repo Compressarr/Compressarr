@@ -25,6 +25,7 @@ public static class WebMonitorStartup
         app.MapBrowseEndpoints();
         app.MapAboutEndpoints();
         app.MapAnnouncementEndpoints();
+        app.MapPosterEndpoints();
         app.MapArrEndpoints();
         app.MapBackupEndpoints();
         app.MapMaintenanceEndpoints();

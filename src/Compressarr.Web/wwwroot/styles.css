@@ -1860,3 +1860,47 @@ pre.ed-cmd { margin: 0; padding: 12px 14px; background: #1d2130; color: #d6dcf0;
 .ann-title { margin-top: 3px; font-size: 14px; font-weight: 600; }
 .ann-text { margin-top: 4px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
 .ann-link { display: inline-block; margin-top: 6px; font-size: 12.5px; }
+
+
+/* ---- Queue posters (Settings > Queue Posters) -------------------------------------------------------------------------------------
+   A poster thumbnail at the left of each queue row, and a larger one beside the file being encoded. Absent entirely when the setting is
+   off, so nothing about the page changes for anyone who has not turned it on. */
+.queue-list { --pw: 40px; }
+.queue-list.poster-small { --pw: 32px; }
+.queue-list.poster-medium { --pw: 40px; }
+.queue-list.poster-large { --pw: 52px; }
+
+.queue-poster {
+  position: relative; flex: 0 0 auto; width: var(--pw); height: calc(var(--pw) * 1.5); border-radius: 4px; overflow: hidden;
+  background: var(--bg); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-dim);
+}
+.queue-poster img, .job-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.queue-poster.noimg { background: repeating-linear-gradient(45deg, var(--bg), var(--bg) 6px, var(--bg-alt) 6px, var(--bg-alt) 12px); }
+.queue-poster.noimg::before {
+  content: ''; width: 18px; height: 18px; background: currentColor; opacity: .35;
+  -webkit-mask: url("data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%224%22%20width%3D%2218%22%20height%3D%2216%22%20rx%3D%222%22%2F%3E%3Cpath%20d%3D%22M7%204v16M17%204v16M3%209h4M17%209h4M3%2015h4M17%2015h4%22%2F%3E%3C%2Fsvg%3E") center/contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%224%22%20width%3D%2218%22%20height%3D%2216%22%20rx%3D%222%22%2F%3E%3Cpath%20d%3D%22M7%204v16M17%204v16M3%209h4M17%209h4M3%2015h4M17%2015h4%22%2F%3E%3C%2Fsvg%3E") center/contain no-repeat;
+}
+.queue-item.skipped .queue-poster { opacity: .45; filter: grayscale(1); }
+
+.job-poster {
+  position: relative; flex: 0 0 auto; width: 64px; height: 96px; border-radius: 5px; overflow: hidden; border: 1px solid var(--border);
+  background: var(--bg); box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+}
+.job-poster.hidden { display: none; }
+.stat-file.with-poster { display: flex; gap: 14px; align-items: flex-start; }
+.stat-file .job-body { flex: 1; min-width: 0; }
+
+.queue-handle-spacer { flex: 0 0 14px; width: 14px; }
+
+/* A poster takes room from the row, so rows tighten a little (desktop widths only) rather than wrapping the last buttons onto a second line. */
+@media (min-width: 721px) {
+  .queue-list.has-posters .queue-item { column-gap: 12px; }
+  .queue-list.has-posters .queue-item .queue-file { min-width: 110px; }
+}
+
+@media (max-width: 720px) {
+  .queue-handle-spacer { display: none; }
+  .queue-list, .queue-list.poster-small, .queue-list.poster-medium, .queue-list.poster-large { --pw: 32px; }
+  .job-poster { width: 48px; height: 72px; }
+}

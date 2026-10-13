@@ -46,6 +46,9 @@ public sealed class CompressarrConfig
 
     /// <summary>Short news items from the Compressarr project (2.2 and 2.1.10 on). On by default.</summary>
     public AnnouncementSettings Announcements { get; set; } = new();
+
+    /// <summary>Optional poster thumbnails on the Monitor page's queue, from TMDb. Off by default.</summary>
+    public PosterSettings Posters { get; set; } = new();
     public ArrSettings Arrs { get; set; } = new();
     public WebSettings Web { get; set; } = new();
     public BackupSettings Backup { get; set; } = new();
@@ -303,6 +306,29 @@ public sealed class AnnouncementSettings
 {
     /// <summary>When false Compressarr never asks GitHub for announcements and the bell is hidden.</summary>
     public bool Enabled { get; set; } = true;
+}
+
+public enum PosterSize
+{
+    Small,
+    Medium,
+    Large
+}
+
+/// <summary>"Show posters on queue" (Settings): small poster pictures beside each file on the Monitor page, looked up by title on TMDb with
+/// the user's own free API key. Nothing is requested while Enabled is false. See PosterService for exactly what is sent and stored.</summary>
+public sealed class PosterSettings
+{
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>The user's TMDb API key (the shorter "API Key", not the Read Access Token). Stored like the Sonarr/Radarr keys.</summary>
+    public string TmdbApiKey { get; set; } = "";
+
+    /// <summary>How big a poster is drawn on the page.</summary>
+    public PosterSize Size { get; set; } = PosterSize.Medium;
+
+    /// <summary>Download TMDb's smaller picture sizes: faster and lighter, a little less sharp on a high-resolution screen.</summary>
+    public bool SmallerImages { get; set; } = false;
 }
 
 public sealed class StartupSettings

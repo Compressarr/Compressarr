@@ -1,0 +1,87 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
+using Compressarr.Core.Conversion;
+
+namespace Compressarr.Core.Posters;
+
+/// <summary>What to look a poster up by: a TV show (by name) or a movie (by title and year). Only this text is ever sent to TMDb - never
+/// a path, a file size or anything else about the file.</summary>
+public sealed record PosterQuery(bool IsTv, string Title, int? Year)
+{
+    /// <summary>Two files that mean the same show or movie share one key, so a whole season costs one lookup.</summary>
+    public string CacheKey => $"{(IsTv ? "tv" : "movie")}|{Title.ToLowerInvariant()}|{Year}";
+
+    /// <summary>A short, URL-safe id for the cached poster (it is what the browser asks the app for).</summary>
+    public string Id => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(CacheKey)))[..16].ToLowerInvariant();
+}
+
+/// <summary>Works out what a queued file is, from its name alone, using the same TV-versus-movie rule the rest of the app uses
+/// (ContentClassifier). A TV file looks up its show; a movie must carry a "(YYYY)" year tag, because a title with no year matches the wrong
+/// film too often - a file without one simply gets no poster rather than a wrong one.</summary>
+public static partial class PosterNameParser
+{
+    private const int MaxTitleLength = 100;
+
+    [GeneratedRegex(@"^(?<title>.+?)[\s._-]*\((?<year>\d{4})\)")]
+    private static partial Regex MovieWithYear();
+
+    [GeneratedRegex(@"\((?<year>\d{4})\)\s*$")]
+    private static partial Regex TrailingYear();
+
+    [GeneratedRegex(@"\s*\([^)]*\)\s*$")]
+    private static partial Regex TrailingParenthetical();
+
+    public static PosterQuery? Parse(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName)) return null;
+
+        var episode = ContentClassifier.GetEpisodeInfo(fileName);
+        if (episode.HasSeasonAndEpisode)
+        {
+            return ParseShow(episode.ShowName);
+        }
+
+        var baseName = Path.GetFileNameWithoutExtension(fileName);
+        var match = MovieWithYear().Match(baseName);
+        if (!match.Success) return null;
+
+        var title = Clean(match.Groups["title"].Value);
+        var year = int.Parse(match.Groups["year"].Value);
+        if (title.Length == 0 || year < 1888 || year > 2100) return null;
+
+        return new PosterQuery(IsTv: false, title, year);
+    }
+
+    private static PosterQuery? ParseShow(string showName)
+    {
+        var name = showName.Trim();
+        int? year = null;
+
+        // "Show Name (2019)" narrows the search; a different tag such as "(US)" or "(UK)" is not part of the title TMDb knows it by.
+        var yearMatch = TrailingYear().Match(name);
+        if (yearMatch.Success)
+        {
+            year = int.Parse(yearMatch.Groups["year"].Value);
+            name = name[..yearMatch.Index];
+        }
+        else
+        {
+            name = TrailingParenthetical().Replace(name, "");
+        }
+
+        var title = Clean(name);
+        if (title.Length == 0) return null;
+        if (year is < 1888 or > 2100) year = null;
+
+        return new PosterQuery(IsTv: true, title, year);
+    }
+
+    /// <summary>Dots and underscores between words ("Breaking.Bad") become spaces; runs of spaces collapse; the length is capped.</summary>
+    private static string Clean(string text)
+    {
+        var spaced = text.Replace('.', ' ').Replace('_', ' ');
+        var collapsed = string.Join(' ', spaced.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim(' ', '-');
+        return collapsed.Length > MaxTitleLength ? collapsed[..MaxTitleLength].TrimEnd() : collapsed;
+    }
+}

@@ -47,7 +47,8 @@ internal static class ConfigMapping
         BackupIntervalDays: config.Backup.IntervalDays,
         BackupRetentionDays: config.Backup.RetentionDays,
         BackupLastRunUtc: config.Backup.LastRunUtc,
-        ValidationIssues: validationIssues);
+        ValidationIssues: validationIssues,
+        Posters: new PosterSettingsDto(config.Posters.Enabled, config.Posters.TmdbApiKey, config.Posters.Size.ToString(), config.Posters.SmallerImages));
 
     public static void ApplySettingsDto(CompressarrConfig config, SettingsDto dto)
     {
@@ -89,6 +90,14 @@ internal static class ConfigMapping
         config.Backup.FolderPath = dto.BackupFolderPath;
         config.Backup.IntervalDays = dto.BackupIntervalDays;
         config.Backup.RetentionDays = dto.BackupRetentionDays;
+        if (dto.Posters is { } posters)
+        {
+            config.Posters.Enabled = posters.Enabled;
+            config.Posters.TmdbApiKey = (posters.TmdbApiKey ?? "").Trim();
+            config.Posters.Size = Enum.TryParse<PosterSize>(posters.Size, ignoreCase: true, out var posterSize) ? posterSize : PosterSize.Medium;
+            config.Posters.SmallerImages = posters.SmallerImages;
+        }
+
         // BackupLastRunUtc is read-only from the client's perspective - set only by BackupService
         // itself after a real backup runs, never round-tripped back in from a settings save.
 

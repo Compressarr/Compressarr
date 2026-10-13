@@ -105,6 +105,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IUpdateCheckService, UpdateCheckService>();
         services.AddSingleton<Compressarr.Core.Announcements.IAnnouncementStateStore, Compressarr.Core.Announcements.JsonAnnouncementStateStore>();
         services.AddSingleton<Compressarr.Core.Announcements.IAnnouncementService, Compressarr.Core.Announcements.AnnouncementService>();
+        services.AddSingleton<Compressarr.Core.Posters.IPosterService, Compressarr.Core.Posters.PosterService>();
 
         return services;
     }

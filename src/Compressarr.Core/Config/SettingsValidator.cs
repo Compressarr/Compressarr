@@ -21,6 +21,11 @@ public static class SettingsValidator
             }
         }
 
+        if (config.Posters.Enabled && string.IsNullOrWhiteSpace(config.Posters.TmdbApiKey))
+        {
+            issues.Add(new ValidationIssue("tmdbApiKey", "Show posters on queue is on, but it needs a TMDb API key (free at themoviedb.org)."));
+        }
+
         if (config.Processing.VidTypes.Count == 0)
         {
             issues.Add(new ValidationIssue("vidTypes", "At least one video extension is required - without one, no file can ever be recognized as a video to convert."));

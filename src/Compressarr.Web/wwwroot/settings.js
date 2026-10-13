@@ -11,6 +11,7 @@ function setStatus(text, success) { setStatusMessage(text, success === 'error' ?
 // Logical validation-issue field key -> the actual input it lives on (see ValidationIssue's own
 // note on why these can differ).
 const SETTINGS_FIELD_MAP = {
+  tmdbApiKey: '#tmdbApiKey',
   fileBotCliPath: '#fileBotCliPath',
   vidTypes: '#vidTypes'
 };
@@ -89,6 +90,11 @@ function fillForm(dto) {
   document.getElementById('queueEtaFormat').value = dto.queueEtaFormat;
   document.getElementById('runAtLogin').checked = dto.runAtLogin;
   document.getElementById('announcementsEnabled').checked = dto.announcementsEnabled;
+  const posters = dto.posters || { enabled: false, tmdbApiKey: '', size: 'Medium', smallerImages: false };
+  document.getElementById('postersEnabled').checked = posters.enabled;
+  document.getElementById('tmdbApiKey').value = posters.tmdbApiKey;
+  document.getElementById('posterSize').value = posters.size;
+  document.getElementById('posterSmaller').checked = posters.smallerImages;
   document.getElementById('updateChannel').value = dto.updateChannel || 'Stable';
   document.getElementById('postExecCmd').value = dto.postExecCmd;
   document.getElementById('postExecArgs').value = dto.postExecArgs;
@@ -153,6 +159,12 @@ function readForm() {
     webPort: parseInt(document.getElementById('webPort').value, 10) || 1212,
     runAtLogin: document.getElementById('runAtLogin').checked,
     announcementsEnabled: document.getElementById('announcementsEnabled').checked,
+    posters: {
+      enabled: document.getElementById('postersEnabled').checked,
+      tmdbApiKey: document.getElementById('tmdbApiKey').value.trim(),
+      size: document.getElementById('posterSize').value,
+      smallerImages: document.getElementById('posterSmaller').checked
+    },
     updateChannel: document.getElementById('updateChannel').value,
     backupFolderPath: document.getElementById('backupFolderPath').value,
     backupIntervalDays: parseInt(document.getElementById('backupIntervalDays').value, 10) || 7,
@@ -243,6 +255,37 @@ async function testArrConnection(service) {
   const body = await res.json();
   setStatus(body.message, body.success ? true : 'error');
 }
+
+// ---- Queue Posters: Test Key checks what is typed (saved or not); the cache line says what is stored and whether TMDB is refusing the key.
+document.getElementById('tmdbTestBtn').addEventListener('click', async () => {
+  setStatus('Testing...');
+  const res = await fetch('/api/posters/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey: document.getElementById('tmdbApiKey').value.trim() })
+  });
+  const body = await res.json();
+  setStatus(body.message, body.success ? true : 'error');
+});
+
+async function refreshPosterCacheInfo() {
+  const el = document.getElementById('posterCacheInfo');
+  try {
+    const info = await (await fetch('/api/posters/info')).json();
+    const size = info.bytes >= 1048576 ? (info.bytes / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(info.bytes / 1024)) + ' KB';
+    el.textContent = (info.posters === 0 ? 'No posters saved yet.' : `${info.posters} poster${info.posters === 1 ? '' : 's'} saved (${size}).`)
+      + (info.problem ? ' ' + info.problem : '');
+  } catch { el.textContent = ''; }
+}
+
+document.getElementById('posterClearBtn').addEventListener('click', async () => {
+  if (!confirm('Delete all saved posters? They are downloaded again when needed.')) return;
+  const body = await (await fetch('/api/posters/clear', { method: 'POST' })).json();
+  setStatus(body.removed === 0 ? 'No saved posters to clear.' : `Cleared ${body.removed} saved poster${body.removed === 1 ? '' : 's'}.`, true);
+  refreshPosterCacheInfo();
+});
+
+refreshPosterCacheInfo();
 
 document.getElementById('sonarrTestBtn').addEventListener('click', () => testArrConnection('sonarr'));
 document.getElementById('radarrTestBtn').addEventListener('click', () => testArrConnection('radarr'));

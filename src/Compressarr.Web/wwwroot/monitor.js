@@ -263,6 +263,24 @@ function queueBadgeLabel(item) {
   return item.isResumed ? 'Resumed' : 'New';
 }
 
+// Poster pictures (Settings > Queue Posters). Set from each poll before the queue is drawn; when off, rows are drawn exactly as before.
+let posterConfig = { enabled: false, smaller: false };
+
+function posterSrc(key, job) {
+  const size = job ? (posterConfig.smaller ? 'w154' : 'w185') : (posterConfig.smaller ? 'w92' : 'w154');
+  return `/api/posters/${encodeURIComponent(key)}?size=${size}`;
+}
+
+// A poster when TMDB has been asked about this title, otherwise a neutral placeholder (a file with no year in its name, or one not looked
+// up yet). An image that fails to load turns into the placeholder too.
+function queuePosterHtml(item) {
+  if (!posterConfig.enabled) return '';
+  // An Error row has no drag handle; the spacer keeps its poster in line with the other rows.
+  const spacer = item.isError ? '<span class="queue-handle-spacer"></span>' : '';
+  if (!item.posterKey) return spacer + '<span class="queue-poster noimg"></span>';
+  return spacer + `<span class="queue-poster"><img alt="" decoding="async" draggable="false" src="${posterSrc(item.posterKey, false)}" onerror="this.parentNode.classList.add('noimg');this.remove()"></span>`;
+}
+
 function renderQueue(items) {
   latestItems = items || [];
   if (draggingKey === null) {
@@ -321,6 +339,7 @@ function renderQueueList() {
 
     row.innerHTML = `
       ${item.isError ? '' : `<span class="queue-handle">${QUEUE_ICON_GRIP}</span>`}
+      ${queuePosterHtml(item)}
       <span class="queue-badge ${queueBadgeClass(item)}">${item.isSkipped ? 'Skipped' : queueBadgeLabel(item)}</span>
       ${item.isFileBotUnmatched ? '<span class="queue-badge unmatched">Unmatched</span>' : ''}
       <div class="queue-lane">${escapeHtml(item.laneDisplayName)}${queueEngineChip(item)}${queueDestinationMarker(item)}</div>
@@ -661,6 +680,28 @@ async function poll() {
       ? formatCompletionDuration(s.queueEtaText)
       : formatCompletionTime(s.queueEtaText);
   }
+
+  const posters = s.posters || {};
+  posterConfig = { enabled: !!posters.enabled, smaller: !!posters.smaller };
+  const queueListEl = document.getElementById('queueList');
+  queueListEl.classList.remove('has-posters', 'poster-small', 'poster-medium', 'poster-large');
+  if (posterConfig.enabled) queueListEl.classList.add('has-posters', 'poster-' + String(posters.size || 'Medium').toLowerCase());
+
+  const jobPoster = document.getElementById('jobPoster');
+  const jobKey = posterConfig.enabled && s.isRunning ? posters.currentKey : null;
+  if (jobKey) {
+    const src = posterSrc(jobKey, true);
+    if (jobPoster.dataset.src !== src) {
+      jobPoster.dataset.src = src;
+      jobPoster.innerHTML = `<img alt="" decoding="async" draggable="false" src="${src}" onerror="this.parentNode.classList.add('hidden');this.parentNode.dataset.src=''">`;
+    }
+    jobPoster.classList.remove('hidden');
+  } else {
+    jobPoster.classList.add('hidden');
+    jobPoster.dataset.src = '';
+    jobPoster.innerHTML = '';
+  }
+  document.getElementById('statFile').classList.toggle('with-poster', !!jobKey);
 
   renderQueue(s.upNext);
   renderLog(s.recentLogLines);

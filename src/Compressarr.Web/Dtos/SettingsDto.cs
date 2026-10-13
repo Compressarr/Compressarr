@@ -41,6 +41,10 @@ public sealed record SettingsDto(
     int BackupIntervalDays,
     int BackupRetentionDays,
     DateTimeOffset? BackupLastRunUtc,
-    List<ValidationIssueDto> ValidationIssues);
+    List<ValidationIssueDto> ValidationIssues,
+    PosterSettingsDto? Posters = null);
+
+/// <summary>Null (an older page that does not know about posters) leaves the saved poster settings as they are.</summary>
+public sealed record PosterSettingsDto(bool Enabled, string TmdbApiKey, string Size, bool SmallerImages);
 
 public sealed record ArrServiceDto(bool Enabled, string Url, string ApiKey);

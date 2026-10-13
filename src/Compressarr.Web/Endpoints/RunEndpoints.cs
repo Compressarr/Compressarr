@@ -3,6 +3,7 @@ using Compressarr.Core.Config;
 using Compressarr.Core.Conversion;
 using Compressarr.Core.Diagnostics;
 using Compressarr.Core.Orchestration;
+using Compressarr.Core.Posters;
 using Compressarr.Core.Queue;
 using Compressarr.Core.Scheduling;
 using Microsoft.AspNetCore.Builder;
@@ -151,7 +152,8 @@ public static class RunEndpoints
             IQueueService queue,
             IEncodeSchedule schedule,
             IActiveEncodeProcess activeProcess,
-            IResumeStateStore resumeStore) =>
+            IResumeStateStore resumeStore,
+            IPosterService posters) =>
         {
             var snapshot = runState.GetSnapshot();
             var cpu = await cpuSampler.SampleAsync();
@@ -165,6 +167,16 @@ public static class RunEndpoints
             var upNext = queue.GetUpNext(config, new QueueRunContext(snapshot.FileFullName, snapshot.LaneIsResumedById));
             var scheduleStatus = schedule.GetStatus(config);
             var queueEtaText = ComputeQueueEtaText(upNext, runState, schedule, scheduleStatus);
+
+            // Poster pictures (Settings > Show posters on queue): each row, and the file being encoded, gets a poster id once TMDb has been
+            // asked about it. Answered from memory - a title not looked up yet is queued in the background and shows up on a later poll.
+            var posterSettings = config.Posters;
+            var upNextShown = posterSettings.Enabled
+                ? upNext.Select(i => i with { PosterKey = posters.GetPosterId(posterSettings, i.FileName) }).ToList()
+                : upNext;
+            var currentPosterKey = posterSettings.Enabled && snapshot.IsRunning && snapshot.FileName is not null
+                ? posters.GetPosterId(posterSettings, snapshot.FileName)
+                : null;
 
             // Where the file being encoded will end up: the lane it was assigned to land in, else its own lane.
             string? landsInLaneName = null;
@@ -208,8 +220,15 @@ public static class RunEndpoints
                     overrideActive = scheduleStatus.OverrideActive,
                     nextChange = scheduleStatus.NextChange
                 },
-                upNext,
-                queueEtaText
+                upNext = upNextShown,
+                queueEtaText,
+                posters = new
+                {
+                    enabled = posterSettings.Enabled,
+                    size = posterSettings.Size.ToString(),
+                    smaller = posterSettings.SmallerImages,
+                    currentKey = currentPosterKey
+                }
             });
         });
     }
