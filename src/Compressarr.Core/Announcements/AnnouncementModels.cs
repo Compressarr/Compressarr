@@ -7,7 +7,7 @@ namespace Compressarr.Core.Announcements;
 /// downstream has to re-validate a field.</summary>
 public sealed record Announcement(
     string Id, DateOnly Date, string Kind, string Title, string Text, string? Link, bool Important,
-    string? MinAppVersion, string? MaxAppVersion, DateOnly? Expires);
+    string? MinAppVersion, string? MaxAppVersion, DateOnly? Expires, bool Welcome = false);
 
 public enum AnnouncementFileStatus
 {
@@ -103,8 +103,9 @@ public static class AnnouncementReader
         var link = Str(entry["link"])?.Trim();
         if (!LinkAllowed(link)) link = null;
 
-        return new Announcement(id, date, kind, title, text, link, entry["important"] is JsonValue v && v.TryGetValue<bool>(out var b) && b,
-            string.IsNullOrEmpty(minVersion) ? null : minVersion, string.IsNullOrEmpty(maxVersion) ? null : maxVersion, expires);
+        return new Announcement(id, date, kind, title, text, link, Flag(entry["important"]),
+            string.IsNullOrEmpty(minVersion) ? null : minVersion, string.IsNullOrEmpty(maxVersion) ? null : maxVersion, expires,
+            Welcome: Flag(entry["welcome"]));
     }
 
     /// <summary>https only, and only the Compressarr GitHub page (github.com/Compressarr; github.com/MrWizardCT, where the project used to live,
@@ -126,6 +127,8 @@ public static class AnnouncementReader
     }
 
     private static string? Str(JsonNode? node) => node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
+    private static bool Flag(JsonNode? node) => node is JsonValue v && v.TryGetValue<bool>(out var b) && b;
 
     private static int? Int(JsonNode? node) => node is JsonValue v && v.TryGetValue<int>(out var i) ? i : null;
 
@@ -153,8 +156,19 @@ public static class AnnouncementRules
     }
 
     /// <summary>On the list today: already dated (a future date is scheduled, not shown yet), within the window and not expired.</summary>
-    public static bool InWindow(Announcement a, DateOnly today) =>
+    public static bool InWindow(Announcement a, DateOnly today) => InWindow(a, today, keepPastWindow: false);
+
+    /// <summary>As above, but keepPastWindow lets a message stay on the list after its window (still not before its date, and never past
+    /// its own expiry). Used for the welcome message while it has not been read yet.</summary>
+    public static bool InWindow(Announcement a, DateOnly today, bool keepPastWindow) =>
         a.Date <= today
-        && today.DayNumber - a.Date.DayNumber <= WindowDays
+        && (keepPastWindow || today.DayNumber - a.Date.DayNumber <= WindowDays)
         && (a.Expires is null || today <= a.Expires);
+
+    /// <summary>The one welcome message that counts: the newest of those marked welcome that apply to this version and today. A file that
+    /// marks several still only ever greets once; the others are ordinary messages.</summary>
+    public static Announcement? CurrentWelcome(IEnumerable<Announcement> all, DateOnly today, AppVersion? current) =>
+        all.Where(a => a.Welcome && InVersionRange(a, current) && InWindow(a, today, keepPastWindow: true))
+           .OrderByDescending(a => a.Date)
+           .FirstOrDefault();
 }

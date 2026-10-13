@@ -205,14 +205,20 @@ public sealed class AnnouncementService : IAnnouncementService, IDisposable
         DateOnly? baseline = DateOnly.TryParseExact(state.Baseline, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
             System.Globalization.DateTimeStyles.None, out var b) ? b : null;
 
-        var items = AnnouncementReader.Parse(state.CachedJson).Items
-            .Where(a => AnnouncementRules.InVersionRange(a, current) && AnnouncementRules.InWindow(a, today))
+        var all = AnnouncementReader.Parse(state.CachedJson).Items;
+        // The welcome message is the one exception to "old news is read" and to the window: an install that has not read it yet is
+        // greeted with it once, whenever it was posted. After it is read it ages out like any other message.
+        var welcomeId = AnnouncementRules.CurrentWelcome(all, today, current)?.Id;
+
+        var items = all
+            .Where(a => AnnouncementRules.InVersionRange(a, current)
+                && AnnouncementRules.InWindow(a, today, keepPastWindow: a.Id == welcomeId && !state.Read.Contains(a.Id)))
             .OrderByDescending(a => a.Important)
             .ThenByDescending(a => a.Date)
             .Select(a => new AnnouncementItem(
                 a.Id, a.Date.ToString("yyyy-MM-dd"), a.Kind, a.Title, a.Text, a.Link, a.Important,
-                // News from before this machine first looked is shown, but never as unread.
-                Read: state.Read.Contains(a.Id) || baseline is null || a.Date < baseline))
+                // News from before this machine first looked is shown, but never as unread (the welcome message excepted).
+                Read: state.Read.Contains(a.Id) || baseline is null || (a.Date < baseline && a.Id != welcomeId)))
             .ToList();
 
         return new AnnouncementView(true, items, items.Count(i => !i.Read), state.LastCheckedUtc, state.NeedsNewerApp);
