@@ -115,6 +115,7 @@
   }
 
   button.addEventListener('click', open);
+  document.addEventListener('compressarr:settings-saved', refresh); // Settings > Announcements was just changed
   refresh();
   setInterval(refresh, 10 * 60 * 1000); // slow: the server only fetches from GitHub about once a day anyway
 })();

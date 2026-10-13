@@ -28,6 +28,45 @@ public class AnnouncementEndpointTests
     private static async Task<JsonNode> Get(QueueHost host) =>
         JsonNode.Parse(await host.Client.GetStringAsync("/api/announcements"))!;
 
+    private static async Task SaveSettings(QueueHost host, bool announcementsEnabled)
+    {
+        var settings = JsonNode.Parse(await host.Client.GetStringAsync("/api/settings"))!.AsObject();
+        settings["announcementsEnabled"] = announcementsEnabled;
+        using var response = await host.Client.PutAsync("/api/settings", new StringContent(settings.ToJsonString(), Encoding.UTF8, "application/json"));
+        response.EnsureSuccessStatusCode();
+    }
+
+    private static int AnnouncementRequests(QueueHost host) =>
+        host.Http.Requests.Count(u => u.Host == "raw.githubusercontent.com" && u.AbsolutePath.Contains("Compressarr-Announcements"));
+
+    [Fact]
+    public async Task TurningAnnouncementsOn_LooksForNewsRightAway_SoTheBellCanAppearWithoutWaitingForTheDailyCheck()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        await SaveSettings(host, announcementsEnabled: false);
+        var before = AnnouncementRequests(host);
+
+        await SaveSettings(host, announcementsEnabled: true);
+
+        Assert.Equal(before + 1, AnnouncementRequests(host));
+        Assert.True((await Get(host))["enabled"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task SavingWithAnnouncementsAlreadyOn_DoesNotAskAgain_AndTurningThemOffHidesTheBellAtOnce()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        await SaveSettings(host, announcementsEnabled: true);
+        var afterFirst = AnnouncementRequests(host);
+
+        await SaveSettings(host, announcementsEnabled: true);
+        Assert.Equal(afterFirst, AnnouncementRequests(host));        // nothing changed, nothing asked
+
+        await SaveSettings(host, announcementsEnabled: false);
+        Assert.False((await Get(host))["enabled"]!.GetValue<bool>());   // what the bell reads right after Save
+        Assert.Equal(afterFirst, AnnouncementRequests(host));        // and nothing is requested while off
+    }
+
     private static Task<HttpResponseMessage> PostRead(QueueHost host, string json) =>
         host.Client.PostAsync("/api/announcements/read", new StringContent(json, Encoding.UTF8, "application/json"));
 

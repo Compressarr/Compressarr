@@ -321,6 +321,9 @@ function renderUpdateIndicator(result) {
   }
 }
 
+// Settings > Save also changes what the toolbar arrow should say (the update channel), so it asks again straight away.
+document.addEventListener('compressarr:settings-saved', () => checkForUpdate());
+
 function checkForUpdate() {
   fetch('/api/about/update-status')
     .then(res => res.json())

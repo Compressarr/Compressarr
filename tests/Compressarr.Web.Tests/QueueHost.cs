@@ -53,6 +53,28 @@ public sealed record LaneSpec(string Id, string Name, bool Enabled = true);
 /// The monitoring loop is never started, so nothing processes files - these tests only observe
 /// and manipulate the queue.
 /// </summary>
+/// <summary>A client factory whose clients never leave the process: each request is recorded and answered 404.</summary>
+public sealed class TestHttpFactory : IHttpClientFactory
+{
+    private sealed class Handler : HttpMessageHandler
+    {
+        private readonly TestHttpFactory _owner;
+        public Handler(TestHttpFactory owner) => _owner = owner;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            lock (_owner._requests) _owner._requests.Add(request.RequestUri!);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+    }
+
+    private readonly List<Uri> _requests = new();
+
+    public IReadOnlyList<Uri> Requests { get { lock (_requests) return _requests.ToList(); } }
+
+    public HttpClient CreateClient(string name) => new(new Handler(this), disposeHandler: false);
+}
+
 public sealed class QueueHost : IAsyncDisposable
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -67,6 +89,10 @@ public sealed class QueueHost : IAsyncDisposable
 
     /// <summary>The catalog this host serves instead of the real one: a test fills it with profiles, and nothing ever goes to the network.</summary>
     public TestCatalogClient Catalog { get; private set; } = new();
+
+    /// <summary>Every outgoing HTTP request the app under test makes through the shared client factory, answered with a fast 404, so a test
+    /// can check that (and what) the app asked for without anything reaching the real network.</summary>
+    public TestHttpFactory Http { get; private set; } = new();
 
     private QueueHost(string root, WebApplication app, CompressarrConfig config)
     {
@@ -97,13 +123,16 @@ public sealed class QueueHost : IAsyncDisposable
         var catalog = new TestCatalogClient();
         builder.Services.RemoveAll<ICatalogClient>();
         builder.Services.AddSingleton<ICatalogClient>(catalog);
+        var http = new TestHttpFactory();
+        builder.Services.RemoveAll<IHttpClientFactory>();
+        builder.Services.AddSingleton<IHttpClientFactory>(http);
 
         var app = builder.Build();
         app.MapCompressarrEndpoints();
         await app.StartAsync();
 
         var config = new CompressarrConfig();
-        var host = new QueueHost(root, app, config) { Catalog = catalog };
+        var host = new QueueHost(root, app, config) { Catalog = catalog, Http = http };
         foreach (var spec in lanes)
         {
             var lane = new LaneConfig
