@@ -420,4 +420,28 @@ public class PosterServiceTests : AppDataTestBase
         for (var i = 0; i < 250 && File.Exists(second); i++) await Task.Delay(20);
         Assert.False(File.Exists(second));                                        // the next day it runs again
     }
+
+    [Fact]
+    public async Task ThatATitleWasSeenAgain_IsNotLostWhenTheAppCloses_EvenRightAfterAnotherWrite()
+    {
+        _http.Respond = r => r.RequestUri!.Host == "tmdb.test"
+            ? Results(r.RequestUri.Query.Contains("Matrix") ? "/matrixpath1.jpg" : "/abcdef12345.jpg")
+            : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[] { 7, 7, 7 }) };
+        string picture;
+        using (var first = Service())
+        {
+            var id = (await WaitForId(first, On, "Inception (2010).mkv"))!;
+            picture = (await first.GetImagePathAsync(On, id, "w154"))!;
+
+            _clock.Now = _clock.Now.AddDays(20);
+            Assert.NotNull(await WaitForId(first, On, "The Matrix (1999).mkv"));   // a lookup writes the index just now...
+            _clock.Now = _clock.Now.AddMinutes(1);
+            Assert.Equal(id, first.GetPosterId(On, "Inception (2010).mkv"));        // ...so this "seen again" mark is not written yet
+        }                                                                          // closing the app must write it
+
+        _clock.Now = _clock.Now.AddDays(20);                                       // day 40: 20 days since it was seen
+        using var second = Service();
+        Assert.Equal(0, second.CleanUp(30));
+        Assert.True(File.Exists(picture));
+    }
 }

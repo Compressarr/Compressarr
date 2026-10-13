@@ -125,6 +125,9 @@ public sealed partial class PosterService : IPosterService, IDisposable
         var id = query.Id;
         lock (_lock)
         {
+            // Marks made by earlier requests are written out here once a few minutes have passed since the last write.
+            if (_indexDirty && _time.GetUtcNow() - _lastIndexSave >= IndexSaveInterval) SaveIndex();
+
             if (LoadIndex().TryGetValue(id, out var entry))
             {
                 var now = _time.GetUtcNow();
@@ -136,7 +139,6 @@ public sealed partial class PosterService : IPosterService, IDisposable
                     {
                         entry.LastSeenUtc = now;
                         _indexDirty = true;
-                        if (now - _lastIndexSave >= IndexSaveInterval) SaveIndex();
                     }
 
                     return id;
@@ -515,6 +517,11 @@ public sealed partial class PosterService : IPosterService, IDisposable
 
     public void Dispose()
     {
+        lock (_lock)
+        {
+            if (_indexDirty) SaveIndex();
+        }
+
         _stop.Cancel();
         _work.Writer.TryComplete();
         _stop.Dispose();
