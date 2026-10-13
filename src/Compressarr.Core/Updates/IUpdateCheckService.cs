@@ -163,7 +163,7 @@ public sealed class UpdateCheckService : IUpdateCheckService, IDisposable
         }
         catch (Exception ex)
         {
-            var failed = new UpdateCheckResult(false, ex.Message, "", "", false, checkedAt, channelName);
+            var failed = new UpdateCheckResult(false, Compressarr.Core.Net.NetworkProblem.Describe(ex), "", "", false, checkedAt, channelName);
             LastResult = failed;
             return failed;
         }

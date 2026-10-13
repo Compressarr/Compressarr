@@ -199,9 +199,9 @@ document.getElementById('checkHandBrakeBtn').addEventListener('click', async () 
   }
 
   const releaseRes = await fetch('/api/handbrake/latest-release');
-  const release = await releaseRes.json();
+  const release = await releaseRes.json().catch(() => ({ available: false, error: 'Compressarr could not check for HandBrakeCLI just now. Try again in a moment.' }));
   if (!release.available) {
-    setStatus('No downloadable HandBrakeCLI build for this platform - on Linux, install it via your package manager or Flatpak.', 'error');
+    setStatus(release.error || 'No downloadable HandBrakeCLI build for this platform - on Linux, install it via your package manager or Flatpak.', 'error');
     return;
   }
 
@@ -212,13 +212,13 @@ document.getElementById('checkHandBrakeBtn').addEventListener('click', async () 
 
   setStatus('Downloading and installing HandBrakeCLI...');
   const installRes = await fetch('/api/handbrake/install', { method: 'POST' });
-  const installBody = await installRes.json();
+  const installBody = await installRes.json().catch(() => ({}));
   if (installRes.ok) {
     // The server already saved the new path; reload so the glance card and validation match.
     await loadEncoder();
     setStatus(`HandBrakeCLI ${installBody.version} installed.`, true);
   } else {
-    setStatus('HandBrakeCLI install failed.', 'error');
+    setStatus(installBody.message || 'HandBrakeCLI install failed.', 'error');
   }
 });
 

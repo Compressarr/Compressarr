@@ -100,7 +100,7 @@ public sealed class CatalogClient : ICatalogClient
         }
         catch (HttpRequestException ex)
         {
-            throw new CatalogException($"Could not reach the catalog: {ex.Message}");
+            throw new CatalogException(Compressarr.Core.Net.NetworkProblem.Describe(ex, "the catalog"));
         }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -133,7 +133,7 @@ public sealed class CatalogClient : ICatalogClient
         }
         catch (HttpRequestException ex)
         {
-            throw new CatalogException($"Could not download {entry.Name}: {ex.Message}");
+            throw new CatalogException($"{entry.Name} couldn't be downloaded. {Compressarr.Core.Net.NetworkProblem.Describe(ex, "the catalog")}");
         }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

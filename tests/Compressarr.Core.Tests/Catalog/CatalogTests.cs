@@ -482,7 +482,8 @@ public class CatalogClientTests : IDisposable
 
         var ex = await Assert.ThrowsAsync<CatalogException>(() => client.LoadAsync(default));
 
-        Assert.Contains("Could not reach the catalog", ex.Message);
+        Assert.Contains("Couldn't reach the catalog", ex.Message);
+        Assert.DoesNotContain("No such host", ex.Message);      // the raw .NET text is never shown
     }
 
     [Fact]

@@ -1,5 +1,8 @@
 renderNav('about');
 
+// Shown when Compressarr itself (not GitHub) did not give the page a usable answer.
+const UNUSABLE_ANSWER = "Couldn't check just now - Compressarr didn't give a usable answer. Try again in a moment.";
+
 const versionText = document.getElementById('versionText');
 const updateStatus = document.getElementById('updateStatus');
 const checkUpdateBtn = document.getElementById('checkUpdateBtn');
@@ -61,7 +64,7 @@ ffCheckUpdateBtn.addEventListener('click', async () => {
     const dto = await res.json();
 
     if (dto.status === 'error') {
-      ffUpdateStatus.textContent = `Couldn't check for updates: ${dto.error}`;
+      ffUpdateStatus.textContent = dto.error;
     } else if (dto.status === 'unavailable') {
       ffUpdateStatus.textContent = "Couldn't check for updates on this platform - install ffmpeg with your package manager.";
     } else if (dto.status === 'uptodate') {
@@ -79,7 +82,7 @@ ffCheckUpdateBtn.addEventListener('click', async () => {
       ffDownloadUpdateBtn.classList.remove('hidden');
     }
   } catch (err) {
-    ffUpdateStatus.textContent = `Couldn't check for updates: ${err.message}`;
+    ffUpdateStatus.textContent = UNUSABLE_ANSWER;
   } finally {
     ffCheckUpdateBtn.disabled = false;
   }
@@ -95,7 +98,9 @@ hbCheckUpdateBtn.addEventListener('click', async () => {
     const res = await fetch('/api/handbrake/latest-release');
     const dto = await res.json();
 
-    if (!dto.available) {
+    if (dto.error) {
+      hbUpdateStatus.textContent = dto.error;
+    } else if (!dto.available) {
       hbUpdateStatus.textContent = "Couldn't check for updates on this platform.";
     } else {
       const installedRes = await fetch('/api/handbrake/installed-version');
@@ -114,7 +119,7 @@ hbCheckUpdateBtn.addEventListener('click', async () => {
       }
     }
   } catch (err) {
-    hbUpdateStatus.textContent = `Couldn't check for updates: ${err.message}`;
+    hbUpdateStatus.textContent = UNUSABLE_ANSWER;
   } finally {
     hbCheckUpdateBtn.disabled = false;
   }
@@ -131,7 +136,7 @@ checkUpdateBtn.addEventListener('click', async () => {
     const dto = await res.json();
 
     if (!dto.checkedOk) {
-      updateStatus.textContent = `Couldn't check for updates: ${dto.error}`;
+      updateStatus.textContent = dto.error;
     } else if (dto.hasUpdate) {
       updateStatus.textContent = `A new version is available: ${dto.latestVersion}${dto.latestVersion.includes('-') ? ' (beta)' : ''}.`;
       downloadUpdateBtn.href = dto.releaseUrl;
@@ -141,7 +146,7 @@ checkUpdateBtn.addEventListener('click', async () => {
       updateStatusClearTimer = setTimeout(() => { updateStatus.textContent = ''; }, 4000);
     }
   } catch (err) {
-    updateStatus.textContent = `Couldn't check for updates: ${err.message}`;
+    updateStatus.textContent = UNUSABLE_ANSWER;
   } finally {
     checkUpdateBtn.disabled = false;
   }
@@ -172,7 +177,7 @@ catCheckBtn.addEventListener('click', async () => {
   try {
     const dto = await (await fetch('/api/catalog')).json();
     if (!dto.ok) {
-      catStatus.textContent = `Couldn't check the catalog: ${dto.error}`;
+      catStatus.textContent = dto.error;
     } else {
       const c = dto.catalog;
       const total = c.families.reduce((n, f) => n + f.versions.length, 0);
@@ -185,7 +190,7 @@ catCheckBtn.addEventListener('click', async () => {
       catOpenLink.classList.remove('hidden');
     }
   } catch (err) {
-    catStatus.textContent = `Couldn't check the catalog: ${err.message}`;
+    catStatus.textContent = UNUSABLE_ANSWER;
   } finally {
     catCheckBtn.disabled = false;
   }

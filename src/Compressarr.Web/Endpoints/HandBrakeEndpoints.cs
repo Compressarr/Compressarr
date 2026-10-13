@@ -27,7 +27,17 @@ public static class HandBrakeEndpoints
 
         app.MapGet("/api/handbrake/latest-release", async (IHandBrakeInstaller installer) =>
         {
-            var release = await installer.GetLatestReleaseAsync();
+            HandBrakeReleaseInfo? release;
+            try
+            {
+                release = await installer.GetLatestReleaseAsync();
+            }
+            catch (Exception ex) when (Compressarr.Core.Net.NetworkProblem.IsNetworkFailure(ex))
+            {
+                // Offline (or GitHub unreachable): answer with a message, never an empty server error the page cannot read.
+                return Results.Json(new { available = false, error = Compressarr.Core.Net.NetworkProblem.Describe(ex) });
+            }
+
             if (release is null) return Results.Json(new { available = false });
 
             return Results.Json(new
@@ -42,6 +52,8 @@ public static class HandBrakeEndpoints
 
         app.MapPost("/api/handbrake/install", async (IHandBrakeInstaller installer, IConfigStore configStore) =>
         {
+            try
+            {
             var release = await installer.GetLatestReleaseAsync();
             if (release is null)
             {
@@ -58,6 +70,11 @@ public static class HandBrakeEndpoints
             });
 
             return Results.Json(new { installedPath, version = release.Version });
+            }
+            catch (Exception ex) when (Compressarr.Core.Net.NetworkProblem.IsNetworkFailure(ex))
+            {
+                return Results.BadRequest(new { message = $"The HandBrakeCLI download failed. {Compressarr.Core.Net.NetworkProblem.Describe(ex)}" });
+            }
         });
     }
 }

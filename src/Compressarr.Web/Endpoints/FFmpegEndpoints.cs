@@ -87,7 +87,7 @@ public static class FFmpegEndpoints
             }
             catch (HttpRequestException ex)
             {
-                return Results.Json(new { available = false, error = $"Could not reach GitHub: {ex.Message}" });
+                return Results.Json(new { available = false, error = Compressarr.Core.Net.NetworkProblem.Describe(ex) });
             }
         });
 
@@ -117,7 +117,7 @@ public static class FFmpegEndpoints
             }
             catch (HttpRequestException ex)
             {
-                return Results.Json(new { status = "error", error = $"Could not reach GitHub: {ex.Message}" });
+                return Results.Json(new { status = "error", error = Compressarr.Core.Net.NetworkProblem.Describe(ex) });
             }
 
             if (latest is null) return Results.Json(new { status = "unavailable" });
@@ -165,7 +165,7 @@ public static class FFmpegEndpoints
             }
             catch (HttpRequestException ex)
             {
-                return Results.BadRequest(new { message = $"The download failed: {ex.Message}" });
+                return Results.BadRequest(new { message = $"The download failed. {Compressarr.Core.Net.NetworkProblem.Describe(ex)}" });
             }
         });
     }
