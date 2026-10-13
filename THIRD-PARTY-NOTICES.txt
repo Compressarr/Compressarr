@@ -14,6 +14,10 @@ the ffmpeg build Compressarr offers (BtbN's FFmpeg-Builds, GPL build) is under t
 GNU GPL (https://ffmpeg.org/legal.html, https://github.com/BtbN/FFmpeg-Builds). The
 license file that comes with a downloaded ffmpeg is kept next to it.
 
+The optional Queue Posters feature (Settings > Queue Posters, off by default) looks posters up with the TMDB API, using the user's own
+free API key. This product uses the TMDB API but is not endorsed or certified by TMDB. The TMDB name and logo belong to TMDB
+(https://www.themoviedb.org).
+
 Components
 ----------
 
