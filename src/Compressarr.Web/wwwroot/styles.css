@@ -1871,7 +1871,7 @@ pre.ed-cmd { margin: 0; padding: 12px 14px; background: #1d2130; color: #d6dcf0;
 .queue-list.poster-large { --pw: 52px; }
 
 .queue-poster {
-  position: relative; flex: 0 0 auto; width: var(--pw); height: calc(var(--pw) * 1.5); border-radius: 4px; overflow: hidden;
+  position: relative; flex: 0 0 auto; width: var(--pw, 40px); height: calc(var(--pw, 40px) * 1.5); border-radius: 4px; overflow: hidden;
   background: var(--bg); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-dim);
 }
 .queue-poster img, .job-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -1895,8 +1895,8 @@ pre.ed-cmd { margin: 0; padding: 12px 14px; background: #1d2130; color: #d6dcf0;
 
 /* A poster takes room from the row, so rows tighten a little (desktop widths only) rather than wrapping the last buttons onto a second line. */
 @media (min-width: 721px) {
-  .queue-list.has-posters .queue-item { column-gap: 12px; }
-  .queue-list.has-posters .queue-item .queue-file { min-width: 110px; }
+  .queue-list.has-posters .queue-item, .queue-item-ghost.has-posters { column-gap: 12px; }
+  .queue-list.has-posters .queue-item .queue-file, .queue-item-ghost.has-posters .queue-file { min-width: 110px; }
 }
 
 @media (max-width: 720px) {

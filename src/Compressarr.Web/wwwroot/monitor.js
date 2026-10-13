@@ -474,6 +474,10 @@ function startQueueDrag(e, item, row) {
 
   ghostEl = row.cloneNode(true);
   ghostEl.classList.add('queue-item-ghost');
+  // The ghost lives on <body>, outside the list, so it does not inherit the poster size or the tighter row spacing the list gives its rows.
+  // Carry both over, or the poster falls back to its picture's full size and the dragged row becomes huge.
+  ghostEl.style.setProperty('--pw', getComputedStyle(row).getPropertyValue('--pw').trim() || '40px');
+  if (document.getElementById('queueList').classList.contains('has-posters')) ghostEl.classList.add('has-posters');
   ghostEl.style.left = rect.left + 'px';
   ghostEl.style.top = rect.top + 'px';
   ghostEl.style.width = rect.width + 'px';
