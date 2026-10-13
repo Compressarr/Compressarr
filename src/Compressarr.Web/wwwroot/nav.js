@@ -137,7 +137,7 @@ function renderNav(activePage) {
     <button type="button" class="hamburger-btn" id="hamburgerBtn" aria-label="Open menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg></button>
     <h1>${titleText}</h1>
     <span class="toolbar-spacer"></span>
-    ${hasAdvanced ? `<div class="page-actions toolbar-advanced"><span class="tb-sep"></span><button type="button" id="advancedBtn" aria-pressed="false" title="Show advanced options">${ADVANCED_ICON}Advanced</button></div>` : ''}
+    ${hasAdvanced ? `<div class="page-actions toolbar-advanced"><button type="button" id="advancedBtn" aria-pressed="false" title="Show advanced options">${ADVANCED_ICON}Advanced</button><span class="tb-sep"></span></div>` : ''}
     <div class="toolbar-global-status">
       <button type="button" id="announcementsBtn" class="toolbar-bell hidden" title="Announcements" aria-label="Announcements">${BELL_ICON}<span class="bell-dot hidden"></span></button>
       <a id="updateLink" class="toolbar-update hidden" target="_blank" rel="noopener" title="Update available">${UPDATE_ICON}</a>

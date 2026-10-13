@@ -132,6 +132,10 @@ to the Settings checkbox.
 On the first successful fetch the app records a baseline date. Messages dated **before** that day count as read, so a fresh install
 shows no dot for history it never missed. The first message posted after install lights the bell as normal.
 
+**The welcome exception.** An announcement may carry `"welcome": true`. The newest such message (for this app version, not expired) is
+shown as unread to an install that has not read it, whatever its date, and stays on the list past the 30-day window while it is unread.
+Once read it ages out like any other message. Only one welcome counts at a time, so it cannot become a permanent pile.
+
 ## 7. Security and privacy
 
 - **What GitHub sees:** the machine's IP address and the request, exactly as with the update check. It learns that someone runs a

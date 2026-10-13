@@ -26,6 +26,14 @@ public class AnnouncementReaderTests
         Assert.Equal("notice", Assert.Single(AnnouncementReader.Parse(File(Entry())).Items).Kind); // no kind -> notice
     }
 
+    [Fact]
+    public void TheWelcomeFlag_IsReadAsTrue_AndDefaultsToFalse()
+    {
+        Assert.True(Assert.Single(AnnouncementReader.Parse(File(Entry(extra: """ "welcome": true """))).Items).Welcome);
+        Assert.False(Assert.Single(AnnouncementReader.Parse(File(Entry())).Items).Welcome);
+        Assert.False(Assert.Single(AnnouncementReader.Parse(File(Entry(extra: """ "welcome": "yes" """))).Items).Welcome);   // only a real true counts
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("not json")]
@@ -155,6 +163,29 @@ public class AnnouncementRulesTests
 
         Assert.True(AnnouncementRules.InWindow(a, new DateOnly(2026, 10, 20)));
         Assert.False(AnnouncementRules.InWindow(a, new DateOnly(2026, 10, 21)));
+    }
+
+    [Fact]
+    public void AWelcomeMessage_CanStayPastTheWindow_ButNeverBeforeItsDateOrAfterItsExpiry()
+    {
+        var a = new Announcement("w", new DateOnly(2026, 10, 14), "notice", "t", "", null, false, null, null, null, Welcome: true);
+
+        Assert.False(AnnouncementRules.InWindow(a, new DateOnly(2026, 12, 1)));                              // past the window: normally gone
+        Assert.True(AnnouncementRules.InWindow(a, new DateOnly(2026, 12, 1), keepPastWindow: true));         // kept while unread
+        Assert.False(AnnouncementRules.InWindow(a, new DateOnly(2026, 10, 13), keepPastWindow: true));       // not before its date
+
+        var expired = a with { Expires = new DateOnly(2026, 11, 1) };
+        Assert.False(AnnouncementRules.InWindow(expired, new DateOnly(2026, 12, 1), keepPastWindow: true));  // withdrawn means withdrawn
+    }
+
+    [Fact]
+    public void OnlyTheNewestWelcome_Counts()
+    {
+        Announcement W(string id, string date, bool welcome = true) => new(id, DateOnly.Parse(date), "notice", "t", "", null, false, null, null, null, Welcome: welcome);
+        var today = new DateOnly(2026, 12, 1);
+
+        Assert.Equal("new", AnnouncementRules.CurrentWelcome(new[] { W("old", "2026-10-01"), W("new", "2026-10-20"), W("plain", "2026-11-30", welcome: false) }, today, null)!.Id);
+        Assert.Null(AnnouncementRules.CurrentWelcome(new[] { W("plain", "2026-10-01", welcome: false) }, today, null));
     }
 
     [Fact]
@@ -400,6 +431,63 @@ public class AnnouncementServiceTests : AppDataTestBase
         await service.StopAsync();
 
         Assert.Single(_http.Requests);
+    }
+
+    private static string WelcomeFile(string date = "2026-10-01", bool welcome = true, string id = "welcome") =>
+        $$"""{ "schema": 1, "announcements": [ { "id": "{{id}}", "date": "{{date}}", "title": "Welcome" {{(welcome ? ", \"welcome\": true" : "")}} } ] }""";
+
+    [Fact]
+    public async Task AFreshInstall_IsGreetedOnceByTheWelcome_EvenThoughItWasPostedEarlier()
+    {
+        _http.Respond = _ => Json(WelcomeFile("2026-10-01"));
+        var service = Service();
+        await service.CheckNowAsync();
+
+        var view = service.GetView();
+        Assert.Equal(1, view.Unread);                       // dated before the first look, still unread
+        Assert.False(view.Items.Single().Read);
+
+        service.MarkRead(null);
+        Assert.Equal(0, service.GetView().Unread);
+    }
+
+    [Fact]
+    public async Task AnOrdinaryOldMessage_IsStillShownAsRead_OnAFreshInstall()
+    {
+        _http.Respond = _ => Json(WelcomeFile("2026-10-01", welcome: false));
+        var service = Service();
+        await service.CheckNowAsync();
+
+        Assert.Equal(0, service.GetView().Unread);
+    }
+
+    [Fact]
+    public async Task TheWelcome_IsStillOffered_AfterTheWindow_UntilItIsRead_ThenAgesOut()
+    {
+        _http.Respond = _ => Json(WelcomeFile("2026-10-01"));
+        _clock.Now = new DateTimeOffset(2026, 12, 1, 9, 0, 0, TimeSpan.Zero);          // two months after it was posted
+        var service = Service();
+        await service.CheckNowAsync();
+
+        Assert.Equal(1, service.GetView().Unread);
+        Assert.Single(service.GetView().Items);
+
+        service.MarkRead(null);
+        Assert.Empty(service.GetView().Items);                                           // read and past its window: gone
+    }
+
+    [Fact]
+    public async Task AnInstall_ThatAlreadyReadTheWelcome_IsNotGreetedAgain()
+    {
+        _http.Respond = _ => Json(WelcomeFile("2026-10-14"));
+        var service = Service();
+        await service.CheckNowAsync();
+        service.MarkRead(null);
+
+        _clock.Now = _clock.Now.AddDays(1);
+        await service.CheckNowAsync();
+
+        Assert.Equal(0, service.GetView().Unread);
     }
 
     [Fact]
