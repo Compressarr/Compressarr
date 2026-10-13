@@ -163,8 +163,9 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
     /// tests that build this class directly never need to supply one.</summary>
     private readonly IEncoderResolver? _encoders;
 
-    /// <summary>The "encoder" behind the Passthrough preset: copies the file instead of re-encoding it.</summary>
-    private readonly IEncoderRunner _passthroughRunner;
+    /// <summary>The "encoder" behind the Passthrough preset: copies the file instead of re-encoding it. Created here rather than injected: the
+    /// service container already maps IEncoderRunner to the HandBrake runner, so an injected parameter of that type would be the wrong one.</summary>
+    private readonly IEncoderRunner _passthroughRunner = new PassthroughRunner();
 
     public ConversionOrchestrator(
         IPathExpander pathExpander,
@@ -181,11 +182,9 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         IResumeStateStore resumeStore,
         IRunProgressReporter progress,
         IConfigStore configStore,
-        IEncoderResolver? encoders = null,
-        IEncoderRunner? passthroughRunner = null)
+        IEncoderResolver? encoders = null)
     {
         _encoders = encoders;
-        _passthroughRunner = passthroughRunner ?? new PassthroughRunner();
         _pathExpander = pathExpander;
         _scanner = scanner;
         _fileBotRunner = fileBotRunner;

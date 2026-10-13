@@ -1272,4 +1272,21 @@ public class RunOrchestratorTests : IDisposable
         Assert.Equal(1, result!.TotalFiles);
         Assert.Single(Directory.GetFiles(config.Lanes[0].Output, "*.mkv"));
     }
+
+    [Fact]
+    public async Task RunOnceAsync_APassthroughOnlyHandBrakeSetup_RunsEvenWhenHandBrakeIsNotInstalled()
+    {
+        var (config, _) = MakeSingleLaneConfig("Inception (2010).mkv");
+        config.Lanes[0].MoviePreset = PassthroughPreset.Name;
+        var processRunner = new RecordingProcessRunner();
+        var (orchestrator, _) = BuildOrchestrator(config, processRunner);
+        File.Delete(config.HandBrake.CliPath);   // BuildOrchestrator created it; there is no HandBrake on this machine
+
+        var result = await orchestrator.RunOnceAsync(config);
+
+        Assert.NotNull(result);                                 // the old rule ("no HandBrakeCLI, no run") would have returned null
+        Assert.Equal(1, result!.TotalFiles);
+        Assert.Empty(processRunner.ProcessedInOrder);
+        Assert.Single(Directory.GetFiles(config.Lanes[0].Output, "*.mkv"));
+    }
 }

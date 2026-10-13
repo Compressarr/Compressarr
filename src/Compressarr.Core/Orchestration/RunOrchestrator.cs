@@ -199,7 +199,10 @@ public sealed class RunOrchestrator : IRunOrchestrator
         // HandBrake must not stop the ffmpeg lanes, nor the other way round). A HandBrake-only setup
         // keeps the original rule: no HandBrakeCLI, no run.
         var hasFfmpegLane = _encoders is not null && config.Lanes.Any(l => l.Enabled && l.Engine == EncoderEngine.FFmpeg);
-        if (!hasFfmpegLane && !_pathExpander.PathExists(config.HandBrake.CliPath))
+        // ... and a setup whose enabled lanes only use Passthrough never starts an encoder, so it needs no HandBrakeCLI.
+        var onlyPassthroughLanes = config.Lanes.Any(l => l.Enabled)
+            && config.Lanes.Where(l => l.Enabled).All(l => PassthroughPreset.OnlyPassthrough(l.TvPreset, l.MoviePreset));
+        if (!hasFfmpegLane && !onlyPassthroughLanes && !_pathExpander.PathExists(config.HandBrake.CliPath))
         {
             _logger.LogProblem("handbrake-cli-missing", $"HandBrakeCLI.exe not found at {hbloc}. Download it from https://handbrake.fr/downloads2.php");
             _progress.RunCompleted(0);

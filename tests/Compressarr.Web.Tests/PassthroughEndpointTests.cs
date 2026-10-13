@@ -80,4 +80,38 @@ public class PassthroughEndpointTests
         Assert.True(row["isPassthrough"]!.GetValue<bool>());
         Assert.Equal(PassthroughPreset.Name, row["preset"]!.GetValue<string>());
     }
+
+    [Fact]
+    public async Task ARealRunThroughTheServiceContainer_CopiesAPassthroughFile_WithoutAnyEncoderInstalled()
+    {
+        // Everything here is the app's real wiring (the service container, the real conversion step, the real run loop) - only the paths are
+        // temporary. A passthrough lane must copy the file even though there is no HandBrakeCLI on this machine: if the container handed the
+        // conversion step the HandBrake runner for the copy, HandBrake would be started (and fail) instead.
+        await using var host = await QueueHost.StartAsync(Lane1);
+        SetPresets(host, PassthroughPreset.Name, PassthroughPreset.Name);
+        host.Services.GetRequiredService<IConfigStore>().Update(AppPaths.GetConfigFilePath(), config =>
+        {
+            config.Processing.DeleteAfterConvert = DeleteAfterConvertMode.Maintain;   // never touch the real Recycle Bin from a test
+            return 0;
+        });
+        Directory.CreateDirectory(Path.Combine(host.Root, "hdsd", "Movies"));   // the library folder Compressarr files into (it never creates this one itself)
+        var source = host.Drop("hdsd", "Some Film (2020).mkv");
+
+        using var started = await host.Client.PostAsync("/api/run/run-now", null);
+        Assert.Equal(System.Net.HttpStatusCode.OK, started.StatusCode);
+
+        string? copy = null;
+        for (var i = 0; i < 300 && copy is null; i++)
+        {
+            copy = Directory.GetFiles(Path.Combine(host.Root, "hdsd"), "Some Film (2020).mkv", SearchOption.AllDirectories)
+                .FirstOrDefault(f => !string.Equals(f, source, StringComparison.OrdinalIgnoreCase));
+            if (copy is null) await Task.Delay(100);
+        }
+
+        var logLines = string.Join(" | ", (await Get(host, "/api/run/status"))["recentLogLines"]!.AsArray().Select(l => l!["text"]!.GetValue<string>()));
+        Assert.True(copy is not null, "the copy was never filed. Run log: " + logLines);         // the copy was filed
+        Assert.Equal("x", await File.ReadAllTextAsync(copy!));
+        Assert.True(File.Exists(source));                                  // Maintain: the source is still there
+        for (var i = 0; i < 100 && (await Get(host, "/api/run/status"))["isRunning"]!.GetValue<bool>(); i++) await Task.Delay(50);   // let the pass finish
+    }
 }
