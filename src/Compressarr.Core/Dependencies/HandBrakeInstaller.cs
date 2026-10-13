@@ -182,7 +182,6 @@ public sealed class HandBrakeInstaller : IHandBrakeInstaller
         }
     }
 
-    [SupportedOSPlatform("macos")]
     /// <summary>HandBrake is GPL software that Compressarr downloads on the user's behalf; a short note beside it says
     /// what it is, which license it is under and where its source is (the release archive carries no license file).</summary>
     internal static void WriteLicenseNotice(string installDir)
@@ -206,6 +205,7 @@ public sealed class HandBrakeInstaller : IHandBrakeInstaller
         }
     }
 
+    [SupportedOSPlatform("macos")]
     private static async Task<string> InstallFromMacDmgAsync(string dmgPath, string installDir, IProgress<string>? progress)
     {
         progress?.Report("Mounting disk image...");

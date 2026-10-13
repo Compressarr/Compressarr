@@ -190,6 +190,8 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
   if (res.ok) {
     const dto = await res.json();
     settingsDirty = false;
+    // The toolbar (announcements bell, update arrow) follows what was just saved without a page change.
+    document.dispatchEvent(new CustomEvent('compressarr:settings-saved'));
     if (!applySettingsValidation(dto.validationIssues)) {
       setStatus('Settings saved.', true);
     }
