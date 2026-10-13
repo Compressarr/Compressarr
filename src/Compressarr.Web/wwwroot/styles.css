@@ -1905,10 +1905,11 @@ pre.ed-cmd { margin: 0; padding: 12px 14px; background: #1d2130; color: #d6dcf0;
   .job-poster { width: 48px; height: 72px; }
 }
 
-/* The TMDB credit on Settings > Queue Posters: TMDB's approved logo (assets/tmdb-logo.svg, "blue short", shown unaltered) at the left, centred against the two lines of text.
+/* The TMDB credit on Settings > Queue Posters: TMDB's approved logo (assets/tmdb-logo.svg, "blue short", shown unaltered) at the left, centred against the lines of text.
    Without the file the logo drops out and the two lines stand alone. */
-.tmdb-credit { display: flex; align-items: stretch; gap: 14px; margin-top: 14px; }
-.tmdb-credit .tmdb-logo { flex: 0 0 auto; align-self: center; width: 128px; height: auto; }
+/* One width for TMDB's logo wherever it appears (Settings card and About page); change it here. */
+.tmdb-credit { --tmdb-logo-width: 100px; display: flex; align-items: stretch; gap: 14px; margin-top: 14px; }
+.tmdb-credit .tmdb-logo { flex: 0 0 auto; align-self: center; width: var(--tmdb-logo-width); height: auto; }
 .tmdb-credit-text { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
 .tmdb-credit-text p { margin: 0; }
-@media (max-width: 560px) { .tmdb-credit .tmdb-logo { width: 96px; } }
+@media (max-width: 560px) { .tmdb-credit { --tmdb-logo-width: 80px; } }
