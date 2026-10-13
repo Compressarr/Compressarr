@@ -1913,3 +1913,10 @@ pre.ed-cmd { margin: 0; padding: 12px 14px; background: #1d2130; color: #d6dcf0;
 .tmdb-credit-text { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
 .tmdb-credit-text p { margin: 0; }
 @media (max-width: 560px) { .tmdb-credit { --tmdb-logo-width: 80px; } }
+
+/* ---- Toggles (the .lane-switch markup, used wherever a whole feature is switched on or off) ----------------------------------------
+   Used on the lane card's Enabled switch and the master on/off switches on Settings, Notifications and Scheduler. Options inside a feature
+   stay plain checkboxes. Inside a .check-row the row's own checkbox sizing must not shrink the invisible input that catches the click. */
+.check-row .lane-switch input[type="checkbox"] { width: 100%; height: 100%; }
+.check-row .lane-switch { margin-right: 2px; }
+.lane-switch:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }

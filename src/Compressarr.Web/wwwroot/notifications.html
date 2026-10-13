@@ -27,7 +27,7 @@
       </div>
       <div class="card-body">
         <div class="check-row">
-          <input type="checkbox" id="toastEnabled" />
+          <span class="lane-switch"><input type="checkbox" id="toastEnabled" /><span class="knob"></span></span>
           <label for="toastEnabled">Show a Windows toast notification when a run completes</label>
         </div>
         <p style="color: var(--text-dim); font-size: 12.5px; margin: 4px 0 0;">
@@ -37,10 +37,10 @@
         <div class="digest-divider"></div>
         <div class="digest-row">
           <span class="digest-row-label">Receive Digest:</span>
-          <label class="check-row inline"><input type="checkbox" id="toastDigestDaily" /> Daily</label>
+          <label class="check-row inline"><span class="lane-switch"><input type="checkbox" id="toastDigestDaily" /><span class="knob"></span></span> Daily</label>
           <span>at</span>
           <input type="time" id="toastDigestDailyTime" value="09:00" />
-          <label class="check-row inline"><input type="checkbox" id="toastDigestWeekly" /> Weekly</label>
+          <label class="check-row inline"><span class="lane-switch"><input type="checkbox" id="toastDigestWeekly" /><span class="knob"></span></span> Weekly</label>
           <span>on</span>
           <select id="toastDigestWeeklyDay">
             <option value="Sunday">Sunday</option>

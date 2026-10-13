@@ -253,10 +253,10 @@ function channelCardFromDto(dto) {
       <div class="digest-divider"></div>
       <div class="digest-row">
         <span class="digest-row-label">Receive Digest:</span>
-        <label class="check-row inline"><input type="checkbox" class="f-digest-daily" /> Daily</label>
+        <label class="check-row inline"><span class="lane-switch"><input type="checkbox" class="f-digest-daily" /><span class="knob"></span></span> Daily</label>
         <span>at</span>
         <input type="time" class="f-digest-daily-time" />
-        <label class="check-row inline"><input type="checkbox" class="f-digest-weekly" /> Weekly</label>
+        <label class="check-row inline"><span class="lane-switch"><input type="checkbox" class="f-digest-weekly" /><span class="knob"></span></span> Weekly</label>
         <span>on</span>
         <select class="f-digest-weekly-day">
           <option value="Sunday">Sunday</option>
