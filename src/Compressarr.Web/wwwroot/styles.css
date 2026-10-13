@@ -1905,10 +1905,10 @@ pre.ed-cmd { margin: 0; padding: 12px 14px; background: #1d2130; color: #d6dcf0;
   .job-poster { width: 48px; height: 72px; }
 }
 
-/* The TMDB credit on Settings > Queue Posters: TMDB's approved logo (assets/tmdb-logo.svg, shown unaltered) at the left, spanning the two lines of text.
+/* The TMDB credit on Settings > Queue Posters: TMDB's approved logo (assets/tmdb-logo.svg, "blue short", shown unaltered) at the left, centred against the two lines of text.
    Without the file the logo drops out and the two lines stand alone. */
 .tmdb-credit { display: flex; align-items: stretch; gap: 14px; margin-top: 14px; }
-.tmdb-credit .tmdb-logo { flex: 0 0 auto; align-self: stretch; height: auto; max-height: 52px; min-height: 36px; width: auto; max-width: 140px; object-fit: contain; }
+.tmdb-credit .tmdb-logo { flex: 0 0 auto; align-self: center; width: 128px; height: auto; }
 .tmdb-credit-text { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
 .tmdb-credit-text p { margin: 0; }
-@media (max-width: 560px) { .tmdb-credit .tmdb-logo { height: 32px; } }
+@media (max-width: 560px) { .tmdb-credit .tmdb-logo { width: 96px; } }
