@@ -122,6 +122,94 @@ internal static class ResumeResults
         });
     }
 
+    // Every settable field of an entry except its identity (lane + path): what a change-based save compares and copies.
+    private static readonly System.Reflection.PropertyInfo[] Fields = typeof(ResumeEntry).GetProperties()
+        .Where(p => p.CanRead && p.CanWrite && p.Name is not (nameof(ResumeEntry.LaneId) or nameof(ResumeEntry.FullName)))
+        .ToArray();
+
+    private static string KeyOf(ResumeEntry e) => e.LaneId + "|" + e.FullName.ToUpperInvariant();
+
+    private static ResumeEntry Copy(ResumeEntry e, string? fullName = null)
+    {
+        var copy = new ResumeEntry { LaneId = e.LaneId, FullName = fullName ?? e.FullName };
+        foreach (var field in Fields) field.SetValue(copy, field.GetValue(e));
+        return copy;
+    }
+
+    /// <summary>A copy of the list as this pass last knew the file to be (taken right after a refresh from disk): the baseline for
+    /// <see cref="SaveChanges"/>.</summary>
+    public static List<ResumeEntry> Snapshot(IEnumerable<ResumeEntry> entries) => entries.Select(e => Copy(e)).ToList();
+
+    /// <summary>Saves what this pass changed - and only that - into the file as it is now. A pass that adds files, remaps renames or prunes works on
+    /// an in-memory list that was refreshed from disk a moment earlier; saving that whole list would write the older picture back over a skip,
+    /// reorder, override or new file the Monitor page committed in between. Here an entry added since the baseline is added, one removed is removed,
+    /// and for one that is in both only the fields that differ from the baseline are copied, so every other field keeps whatever is freshest on disk.
+    /// <paramref name="renames"/> (old path to new path) lets a remapped file carry the disk entry's latest user edits to its new path.</summary>
+    public static void SaveChanges(IResumeStateStore store, IReadOnlyList<ResumeEntry> baseline, IReadOnlyList<ResumeEntry> current, string resumeFilePath,
+        IReadOnlyDictionary<string, string>? renames = null)
+    {
+        var before = baseline.GroupBy(KeyOf).ToDictionary(g => g.Key, g => g.First());
+        var now = current.GroupBy(KeyOf).ToDictionary(g => g.Key, g => g.First());
+        var added = now.Where(kv => !before.ContainsKey(kv.Key)).Select(kv => kv.Value).ToList();
+        var removed = before.Where(kv => !now.ContainsKey(kv.Key)).Select(kv => kv.Value).ToList();
+        var changed = now.Where(kv => before.TryGetValue(kv.Key, out var b) && Fields.Any(f => !Equals(f.GetValue(b), f.GetValue(kv.Value)))).Select(kv => kv.Value).ToList();
+        if (added.Count == 0 && removed.Count == 0 && changed.Count == 0) return;
+
+        var renameSources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (renames is not null) foreach (var (from, to) in renames) renameSources[to] = from;
+
+        store.Update(resumeFilePath, disk =>
+        {
+            ResumeEntry? OnDisk(ResumeEntry e) => disk.FirstOrDefault(d => d.LaneId == e.LaneId && string.Equals(d.FullName, e.FullName, StringComparison.OrdinalIgnoreCase));
+
+            foreach (var entry in added)
+            {
+                if (OnDisk(entry) is not null) continue;   // someone (the Monitor page) already tracked it
+
+                // A file FileBot renamed: it takes over the entry that is on disk under the old path, edits made to it since the refresh included.
+                if (renameSources.TryGetValue(entry.FullName, out var from) && before.TryGetValue(entry.LaneId + "|" + from.ToUpperInvariant(), out var old) && removed.Contains(old)
+                    && OnDisk(old) is { } oldOnDisk)
+                {
+                    var moved = Copy(oldOnDisk, entry.FullName);
+                    foreach (var field in Fields)
+                    {
+                        if (!Equals(field.GetValue(old), field.GetValue(entry))) field.SetValue(moved, field.GetValue(entry));
+                    }
+
+                    disk.Remove(oldOnDisk);
+                    disk.Add(moved);
+                    removed.Remove(old);
+                    continue;
+                }
+
+                disk.Add(Copy(entry));
+            }
+
+            foreach (var entry in removed)
+            {
+                if (OnDisk(entry) is { } gone) disk.Remove(gone);
+            }
+
+            foreach (var entry in changed)
+            {
+                var target = OnDisk(entry);
+                if (target is null)
+                {
+                    disk.Add(Copy(entry));   // taken out of the file meanwhile (Reset Resume File): this pass still has work to record
+                    continue;
+                }
+
+                var was = before[KeyOf(entry)];
+                foreach (var field in Fields)
+                {
+                    if (!Equals(field.GetValue(was), field.GetValue(entry))) field.SetValue(target, field.GetValue(entry));
+                }
+            }
+
+            return true;
+        });
+    }
+
     /// <summary>Drops these entries from the file (they were removed in memory because their file is gone), leaving every other entry as it is.</summary>
     public static void Remove(IResumeStateStore store, IReadOnlyCollection<ResumeEntry> entries, string resumeFilePath)
     {
@@ -340,7 +428,15 @@ public sealed class JsonResumeStateStore : IResumeStateStore
         {
             var state = Load(path);
             var result = mutate(state);
-            Save(state, path);
+            if (state.Count == 0)
+            {
+                if (File.Exists(path)) File.Delete(path);   // an empty queue and no file read the same, and this keeps "nothing left" atomic with the change
+            }
+            else
+            {
+                Save(state, path);
+            }
+
             return result;
         }
         finally

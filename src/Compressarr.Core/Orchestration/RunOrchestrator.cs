@@ -404,9 +404,15 @@ public sealed class RunOrchestrator : IRunOrchestrator
         if (!stillOutstanding && File.Exists(resumeFilePath))
         {
             // Nothing left to do. A converted file whose source was kept (Maintain) is still remembered, or it would be converted
-            // again on the next pass; everything else is forgotten as before.
-            var kept = resumeState.Where(ResumeKeeping.StillNeeded).ToList();
-            if (kept.Count == 0) File.Delete(resumeFilePath); else _resumeStore.Save(kept, resumeFilePath);
+            // again on the next pass; everything else is forgotten as before. Decided against the file as it is now, not this pass's
+            // older list: a file the Monitor page tracked in the meantime is outstanding work, and keeps the file as it is (the store
+            // removes the file itself when nothing is left).
+            _resumeStore.Update(resumeFilePath, disk =>
+            {
+                if (disk.Any(e => e.Status != ResumeStatus.Completed)) return false;
+                disk.RemoveAll(e => !ResumeKeeping.StillNeeded(e));
+                return true;
+            });
         }
 
         RetentionCleaner.CleanUp(_trash, logFilePath, new[] { ".log", ".txt" }, config.Logging.RetentionDays, "log");

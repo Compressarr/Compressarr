@@ -391,6 +391,27 @@ file sealed class ThrowOnCleanupCompanionFileService : ICompanionFileService
         throw new IOException("Access to the path is denied.");
 }
 
+/// <summary>Reads like the real store, but right after the first Load it commits an edit - the web request that lands just after a pass refreshed
+/// its list and just before it saves. Deterministic: no timing involved.</summary>
+file sealed class EditAfterFirstLoadStore : IResumeStateStore
+{
+    private readonly JsonResumeStateStore _inner = new();
+    private readonly Action<JsonResumeStateStore, string> _edit;
+    private bool _done;
+    public EditAfterFirstLoadStore(Action<JsonResumeStateStore, string> edit) => _edit = edit;
+
+    public List<ResumeEntry> Load(string path)
+    {
+        var snapshot = _inner.Load(path);
+        if (!_done) { _done = true; _edit(_inner, path); }
+        return snapshot;
+    }
+
+    public void Save(List<ResumeEntry> state, string path) => _inner.Save(state, path);
+    public void DeleteIfComplete(List<ResumeEntry> state, string path) => _inner.DeleteIfComplete(state, path);
+    public T Update<T>(string path, Func<List<ResumeEntry>, T> mutate) => _inner.Update(path, mutate);
+}
+
 file sealed class NoOpResumeStateStore : IResumeStateStore
 {
     public List<ResumeEntry> Load(string path) => new();
@@ -712,6 +733,34 @@ public class ConversionOrchestratorTests : IDisposable
         Assert.Equal(new FileInfo(source).Length, onDisk.KeptSourceSize);
         Assert.NotNull(onDisk.KeptSourceModifiedUtc);
         Assert.Empty(second);                                    // the unchanged source is not converted again
+    }
+
+    [Fact]
+    public async Task LanePreparation_KeepsAQueueEditMadeAfterItsRefresh_WhenItTracksANewFile()
+    {
+        var inputDir = Path.Combine(_tempDir, "Input");
+        var outputDir = Path.Combine(_tempDir, "Output");
+        Directory.CreateDirectory(inputDir);
+        Directory.CreateDirectory(outputDir);
+        var a = Path.Combine(inputDir, "a.mkv");
+        var b = Path.Combine(inputDir, "b.mkv");
+        File.WriteAllText(a, "a");
+        File.WriteAllText(b, "b");                                    // not tracked yet: the pass will add it
+        var lane = new LaneConfig { Id = "lane1", DisplayName = "Test Lane", Enabled = true, Input = inputDir, Output = outputDir, MoviePreset = "Any Preset" };
+        var config = new CompressarrConfig { Processing = new ProcessingSettings { MoveFiles = false, ClearTitleMetadata = false } };
+        config.Lanes.Add(lane);
+        var resumePath = Path.Combine(_tempDir, "resume.json");
+        new JsonResumeStateStore().Save(new List<ResumeEntry> { new() { LaneId = "lane1", FullName = a, Status = ResumeStatus.Pending, Order = 0 } }, resumePath);
+
+        // The skip lands right after the pass's refresh read the file.
+        var store = new EditAfterFirstLoadStore((inner, path) => inner.Update(path, state => { state.Single(e => e.FullName == a).Skipped = true; return true; }));
+        var orchestrator = OrchestratorWithRealStore(new FakeProcessRunner(), lane, config, store);
+
+        await orchestrator.PrepareLaneAsync(lane, config, new JsonResumeStateStore().Load(resumePath), resumePath);
+
+        var after = new JsonResumeStateStore().Load(resumePath);
+        Assert.True(after.Single(e => e.FullName == a).Skipped, "the skip committed after the refresh must survive the pass's save");
+        Assert.Contains(after, e => e.FullName == b);                  // and the new file was tracked
     }
 
     [Fact]

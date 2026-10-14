@@ -301,6 +301,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         // blind Save at the end of this method would silently wipe those entries out, and they'd
         // have to be re-stamped later, out of the order they actually arrived in.
         RefreshResumeState(resumeState, resumeFilePath);
+        var persisted = ResumeResults.Snapshot(resumeState);   // the file as this pass knows it; what it changes from here is what it saves
 
         // A file FileBot just renamed keeps its place in line (and any skip / preset override)
         // rather than being tracked as a new arrival at the end - this has to run after the refresh
@@ -319,7 +320,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             videoFiles = QueueRules.WaitingEntriesInOrder(resumeState, lane.Id)
                 .Select(p => new FileInfo(p.FullName))
                 .ToList();
-            if (addedUntracked || remappedRenames) _resumeStore.Save(resumeState, resumeFilePath);
+            if (addedUntracked || remappedRenames) ResumeResults.SaveChanges(_resumeStore, persisted, resumeState, resumeFilePath, fileBotResult.Renames);
         }
         else
         {
@@ -330,7 +331,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
                 .Where(f => !heldPaths.Contains(f.FullName))
                 .Where(f => !ResumeKeeping.AlreadyConverted(keptSources, f)) // converted already, source kept (Maintain) and unchanged
                 .ToList();
-            _resumeStore.Save(resumeState, resumeFilePath);
+            ResumeResults.SaveChanges(_resumeStore, persisted, resumeState, resumeFilePath, fileBotResult.Renames);
         }
 
         var fileCount = videoFiles.Count;
@@ -751,22 +752,27 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
     public void PruneOrphanedLaneEntries(CompressarrConfig config, List<ResumeEntry> resumeState, string resumeFilePath)
     {
         var configuredLaneIds = config.Lanes.Select(l => l.Id).ToHashSet();
+        if (!resumeState.Any(e => !configuredLaneIds.Contains(e.LaneId))) return;
+
+        RefreshResumeState(resumeState, resumeFilePath);
+        var persisted = ResumeResults.Snapshot(resumeState);
         var orphaned = resumeState.Where(e => !configuredLaneIds.Contains(e.LaneId)).ToList();
-        if (orphaned.Count == 0) return;
 
         foreach (var entry in orphaned)
         {
             _logger.Log($"Resume entry for '{entry.FullName}' belongs to a lane that no longer exists - removing it.", LogSeverity.Info);
             resumeState.Remove(entry);
         }
-        _resumeStore.Save(resumeState, resumeFilePath);
+        ResumeResults.SaveChanges(_resumeStore, persisted, resumeState, resumeFilePath);
     }
 
     public void BackfillMissingOrder(CompressarrConfig config, List<ResumeEntry> resumeState, string resumeFilePath)
     {
+        RefreshResumeState(resumeState, resumeFilePath);
+        var persisted = ResumeResults.Snapshot(resumeState);
         if (QueueRules.BackfillMissingOrder(config, resumeState, _pathExpander, _scanner, message => _logger.Log(message, LogSeverity.Error)))
         {
-            _resumeStore.Save(resumeState, resumeFilePath);
+            ResumeResults.SaveChanges(_resumeStore, persisted, resumeState, resumeFilePath);
         }
     }
 
