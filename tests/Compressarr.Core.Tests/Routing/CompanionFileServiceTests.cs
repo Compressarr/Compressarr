@@ -299,6 +299,71 @@ public class CompanionFileServiceTests : IDisposable
         Assert.True(Directory.Exists(seasonDir), "a folder still holding another video is not really empty");
     }
 
+    [Theory]
+    [InlineData(DeleteAfterConvertMode.Delete)]
+    [InlineData(DeleteAfterConvertMode.Recycle)]
+    public void CleanUpEmptySourceFolder_AVideoStillQueuedInASubfolder_IsNeverSweptAway(DeleteAfterConvertMode unmatchedAction)
+    {
+        var inputRoot = Path.Combine(_tempDir, "Input");
+        var movieDir = Path.Combine(inputRoot, "Movie");
+        var deepDir = Path.Combine(movieDir, "Extras", "Deleted Scenes");
+        Directory.CreateDirectory(deepDir);
+        var queued = Path.Combine(deepDir, "unprocessed.mkv");
+        File.WriteAllText(queued, "x");                                           // still waiting (or skipped, or under the size filter)
+        File.WriteAllText(Path.Combine(movieDir, "Extras", "notes.txt"), "x");
+
+        _service.CleanUpEmptySourceFolder(movieDir, inputRoot, VidTypes, DeleteAfterConvertMode.Delete, unmatchedAction);
+
+        Assert.True(File.Exists(queued), "an unprocessed video below the folder must survive the cleanup");
+        Assert.True(Directory.Exists(movieDir), "the folder above it is not empty, so it stays");
+    }
+
+    [Fact]
+    public void CleanUpEmptySourceFolder_AFolderWithNoVideoAnywhereBelow_IsStillDisposedOf()
+    {
+        var inputRoot = Path.Combine(_tempDir, "Input");
+        var movieDir = Path.Combine(inputRoot, "Movie");
+        Directory.CreateDirectory(Path.Combine(movieDir, "Subs", "English"));
+        File.WriteAllText(Path.Combine(movieDir, "Subs", "English", "movie.srt"), "x");
+
+        _service.CleanUpEmptySourceFolder(movieDir, inputRoot, VidTypes, DeleteAfterConvertMode.Delete, DeleteAfterConvertMode.Delete);
+
+        Assert.False(Directory.Exists(movieDir), "leftovers with no video in them are cleaned up as before");
+    }
+
+    [Fact]
+    public void CleanUpEmptySourceFolder_AJunctionInsideTheFolder_IsLeftAlone_AndNothingBehindItIsTouched()
+    {
+        if (!OperatingSystem.IsWindows()) return;   // mklink /J is Windows-only, like the scanner's own junction test
+
+        var inputRoot = Path.Combine(_tempDir, "Input");
+        var movieDir = Path.Combine(inputRoot, "Movie");
+        Directory.CreateDirectory(movieDir);
+        var outside = Directory.CreateTempSubdirectory("compressarr-cleanup-outside-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(outside, "elsewhere.mkv"), "x");
+            var link = Path.Combine(movieDir, "link");
+            var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{outside}\"")
+            {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+            })!;
+            mklink.WaitForExit();
+            if (!Directory.Exists(link)) return;    // a host that forbids junctions cannot run this check
+
+            _service.CleanUpEmptySourceFolder(movieDir, inputRoot, VidTypes, DeleteAfterConvertMode.Delete, DeleteAfterConvertMode.Delete);
+
+            Assert.True(File.Exists(Path.Combine(outside, "elsewhere.mkv")));
+            Assert.True(Directory.Exists(link), "a link cannot be vouched for, so its folder is kept");
+        }
+        finally
+        {
+            var junction = Path.Combine(movieDir, "link");
+            if (Directory.Exists(junction)) Directory.Delete(junction);   // removes the link only
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
     [Fact]
     public void CleanUpEmptySourceFolder_MaintainMode_LeavesFolderUntouched()
     {

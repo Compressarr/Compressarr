@@ -11,6 +11,7 @@ for that full history.
 
 ## [Unreleased]
 
+- **A source folder's cleanup could remove a video that was still waiting.** Input folders are scanned recursively, so a movie folder can hold a subfolder (Extras, Featurettes) with a video that is still queued, skipped, or under the size filter. When the movie next to it finished, the cleanup treated that subfolder as an unmatched leftover and sent the whole thing to the Recycle Bin (or deleted it, if recycling failed). A subfolder is now only cleaned up when nothing at any depth below it is a video; a link (junction) or a folder that can't be read is left alone, and the folder above it then stays too.
 - **The license now ships with the program.** The installer shows an information page about the GNU General Public License (v3; nothing
   to accept), and installs the full license text (`LICENSE`) and a list of the open-source components Compressarr is built with
   (`THIRD-PARTY-NOTICES.txt`) in the install folder. The About page has a License line linking to both and to the source code, and a
