@@ -1507,6 +1507,11 @@ ResumeKeeping.NoteKeptSource(resumeEntry, config.Processing.DeleteAfterConvert);
                 diskEntry.EncodedFileDesiredName = resumeEntry.EncodedFileDesiredName;
                 diskEntry.PendingCompanionSourceDirectory = resumeEntry.PendingCompanionSourceDirectory;
                 diskEntry.PendingCompanionVideoDestPath = resumeEntry.PendingCompanionVideoDestPath;
+                // Also this file's own results: the hold after a failed encode, and the size and time of a source that was kept (Maintain).
+                // Without them the file kept them only in memory, and the next pass - or a restart - read the entry back without them.
+                diskEntry.HeldAfterFailure = resumeEntry.HeldAfterFailure;
+                diskEntry.KeptSourceSize = resumeEntry.KeptSourceSize;
+                diskEntry.KeptSourceModifiedUtc = resumeEntry.KeptSourceModifiedUtc;
             }
             return true;
         });

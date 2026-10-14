@@ -11,6 +11,7 @@ for that full history.
 
 ## [2.1.10] - Unreleased
 
+- **A file whose encode failed now stays held after a restart, and a kept source is remembered across one.** The "held" mark that keeps a failed file out of the retry loop (2.1.9) and the size and date that stop a kept source being converted again (below) were saved in memory but not written to the resume file with the file's result. So the next pass, or a restart, found the file as if nothing had happened: a failed encode was tried again and reported again, and a kept source could be converted again. Both are now saved with the result.
 - **A source folder's cleanup could remove a video that was still waiting.** Input folders are scanned recursively, so a movie folder can hold a subfolder (Extras, Featurettes) with a video that is still queued, skipped, or under the size filter. When the movie next to it finished, the cleanup treated that subfolder as an unmatched leftover and sent the whole thing to the Recycle Bin (or deleted it, if recycling failed). A subfolder is now only cleaned up when nothing at any depth below it is a video; a link (junction) or a folder that can't be read (including one that denies listing) is left alone, and the folder above it then stays too.
 - **The license now ships with the program.** The installer shows an information page about the GNU General Public License (v3; nothing
   to accept), and installs the full license text (`LICENSE`) and a list of the open-source components Compressarr is built with
