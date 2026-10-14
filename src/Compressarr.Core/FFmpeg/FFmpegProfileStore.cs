@@ -34,6 +34,10 @@ public interface IFFmpegProfileStore
 
     void RemoveUserProfile(string name);
 
+    /// <summary>Set when the file holding the profiles added from a catalog exists but could not be read: those profiles are then not offered
+    /// (and no install will overwrite the file). Null when everything is fine.</summary>
+    string? CatalogFileError { get; }
+
     /// <summary>Names of catalog profiles whose stored copy no longer matches what was installed. They are not offered to lanes.</summary>
     IReadOnlyList<string> DamagedCatalogProfiles { get; }
 
@@ -69,6 +73,7 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
     private (DateTime WriteUtc, long Length, DateTime RecordUtc, long RecordLength) _catalogStamp;
     private List<FFmpegProfile>? _catalogCache;
     private List<string> _catalogDamaged = new();
+    private string? _catalogError;
 
     public string? UserFileError
     {
@@ -83,6 +88,18 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
     }
 
     public IReadOnlyList<FFmpegProfile> GetBuiltIns() => _bundled.Value.Select(p => p.Clone()).ToList();
+
+    public string? CatalogFileError
+    {
+        get
+        {
+            lock (_gate)
+            {
+                LoadCatalogLocked();
+                return _catalogError;
+            }
+        }
+    }
 
     public IReadOnlyList<string> DamagedCatalogProfiles
     {
@@ -274,13 +291,16 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
 
         _catalogStamp = stamp;
         _catalogDamaged = new List<string>();
+        _catalogError = null;
         if (info is null) return _catalogCache = new List<FFmpegProfile>();
 
         var records = Compressarr.Core.Catalog.CatalogRecordFile.Load()
             .Where(r => string.Equals(r.Engine, "ffmpeg", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
         var profiles = new List<FFmpegProfile>();
-        foreach (var profile in ReadCatalogProfilesLocked() ?? new List<FFmpegProfile>())
+        var stored = ReadCatalogProfilesLocked();
+        if (stored is null) _catalogError = $"Your ffmpeg catalog profile file could not be read, so the profiles installed from a catalog are not shown. Restore it from a backup, or delete it ({path}) and add them again from the catalog.";
+        foreach (var profile in stored ?? new List<FFmpegProfile>())
         {
             if (records.TryGetValue(profile.Name, out var record) && record.DefinitionSha == Compressarr.Core.Catalog.CatalogHash.OfFFmpegProfile(profile))
             {

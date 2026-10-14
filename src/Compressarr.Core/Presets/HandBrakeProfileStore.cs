@@ -34,6 +34,10 @@ public interface IHandBrakeProfileStore
     /// are then not offered (and no write will overwrite it). Null when everything is fine.</summary>
     string? UserFileError { get; }
 
+    /// <summary>Set when the file holding the profiles added from a catalog exists but could not be read: those profiles are then not offered
+    /// (and no install will overwrite the file). Null when everything is fine.</summary>
+    string? CatalogFileError { get; }
+
     /// <summary>Names of catalog profiles whose stored copy no longer matches what was installed (edited by hand, damaged). They are
     /// not offered to lanes; deleting and adding them again fixes it.</summary>
     IReadOnlyList<string> DamagedCatalogProfiles { get; }
@@ -88,6 +92,7 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
     private (DateTime WriteUtc, long Length, DateTime RecordUtc, long RecordLength) _catalogStamp;
     private List<HandBrakeProfile>? _catalogCache;
     private List<string> _catalogDamaged = new();
+    private string? _catalogError;
 
     public string? UserFileError
     {
@@ -97,6 +102,18 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
             {
                 LoadUserLocked();
                 return _userError;
+            }
+        }
+    }
+
+    public string? CatalogFileError
+    {
+        get
+        {
+            lock (_gate)
+            {
+                LoadCatalogLocked();
+                return _catalogError;
             }
         }
     }
@@ -348,13 +365,16 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
 
         _catalogStamp = stamp;
         _catalogDamaged = new List<string>();
+        _catalogError = null;
         if (info is null) return _catalogCache = new List<HandBrakeProfile>();
 
         var records = Compressarr.Core.Catalog.CatalogRecordFile.Load()
             .Where(r => string.Equals(r.Engine, "handbrake", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
         var profiles = new List<HandBrakeProfile>();
-        foreach (var leaf in ReadCatalogLeavesLocked() ?? new List<HandBrakePresetFile.Leaf>())
+        var leaves = ReadCatalogLeavesLocked();
+        if (leaves is null) _catalogError = $"Your HandBrake catalog profile file could not be read, so the profiles installed from a catalog are not shown. Restore it from a backup, or delete it ({path}) and add them again from the catalog.";
+        foreach (var leaf in leaves ?? new List<HandBrakePresetFile.Leaf>())
         {
             if (records.TryGetValue(leaf.Name, out var record) && record.DefinitionSha == Compressarr.Core.Catalog.CatalogHash.OfDefinition(leaf.Definition))
             {

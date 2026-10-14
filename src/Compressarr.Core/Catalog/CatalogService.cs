@@ -254,11 +254,11 @@ public sealed class CatalogService : ICatalogService
 
     /// <summary>True when this Compressarr is at least the version the profile needs. Only the numbers count: a pre-release of 2.2.0 meets "2.2.0",
     /// so the catalog works on the betas that lead up to it. An unreadable requirement is treated as "needs a newer Compressarr", never as "fine";
-    /// an unreadable running version blocks nothing.</summary>
+    /// an unreadable running version meets no requirement either.</summary>
     internal static bool MeetsAppVersion(string? required, AppVersion? current)
     {
         if (string.IsNullOrWhiteSpace(required)) return true;
         if (AppVersion.Parse(required) is not { } needed) return false;
-        return current is null || current.WithoutPreRelease().CompareTo(needed.WithoutPreRelease()) >= 0;
+        return current is not null && current.WithoutPreRelease().CompareTo(needed.WithoutPreRelease()) >= 0;
     }
 }

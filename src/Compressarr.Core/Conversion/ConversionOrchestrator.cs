@@ -151,8 +151,8 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
     private readonly IArrUnmonitorService _arrUnmonitor;
     private readonly ITrashService _trash;
     private readonly IRunLogger _logger;
-    /// <summary>Set once the "HDR check skipped" notice has been logged in this pass; PrepareLaneAsync clears it, so every pass says it again.</summary>
-    private bool _loggedHdrCheckSkipped;
+    /// <summary>The pass (its timestamp) for which the "HDR check skipped" notice was last logged, so each pass says it once.</summary>
+    private string? _hdrCheckSkippedNotedFor;
     private readonly IResumeStateStore _resumeStore;
     private readonly IRunProgressReporter _progress;
     private readonly IConfigStore _configStore;
@@ -213,8 +213,6 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         List<ReportErrorCode>? reportProblems = null,
         CancellationToken cancellationToken = default)
     {
-        _loggedHdrCheckSkipped = false; // a new pass: the notice belongs in this run's log too
-
         var inputPath = _pathExpander.Expand(lane.Input);
         var outputBase = _pathExpander.Expand(lane.Output);
         var tvShowBasePath = _pathExpander.Expand(lane.TvShowBasePath);
@@ -509,9 +507,9 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             sourceProbe ??= await _encoders.ProbeAsync(config, file.FullName, cancellationToken);
             if (sourceProbe is null)
             {
-                if (!_loggedHdrCheckSkipped)
+                if (_hdrCheckSkippedNotedFor != timestamp)
                 {
-                    _loggedHdrCheckSkipped = true;
+                    _hdrCheckSkippedNotedFor = timestamp;
                     _logger.Log("  HDR check skipped: ffprobe was not found, so HDR files can't be recognised before encoding (install ffmpeg on the Encoder page to turn it on).");
                 }
             }

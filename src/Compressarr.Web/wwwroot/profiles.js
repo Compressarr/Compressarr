@@ -73,6 +73,7 @@ async function loadProfiles() {
 
   const errors = [];
   if ((dto.damagedCatalog || []).length) errors.push(`${dto.damagedCatalog.map(n => `"${n}"`).join(', ')} from the catalog no longer match${dto.damagedCatalog.length === 1 ? 'es' : ''} what was installed (the stored copy was changed or damaged), so ${dto.damagedCatalog.length === 1 ? 'it is' : 'they are'} not offered to lanes. Add ${dto.damagedCatalog.length === 1 ? 'it' : 'them'} again from the catalog.`);
+  if (dto.catalogFileError) errors.push(dto.catalogFileError);
   if (dto.userFileError) errors.push(`Your HandBrake profile file could not be read, so only the built-ins are shown: ${dto.userFileError}`);
   if (dto.ffmpegUserFileError) errors.push(`Your ffmpeg profile file could not be read, so only the built-ins are shown: ${dto.ffmpegUserFileError}`);
   const errorBox = document.getElementById('profileError');

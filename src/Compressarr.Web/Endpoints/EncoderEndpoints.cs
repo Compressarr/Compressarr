@@ -98,7 +98,8 @@ public static class EncoderEndpoints
                 ffmpegProfiles.UserFileError,
                 AppPaths.GetCatalogHandBrakeFilePath(),
                 AppPaths.GetCatalogFFmpegFilePath(),
-                profiles.DamagedCatalogProfiles.Concat(ffmpegProfiles.DamagedCatalogProfiles).ToList()));
+                profiles.DamagedCatalogProfiles.Concat(ffmpegProfiles.DamagedCatalogProfiles).ToList(),
+                string.Join(" ", new[] { profiles.CatalogFileError, ffmpegProfiles.CatalogFileError }.Where(e => e is not null))));
         });
     }
 }

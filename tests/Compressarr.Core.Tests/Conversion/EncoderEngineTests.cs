@@ -194,12 +194,12 @@ public class EncoderEngineTests : IDisposable
         return new Rig(orchestrator, lane, config, resolver, logger, progress, source, Path.Combine(_tempDir, "resume.json"));
     }
 
-    private static async Task<ConversionResult> RunAsync(Rig rig)
+    private static async Task<ConversionResult> RunAsync(Rig rig, string timestamp = "20260101_000000")
     {
         var resume = new List<ResumeEntry>();
         var context = await rig.Orchestrator.PrepareLaneAsync(rig.Lane, rig.Config, resume, rig.ResumePath);
         var entry = resume.Single(e => e.LaneId == rig.Lane.Id);
-        return await rig.Orchestrator.ProcessOneFileAsync(context!, entry, rig.ResumePath.Replace("resume.json", ""), "20260101_000000", resume, rig.ResumePath, CancellationToken.None);
+        return await rig.Orchestrator.ProcessOneFileAsync(context!, entry, rig.ResumePath.Replace("resume.json", ""), timestamp, resume, rig.ResumePath, CancellationToken.None);
     }
 
     private static MediaProbeResult Probe(string json) => FFprobeParser.Parse(json);
@@ -576,9 +576,9 @@ public class EncoderEngineTests : IDisposable
     {
         var rig = HandBrakeRig("x264", dynamicMetadata: true, probe: null);
 
-        await RunAsync(rig);
+        await RunAsync(rig, "20260101_000000");
         File.WriteAllText(rig.Source, "source bytes");   // the first run may have moved or deleted it
-        await RunAsync(rig);
+        await RunAsync(rig, "20260102_000000");          // the next pass has its own timestamp
 
         Assert.Equal(2, rig.Logger.Logs.Count(l => l.Message.Contains("HDR check skipped")));
     }

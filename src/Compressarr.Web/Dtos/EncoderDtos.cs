@@ -43,7 +43,8 @@ public sealed record ProfileListDto(
     string? FfmpegUserFileError = null,
     string? CatalogHandBrakeFilePath = null,
     string? CatalogFFmpegFilePath = null,
-    List<string>? DamagedCatalog = null);
+    List<string>? DamagedCatalog = null,
+    string? CatalogFileError = null);
 
 /// <summary>The editor's view of one HandBrake profile: the form fields, whether it is a locked
 /// built-in (the editor is then read-only), and which lanes use it.</summary>

@@ -581,7 +581,9 @@ public sealed partial class PosterService : IPosterService, IDisposable
         }
         catch (Exception)
         {
-            // Remembering is a courtesy: the poster still works for this session.
+            // Remembering is a courtesy: the poster still works for this session. The marks stay pending (Dispose tries again), and the next
+            // attempt waits the usual interval instead of failing again on every poll.
+            _lastIndexSave = _time.GetUtcNow();
         }
     }
 

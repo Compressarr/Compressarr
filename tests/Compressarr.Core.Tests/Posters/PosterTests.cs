@@ -434,6 +434,7 @@ public class PosterServiceTests : AppDataTestBase
 
         Assert.All(paths, p => Assert.NotNull(p));
         Assert.Single(paths.Distinct());
+        Assert.Equal(1, _http.Requests.Count(r => r.Host == "img.test"));   // one download shared by all eight
         Assert.Equal(new byte[] { 5, 5, 5, 5 }, await ReadWhenFree(paths[0]!));
         Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(paths[0]!)!, "*.tmp"));
     }

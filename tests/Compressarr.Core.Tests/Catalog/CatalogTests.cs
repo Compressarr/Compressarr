@@ -129,6 +129,24 @@ public class CatalogStoreTests : AppDataTestBase
     }
 
     [Fact]
+    public void ACatalogFileThatCannotBeRead_IsReported_SoTheProfilesDoNotJustVanish()
+    {
+        Assert.Null(new HandBrakeProfileStore().CatalogFileError);
+        Assert.Null(new FFmpegProfileStore().CatalogFileError);
+        new HandBrakeProfileStore().AddCatalogProfile(HbDefinition("Cat One v1"), Record("Cat One v1", "handbrake"));
+        File.WriteAllText(AppPaths.GetCatalogHandBrakeFilePath(), "{ not json");
+        File.WriteAllText(AppPaths.GetCatalogFFmpegFilePath(), "{ not json");
+
+        var hb = new HandBrakeProfileStore();
+        var ff = new FFmpegProfileStore();
+
+        Assert.Contains("could not be read", hb.CatalogFileError);
+        Assert.Contains(AppPaths.GetCatalogHandBrakeFilePath(), hb.CatalogFileError);
+        Assert.Contains("could not be read", ff.CatalogFileError);
+        Assert.DoesNotContain(hb.GetAll(), p => p.IsCatalog);
+    }
+
+    [Fact]
     public void ACatalogFileThatCannotBeRead_IsNeverOverwrittenByAnInstall()
     {
         new HandBrakeProfileStore().AddCatalogProfile(HbDefinition("Cat One v1"), Record("Cat One v1", "handbrake"));
@@ -434,6 +452,13 @@ public class CatalogServiceTests : AppDataTestBase
         var ex = await Assert.ThrowsAsync<CatalogException>(() => Service().ListAsync(default));
 
         Assert.Contains("offline", ex.Message);
+    }
+
+    [Fact]
+    public void WhenTheRunningVersionCannotBeRead_OnlyAProfileWithNoRequirementIsOffered()
+    {
+        Assert.False(CatalogService.MeetsAppVersion("2.2.0", null));
+        Assert.True(CatalogService.MeetsAppVersion("", null));
     }
 
     [Theory]
