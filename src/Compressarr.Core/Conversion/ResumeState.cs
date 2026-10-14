@@ -127,6 +127,13 @@ internal static class ResumeResults
         .Where(p => p.CanRead && p.CanWrite && p.Name is not (nameof(ResumeEntry.LaneId) or nameof(ResumeEntry.FullName)))
         .ToArray();
 
+    // The fields only the Monitor page's queue edits change (and a pass may fill in when they are still unset).
+    private static readonly HashSet<string> UserOwned = new()
+    {
+        nameof(ResumeEntry.Order), nameof(ResumeEntry.Skipped), nameof(ResumeEntry.PresetOverride), nameof(ResumeEntry.Removed),
+        nameof(ResumeEntry.DestinationLaneId), nameof(ResumeEntry.CreatedByQueueEdit)
+    };
+
     private static string KeyOf(ResumeEntry e) => e.LaneId + "|" + e.FullName.ToUpperInvariant();
 
     private static ResumeEntry Copy(ResumeEntry e, string? fullName = null)
@@ -143,7 +150,7 @@ internal static class ResumeResults
     /// <summary>Saves what this pass changed - and only that - into the file as it is now. A pass that adds files, remaps renames or prunes works on
     /// an in-memory list that was refreshed from disk a moment earlier; saving that whole list would write the older picture back over a skip,
     /// reorder, override or new file the Monitor page committed in between. Here an entry added since the baseline is added, one removed is removed,
-    /// and for one that is in both only the fields that differ from the baseline are copied, so every other field keeps whatever is freshest on disk.
+    /// and for one that is in both only the fields that differ from the baseline are copied, so every other field keeps whatever is freshest on disk. When the pass and the Monitor page both changed the same queue field since the baseline, the Monitor page's value stays.
     /// <paramref name="renames"/> (old path to new path) lets a remapped file carry the disk entry's latest user edits to its new path.</summary>
     public static void SaveChanges(IResumeStateStore store, IReadOnlyList<ResumeEntry> baseline, IReadOnlyList<ResumeEntry> current, string resumeFilePath,
         IReadOnlyDictionary<string, string>? renames = null)
@@ -155,33 +162,51 @@ internal static class ResumeResults
         var changed = now.Where(kv => before.TryGetValue(kv.Key, out var b) && Fields.Any(f => !Equals(f.GetValue(b), f.GetValue(kv.Value)))).Select(kv => kv.Value).ToList();
         if (added.Count == 0 && removed.Count == 0 && changed.Count == 0) return;
 
-        var renameSources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (renames is not null) foreach (var (from, to) in renames) renameSources[to] = from;
-
         store.Update(resumeFilePath, disk =>
         {
             ResumeEntry? OnDisk(ResumeEntry e) => disk.FirstOrDefault(d => d.LaneId == e.LaneId && string.Equals(d.FullName, e.FullName, StringComparison.OrdinalIgnoreCase));
 
-            foreach (var entry in added)
+            // A file FileBot renamed is one queue entry that changed its path: the entry on disk under the old path carries the latest queue edits
+            // (skip, order, profile, destination), and they go to the new path - whether or not the Monitor page has already tracked that path.
+            var handled = new HashSet<ResumeEntry>();
+            foreach (var old in removed.ToList())
             {
-                if (OnDisk(entry) is not null) continue;   // someone (the Monitor page) already tracked it
+                var rename = renames?.FirstOrDefault(kv => string.Equals(kv.Key, old.FullName, StringComparison.OrdinalIgnoreCase));
+                if (rename is not { Value: { } to }) continue;
+                var target = current.FirstOrDefault(e => e.LaneId == old.LaneId && string.Equals(e.FullName, to, StringComparison.OrdinalIgnoreCase));
+                if (target is null || OnDisk(old) is not { } oldOnDisk) continue;
 
-                // A file FileBot renamed: it takes over the entry that is on disk under the old path, edits made to it since the refresh included.
-                if (renameSources.TryGetValue(entry.FullName, out var from) && before.TryGetValue(entry.LaneId + "|" + from.ToUpperInvariant(), out var old) && removed.Contains(old)
-                    && OnDisk(old) is { } oldOnDisk)
+                var targetOnDisk = OnDisk(target);
+                if (targetOnDisk is null)
                 {
-                    var moved = Copy(oldOnDisk, entry.FullName);
+                    var moved = Copy(oldOnDisk, target.FullName);
                     foreach (var field in Fields)
                     {
-                        if (!Equals(field.GetValue(old), field.GetValue(entry))) field.SetValue(moved, field.GetValue(entry));
+                        if (!Equals(field.GetValue(old), field.GetValue(target))) field.SetValue(moved, field.GetValue(target));
                     }
 
                     disk.Remove(oldOnDisk);
                     disk.Add(moved);
-                    removed.Remove(old);
-                    continue;
+                }
+                else if (targetOnDisk.Status == ResumeStatus.Pending)
+                {
+                    // Both identities are on disk (the Monitor page adopted the new path first): one pending file, so one entry survives - the one
+                    // at the new path - carrying the queue edits of the old one, the same rule QueueRules.RemapRenamedFiles applies in memory.
+                    foreach (var field in Fields.Where(p => UserOwned.Contains(p.Name))) field.SetValue(targetOnDisk, field.GetValue(oldOnDisk));
+                    disk.Remove(oldOnDisk);
+                }
+                else
+                {
+                    continue;   // a finished copy sits at the new path: different work, nothing is replaced (the old entry goes with its missing file later)
                 }
 
+                removed.Remove(old);
+                handled.Add(target);
+            }
+
+            foreach (var entry in added)
+            {
+                if (handled.Contains(entry) || OnDisk(entry) is not null) continue;   // handled above, or the Monitor page already tracked it
                 disk.Add(Copy(entry));
             }
 
@@ -192,6 +217,8 @@ internal static class ResumeResults
 
             foreach (var entry in changed)
             {
+                if (handled.Contains(entry)) continue;
+
                 var target = OnDisk(entry);
                 if (target is null)
                 {
@@ -202,7 +229,13 @@ internal static class ResumeResults
                 var was = before[KeyOf(entry)];
                 foreach (var field in Fields)
                 {
-                    if (!Equals(field.GetValue(was), field.GetValue(entry))) field.SetValue(target, field.GetValue(entry));
+                    if (Equals(field.GetValue(was), field.GetValue(entry))) continue;   // the pass did not change this one
+
+                    // A queue edit is the user's: when the Monitor page changed the same field after the baseline, theirs wins over what a pass
+                    // computed from the older list (an order backfill, say). The pass's own results always apply.
+                    if (UserOwned.Contains(field.Name) && !Equals(field.GetValue(target), field.GetValue(was))) continue;
+
+                    field.SetValue(target, field.GetValue(entry));
                 }
             }
 

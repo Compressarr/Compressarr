@@ -85,6 +85,92 @@ public class ResumeSaveChangesTests : IDisposable
     }
 
     [Fact]
+    public void ARemappedFile_WhoseNewPathTheMonitorPageAlreadyTracked_ArrivesAsOneEntryWithTheOldOnesQueueEdits()
+    {
+        var (memory, baseline) = Start(Entry("old name.mkv", 3), Entry("other.mkv", 4));
+        EditOnDisk("old name.mkv", e => { e.Skipped = true; e.PresetOverride = "Fast"; e.DestinationLaneId = "library2"; });
+        memory.Single(e => e.FullName.EndsWith("old name.mkv")).FullName = @"C:\In\New Name (2020).mkv";   // the pass's remap
+        _store.Update(Path_, state => { state.Add(Entry("New Name (2020).mkv", 99)); return true; });          // the Monitor page adopted the new path first
+
+        ResumeResults.SaveChanges(_store, baseline, memory, Path_,
+            new Dictionary<string, string> { [@"C:\In\old name.mkv"] = @"C:\In\New Name (2020).mkv" });
+
+        var after = _store.Load(Path_);
+        Assert.DoesNotContain(after, e => e.FullName.EndsWith("old name.mkv"));
+        var survivor = Assert.Single(after, e => e.FullName.EndsWith("New Name (2020).mkv"));
+        Assert.True(survivor.Skipped, "a skipped file must not become eligible because it was renamed");
+        Assert.Equal("Fast", survivor.PresetOverride);
+        Assert.Equal("library2", survivor.DestinationLaneId);
+        Assert.Equal(3, survivor.Order);
+    }
+
+    [Fact]
+    public void ARemappedFile_WhoseNewPathWasTrackedBeforeTheBaseline_AlsoCarriesTheLatestEdits()
+    {
+        var (memory, baseline) = Start(Entry("old name.mkv", 3), Entry("New Name (2020).mkv", 9));
+        EditOnDisk("old name.mkv", e => e.Skipped = true);                                                   // after the refresh
+        // the pass's in-memory remap of two pending entries: the old one's fields go to the target, the old one is dropped
+        var target = memory.Single(e => e.FullName.EndsWith("New Name (2020).mkv"));
+        target.Order = 3;
+        memory.RemoveAll(e => e.FullName.EndsWith("old name.mkv"));
+
+        ResumeResults.SaveChanges(_store, baseline, memory, Path_,
+            new Dictionary<string, string> { [@"C:\In\old name.mkv"] = @"C:\In\New Name (2020).mkv" });
+
+        var after = _store.Load(Path_);
+        Assert.DoesNotContain(after, e => e.FullName.EndsWith("old name.mkv"));
+        var survivor = Assert.Single(after, e => e.FullName.EndsWith("New Name (2020).mkv"));
+        Assert.True(survivor.Skipped);
+        Assert.Equal(3, survivor.Order);
+    }
+
+    [Fact]
+    public void AFinishedCopyAtTheNewPath_IsNeverReplacedByARemap()
+    {
+        var (memory, baseline) = Start(Entry("old name.mkv", 3));
+        _store.Update(Path_, state => { state.Add(Entry("New Name (2020).mkv", 5, ResumeStatus.Completed)); return true; });
+        memory.Single().FullName = @"C:\In\New Name (2020).mkv";
+
+        ResumeResults.SaveChanges(_store, baseline, memory, Path_,
+            new Dictionary<string, string> { [@"C:\In\old name.mkv"] = @"C:\In\New Name (2020).mkv" });
+
+        var finished = Assert.Single(_store.Load(Path_), e => e.FullName.EndsWith("New Name (2020).mkv"));
+        Assert.Equal(ResumeStatus.Completed, finished.Status);
+        Assert.Equal(5, finished.Order);
+    }
+
+    [Fact]
+    public void WhenThePassAndTheMonitorPageBothChangeTheOrder_TheMonitorPagesValueStays()
+    {
+        var (memory, baseline) = Start(new ResumeEntry { LaneId = "lane1", FullName = @"C:\In\a.mkv", Status = ResumeStatus.Pending, Order = null },
+            new ResumeEntry { LaneId = "lane1", FullName = @"C:\In\b.mkv", Status = ResumeStatus.Pending, Order = null });
+        _store.Update(Path_, state =>                                   // the user's explicit reorder, committed after the baseline
+        {
+            state.Single(e => e.FullName.EndsWith("b.mkv")).Order = 0;
+            state.Single(e => e.FullName.EndsWith("a.mkv")).Order = 1;
+            return true;
+        });
+        memory.Single(e => e.FullName.EndsWith("a.mkv")).Order = 0;    // the pass's order backfill, from the older list
+        memory.Single(e => e.FullName.EndsWith("b.mkv")).Order = 1;
+
+        ResumeResults.SaveChanges(_store, baseline, memory, Path_);
+
+        var after = _store.Load(Path_).OrderBy(e => e.Order).Select(e => Path.GetFileName(e.FullName)).ToList();
+        Assert.Equal(new[] { "b.mkv", "a.mkv" }, after);
+    }
+
+    [Fact]
+    public void ABackfilledOrder_IsStillWritten_WhenNobodyElseTouchedIt()
+    {
+        var (memory, baseline) = Start(new ResumeEntry { LaneId = "lane1", FullName = @"C:\In\a.mkv", Status = ResumeStatus.Pending, Order = null });
+        memory.Single().Order = 0;
+
+        ResumeResults.SaveChanges(_store, baseline, memory, Path_);
+
+        Assert.Equal(0, _store.Load(Path_).Single().Order);
+    }
+
+    [Fact]
     public void NothingChanged_MeansNothingIsWritten()
     {
         var (memory, baseline) = Start(Entry("a.mkv", 0));
