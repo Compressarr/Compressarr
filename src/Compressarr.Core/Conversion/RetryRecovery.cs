@@ -194,8 +194,7 @@ internal sealed class RetryRecovery
             {
                 var retryLibraries = LaneDestination.Resolve(config, _pathExpander, entry, tvShowBasePath, movieBasePath);
                 retryDestPath = _fileRouter.RouteFile(encodedFilePath, desiredFileName, retryIsTv, retryLibraries.TvShowBasePath, retryLibraries.MovieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision);
-                entry.Status = ResumeStatus.Completed;
-ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
+                ResumeKeeping.MarkCompleted(entry, config.Processing.DeleteAfterConvert);
                 entry.EncodedFilePath = null;
                 entry.EncodedFileDesiredName = null;
                 entry.LastRetryFailureMessage = null;
@@ -232,8 +231,7 @@ ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
             {
                 // Configured to skip, not an error - the file just stays put; nothing left to
                 // retry, so this is as resolved as it's going to get.
-                entry.Status = ResumeStatus.Completed;
-ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
+                ResumeKeeping.MarkCompleted(entry, config.Processing.DeleteAfterConvert);
                 entry.EncodedFilePath = null;
                 entry.EncodedFileDesiredName = null;
                 entry.LastRetryFailureMessage = null;
@@ -342,8 +340,7 @@ ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
                 {
                     if (_cleanup.TryCleanUpSourceFolder(config, sourceDirectory, inputPath, " on companion retry") is null)
                     {
-                        entry.Status = ResumeStatus.Completed;
-ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
+                        ResumeKeeping.MarkCompleted(entry, config.Processing.DeleteAfterConvert);
                         entry.PendingCompanionSourceDirectory = null;
                         entry.PendingCompanionVideoDestPath = null;
                     }
@@ -410,8 +407,7 @@ ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
             // confirming a rescan for cleanup that's already moot.
             if (!Directory.Exists(sourceDirectory))
             {
-                entry.Status = ResumeStatus.Completed;
-ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
+                ResumeKeeping.MarkCompleted(entry, config.Processing.DeleteAfterConvert);
                 entry.PendingCompanionSourceDirectory = null;
                 entry.PendingCompanionVideoDestPath = null;
                 entry.LastRetryFailureMessage = null;
@@ -434,8 +430,7 @@ ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
                 if (cleanupError is null)
                 {
                     _logger.Log($"  Retried source folder cleanup for '{desiredFileName}' - succeeded.");
-                    entry.Status = ResumeStatus.Completed;
-ResumeKeeping.NoteKeptSource(entry, config.Processing.DeleteAfterConvert);
+                    ResumeKeeping.MarkCompleted(entry, config.Processing.DeleteAfterConvert);
                     entry.PendingCompanionSourceDirectory = null;
                     entry.PendingCompanionVideoDestPath = null;
                     entry.LastRetryFailureMessage = null;

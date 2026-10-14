@@ -13,7 +13,9 @@ public sealed record PosterQuery(bool IsTv, string Title, int? Year)
     public string CacheKey => $"{(IsTv ? "tv" : "movie")}|{Title.ToLowerInvariant()}|{Year}";
 
     /// <summary>A short, URL-safe id for the cached poster (it is what the browser asks the app for).</summary>
-    public string Id => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(CacheKey)))[..16].ToLowerInvariant();
+    public string Id => _id ??= Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(CacheKey)))[..16].ToLowerInvariant();
+
+    private string? _id; // worked out once: the Monitor page asks for it for every queue row on every poll
 }
 
 /// <summary>Works out what a queued file is, from its name alone, using the same TV-versus-movie rule the rest of the app uses

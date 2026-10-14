@@ -46,6 +46,9 @@ public sealed class AppVersion : IComparable<AppVersion>
         return new AppVersion(numbers, pre);
     }
 
+    /// <summary>The same version without its pre-release tag ("2.2.0-beta.6" becomes "2.2.0"), for requirements that only name the numbers.</summary>
+    public AppVersion WithoutPreRelease() => _pre.Length == 0 ? this : new AppVersion(_numbers, Array.Empty<string>());
+
     /// <summary>True for a beta or other pre-release ("2.2.0-beta.5"), false for a final release ("2.2.0").</summary>
     public bool IsPreRelease => _pre.Length > 0;
 

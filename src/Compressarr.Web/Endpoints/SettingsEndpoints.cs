@@ -33,7 +33,7 @@ public static class SettingsEndpoints
 
             // Turning announcements on looks for news now, so the bell can appear as soon as this save returns instead of at the next
             // daily check. Capped, so Save never waits long when GitHub cannot be reached (the check carries on in the background).
-            if (!announcementsWereOn && dto.AnnouncementsEnabled)
+            if (!announcementsWereOn && dto.AnnouncementsEnabled == true)
             {
                 try { await announcements.CheckNowAsync().WaitAsync(TimeSpan.FromSeconds(4)); }
                 catch (Exception) { /* best-effort: the bell just appears at the next check */ }

@@ -136,9 +136,17 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
                 throw new InvalidOperationException($"A profile named '{name}' already exists.");
             }
 
+            // Everything already in the file stays - including a profile that reads as damaged, which is the user's to delete - so the file is
+            // rebuilt from what is in it, not from the valid list. A file that cannot be read is never overwritten.
+            var inFile = ReadCatalogLeavesLocked() ?? throw new InvalidOperationException("The catalog profile file could not be read, so nothing was changed. Delete catalog-handbrake.json to start it again.");
+            if (inFile.Any(l => string.Equals(l.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"A catalog profile named '{name}' is already stored but reads as damaged. Delete it first, then add it again.");
+            }
+
             // The record first: a record without its profile is harmless, a profile without its record would read as damaged.
             Compressarr.Core.Catalog.CatalogRecordFile.Add(record with { Name = name, Engine = "handbrake", DefinitionSha = Compressarr.Core.Catalog.CatalogHash.OfDefinition(definition) });
-            var all = existing.Select(p => (JsonNode)p.Definition.DeepClone()).Append((JsonNode)definition.DeepClone()).ToList();
+            var all = inFile.Select(l => (JsonNode)l.Definition.DeepClone()).Append((JsonNode)definition.DeepClone()).ToList();
             WriteCatalogFileLocked(all);
             EnsureActiveFileLocked();
         }
@@ -154,7 +162,7 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
             if (index < 0 && !damaged) throw new InvalidOperationException($"There is no catalog profile named '{name}'.");
 
             // A damaged profile is not in the list above, but its entry is still in the file: keep every other one as it is.
-            var keep = ReadCatalogLeavesLocked().Where(l => !string.Equals(l.Name, name, StringComparison.OrdinalIgnoreCase)).Select(l => (JsonNode)l.Definition.DeepClone()).ToList();
+            var keep = (ReadCatalogLeavesLocked() ?? throw new InvalidOperationException("The catalog profile file could not be read, so nothing was changed. Delete catalog-handbrake.json to start it again.")).Where(l => !string.Equals(l.Name, name, StringComparison.OrdinalIgnoreCase)).Select(l => (JsonNode)l.Definition.DeepClone()).ToList();
             WriteCatalogFileLocked(keep);
             Compressarr.Core.Catalog.CatalogRecordFile.Remove("handbrake", name);
             EnsureActiveFileLocked();
@@ -346,7 +354,7 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
             .Where(r => string.Equals(r.Engine, "handbrake", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
         var profiles = new List<HandBrakeProfile>();
-        foreach (var leaf in ReadCatalogLeavesLocked())
+        foreach (var leaf in ReadCatalogLeavesLocked() ?? new List<HandBrakePresetFile.Leaf>())
         {
             if (records.TryGetValue(leaf.Name, out var record) && record.DefinitionSha == Compressarr.Core.Catalog.CatalogHash.OfDefinition(leaf.Definition))
             {
@@ -361,12 +369,12 @@ public sealed class HandBrakeProfileStore : IHandBrakeProfileStore
         return _catalogCache = profiles;
     }
 
-    private static List<HandBrakePresetFile.Leaf> ReadCatalogLeavesLocked()
+    /// <summary>Every profile in the catalog file (also ones that read as damaged); empty when there is no file, null when there is one that cannot be read.</summary>
+    private static List<HandBrakePresetFile.Leaf>? ReadCatalogLeavesLocked()
     {
         var path = AppPaths.GetCatalogHandBrakeFilePath();
-        return File.Exists(path) && HandBrakePresetFile.TryRead(path, out var root, out _)
-            ? HandBrakePresetFile.GetLeaves(root)
-            : new List<HandBrakePresetFile.Leaf>();
+        if (!File.Exists(path)) return new List<HandBrakePresetFile.Leaf>();
+        return HandBrakePresetFile.TryRead(path, out var root, out _) ? HandBrakePresetFile.GetLeaves(root) : null;
     }
 
     private void WriteCatalogFileLocked(List<JsonNode> leaves)

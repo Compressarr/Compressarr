@@ -112,6 +112,39 @@ public class CatalogStoreTests : AppDataTestBase
     }
 
     [Fact]
+    public void AddingAnotherCatalogProfile_KeepsOneThatReadsAsDamaged_AndRefusesItsName()
+    {
+        var store = new HandBrakeProfileStore();
+        store.AddCatalogProfile(HbDefinition("Cat One v1"), Record("Cat One v1", "handbrake"));
+        var path = AppPaths.GetCatalogHandBrakeFilePath();
+        File.WriteAllText(path, File.ReadAllText(path).Replace("\"VideoQualitySlider\": 22", "\"VideoQualitySlider\": 5"));
+
+        var reread = new HandBrakeProfileStore();
+        reread.AddCatalogProfile(HbDefinition("Cat Two v1"), Record("Cat Two v1", "handbrake"));
+
+        var after = new HandBrakeProfileStore();
+        Assert.Contains("Cat One v1", after.DamagedCatalogProfiles);                       // still there for the user to delete, not silently dropped
+        Assert.Contains(after.GetAll(), p => p.Name == "Cat Two v1" && p.IsCatalog);
+        Assert.Throws<InvalidOperationException>(() => after.AddCatalogProfile(HbDefinition("Cat One v1"), Record("Cat One v1", "handbrake")));
+    }
+
+    [Fact]
+    public void ACatalogFileThatCannotBeRead_IsNeverOverwrittenByAnInstall()
+    {
+        new HandBrakeProfileStore().AddCatalogProfile(HbDefinition("Cat One v1"), Record("Cat One v1", "handbrake"));
+        new FFmpegProfileStore().AddCatalogProfile(new FFmpegProfile { Name = "FF One v1", VideoCodec = "av1_nvenc", Preset = "p5", PixFmt = "p010le", Quality = 34 }, Record("FF One v1", "ffmpeg"));
+        File.WriteAllText(AppPaths.GetCatalogHandBrakeFilePath(), "{ not json");
+        File.WriteAllText(AppPaths.GetCatalogFFmpegFilePath(), "{ not json");
+
+        Assert.Throws<InvalidOperationException>(() => new HandBrakeProfileStore().AddCatalogProfile(HbDefinition("Cat Two v1"), Record("Cat Two v1", "handbrake")));
+        Assert.Throws<InvalidOperationException>(() => new FFmpegProfileStore().AddCatalogProfile(
+            new FFmpegProfile { Name = "FF Two v1", VideoCodec = "av1_nvenc", Preset = "p5", PixFmt = "p010le", Quality = 34 }, Record("FF Two v1", "ffmpeg")));
+
+        Assert.Equal("{ not json", File.ReadAllText(AppPaths.GetCatalogHandBrakeFilePath()));
+        Assert.Equal("{ not json", File.ReadAllText(AppPaths.GetCatalogFFmpegFilePath()));
+    }
+
+    [Fact]
     public void ACatalogProfileWithNoRecord_IsNotTrusted()
     {
         var store = new HandBrakeProfileStore();
@@ -411,9 +444,11 @@ public class CatalogServiceTests : AppDataTestBase
     [InlineData("2.2.0-beta.6", "2.2.0", true)]   // the pre-release tag is ignored: 2.2.0 beta counts as 2.2.0
     [InlineData("2.2.0", "", true)]
     [InlineData("2.2.0", "banana", false)]       // an unreadable requirement is never "fine"
+    [InlineData("2.2.0-rc.1", "2.2.0-beta.6", true)]
+    [InlineData("2.2.0-rc.1", "2.2.1", false)]
     public void TheAppVersionCheck_ComparesNumbers_AndDistrustsGarbage(string current, string required, bool expected)
     {
-        Assert.Equal(expected, CatalogService.MeetsAppVersion(required, Version.Parse(current.Split('-')[0])));
+        Assert.Equal(expected, CatalogService.MeetsAppVersion(required, Compressarr.Core.Updates.AppVersion.Parse(current)));
     }
 }
 

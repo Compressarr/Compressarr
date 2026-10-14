@@ -115,7 +115,7 @@ public sealed class UpdateCheckService : IUpdateCheckService, IDisposable
 
         try
         {
-            var client = _httpClientFactory.CreateClient();
+            using var client = _httpClientFactory.CreateClient();
             client.Timeout = TimeSpan.FromSeconds(10);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Compressarr-UpdateChecker");
 
@@ -125,10 +125,10 @@ public sealed class UpdateCheckService : IUpdateCheckService, IDisposable
                 ? $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases?per_page=100"
                 : $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases/latest";
 
-            var response = await client.GetAsync(url);
+            using var response = await client.GetAsync(url);
             if (!response.IsSuccessStatusCode)
             {
-                var failed = new UpdateCheckResult(false, $"GitHub returned HTTP {(int)response.StatusCode}.", "", "", false, checkedAt, channelName);
+                var failed = new UpdateCheckResult(false, Compressarr.Core.Net.NetworkProblem.DescribeStatus((int)response.StatusCode), "", "", false, checkedAt, channelName);
                 LastResult = failed;
                 return failed;
             }

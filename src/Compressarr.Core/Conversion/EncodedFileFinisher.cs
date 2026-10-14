@@ -356,8 +356,7 @@ internal sealed class EncodedFileFinisher
         }
         else
         {
-            resumeEntry.Status = ResumeStatus.Completed;
-            ResumeKeeping.NoteKeptSource(resumeEntry, config.Processing.DeleteAfterConvert);
+            ResumeKeeping.MarkCompleted(resumeEntry, config.Processing.DeleteAfterConvert);
         }
 
         return new FinishOutcome(endSizeGb, arrStatus, finalFileName ?? newFileName, moveFailed, diskFull, failureReason, errorCode, postProcessWarning, redirectedTo);

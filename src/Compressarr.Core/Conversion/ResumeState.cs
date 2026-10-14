@@ -42,8 +42,15 @@ public static class ResumeKeeping
 {
     private static readonly TimeSpan TimeTolerance = TimeSpan.FromSeconds(2); // file systems round last-write times differently
 
+    /// <summary>Marks an entry Completed - the one place that does, so a source that is kept is always noted with it.</summary>
+    public static void MarkCompleted(ResumeEntry entry, DeleteAfterConvertMode mode)
+    {
+        entry.Status = ResumeStatus.Completed;
+        NoteKeptSource(entry, mode);
+    }
+
     /// <summary>Notes the source's size and time on a Completed entry when the mode keeps the source. Does nothing otherwise.</summary>
-    public static void NoteKeptSource(ResumeEntry entry, DeleteAfterConvertMode mode)
+    private static void NoteKeptSource(ResumeEntry entry, DeleteAfterConvertMode mode)
     {
         if (mode != DeleteAfterConvertMode.Maintain || !File.Exists(entry.FullName)) return;
         var info = new FileInfo(entry.FullName);
@@ -62,9 +69,22 @@ public static class ResumeKeeping
     public static bool StillNeeded(ResumeEntry entry) =>
         entry.Status == ResumeStatus.Completed && entry.KeptSourceSize.HasValue && File.Exists(entry.FullName);
 
+    /// <summary>The lane's entries that were converted with their source kept, by path - built once per scan, so asking about each scanned
+    /// file is a lookup rather than a pass over the whole resume state.</summary>
+    public static Dictionary<string, ResumeEntry> KeptSources(IEnumerable<ResumeEntry> state, string laneId)
+    {
+        var kept = new Dictionary<string, ResumeEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in state)
+        {
+            if (e.LaneId == laneId && e.Status == ResumeStatus.Completed && e.KeptSourceSize.HasValue) kept[e.FullName] = e;
+        }
+
+        return kept;
+    }
+
     /// <summary>Whether this file, found in a scan, was already converted with its source kept (so it is not work to do).</summary>
-    public static bool AlreadyConverted(IEnumerable<ResumeEntry> state, string laneId, FileInfo found) =>
-        state.Any(e => e.LaneId == laneId && string.Equals(e.FullName, found.FullName, StringComparison.OrdinalIgnoreCase) && IsConvertedAndUnchanged(e, found));
+    public static bool AlreadyConverted(IReadOnlyDictionary<string, ResumeEntry> keptSources, FileInfo found) =>
+        keptSources.TryGetValue(found.FullName, out var entry) && IsConvertedAndUnchanged(entry, found);
 }
 
 public sealed class ResumeEntry

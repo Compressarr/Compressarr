@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Compressarr.Core.FFmpeg;
 using Compressarr.Core.Presets;
+using Compressarr.Core.Updates;
 
 namespace Compressarr.Core.Catalog;
 
@@ -66,7 +67,7 @@ public sealed class CatalogService : ICatalogService
         var damagedFf = _ffmpeg.DamagedCatalogProfiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var hbAll = _handBrake.GetAll();
         var ffAll = _ffmpeg.GetAll();
-        var appVersion = AppVersion();
+        var appVersion = AppVersion.Installed();
 
         var valid = listing.Document.Profiles.Where(e => (e.IsHandBrake || e.IsFFmpeg) && !string.IsNullOrWhiteSpace(e.Family) && e.Version > 0).ToList();
         var families = new List<CatalogFamilyView>();
@@ -143,7 +144,7 @@ public sealed class CatalogService : ICatalogService
 
     private async Task<CatalogInstallResult> InstallOneAsync(CatalogListing listing, CatalogEntry entry, string? importAs, CancellationToken cancellationToken)
     {
-        if (!MeetsAppVersion(entry.MinAppVersion, AppVersion()))
+        if (!MeetsAppVersion(entry.MinAppVersion, AppVersion.Installed()))
         {
             throw new CatalogException($"{entry.Name} needs Compressarr {entry.MinAppVersion} or newer.");
         }
@@ -251,18 +252,13 @@ public sealed class CatalogService : ICatalogService
         return profile;
     }
 
-    private static Version AppVersion() => typeof(CatalogService).Assembly.GetName().Version ?? new Version(0, 0, 0);
-
-    /// <summary>True when this Compressarr is at least the version the profile needs. An unreadable requirement is treated as "needs a newer
-    /// Compressarr", never as "fine".</summary>
-    internal static bool MeetsAppVersion(string? required, Version current)
+    /// <summary>True when this Compressarr is at least the version the profile needs. Only the numbers count: a pre-release of 2.2.0 meets "2.2.0",
+    /// so the catalog works on the betas that lead up to it. An unreadable requirement is treated as "needs a newer Compressarr", never as "fine";
+    /// an unreadable running version blocks nothing.</summary>
+    internal static bool MeetsAppVersion(string? required, AppVersion? current)
     {
         if (string.IsNullOrWhiteSpace(required)) return true;
-        var text = required.Trim();
-        var cut = text.IndexOfAny(new[] { '-', '+' });
-        if (cut >= 0) text = text[..cut];
-        return Version.TryParse(text, out var needed) && Normalise(current) >= Normalise(needed);
+        if (AppVersion.Parse(required) is not { } needed) return false;
+        return current is null || current.WithoutPreRelease().CompareTo(needed.WithoutPreRelease()) >= 0;
     }
-
-    private static Version Normalise(Version v) => new(Math.Max(v.Major, 0), Math.Max(v.Minor, 0), Math.Max(v.Build, 0));
 }

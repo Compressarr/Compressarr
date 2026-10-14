@@ -33,6 +33,26 @@ public class UpdateChannelSettingTests
         Assert.Equal("Beta", (await Settings(host))["updateChannel"]!.GetValue<string>());
     }
 
+    [Fact]
+    public async Task AnOlderPage_ThatSendsNeitherTheChannelNorTheAnnouncementsChoice_LeavesBothAsSaved()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var settings = await Settings(host);
+        settings["updateChannel"] = UpdateCheckSettings.DefaultChannel == UpdateChannel.Beta ? "Stable" : "Beta";   // not the default, so a reset would show
+        settings["announcementsEnabled"] = true;
+        await Save(host, settings);
+        var saved = await Settings(host);
+
+        var older = JsonNode.Parse(saved.ToJsonString())!.AsObject();
+        older.Remove("updateChannel");
+        older.Remove("announcementsEnabled");
+        await Save(host, older);
+
+        var after = await Settings(host);
+        Assert.Equal(saved["updateChannel"]!.GetValue<string>(), after["updateChannel"]!.GetValue<string>());
+        Assert.True(after["announcementsEnabled"]!.GetValue<bool>());
+    }
+
     [Theory]
     [InlineData("nightly")]
     [InlineData("")]

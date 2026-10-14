@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
@@ -91,6 +92,12 @@ public sealed partial class PosterService : IPosterService, IDisposable
     private DateTimeOffset _lastIndexSave;
     private DateTimeOffset _lastCleanup;
     private bool _cleaning;
+    private bool _flushing;
+    private readonly Dictionary<string, Task<string?>> _downloads = new(StringComparer.OrdinalIgnoreCase);   // guarded by _lock
+
+    // What each file name was worked out to be: the Monitor page asks about every queue row on every poll, and a name never changes meaning.
+    private readonly ConcurrentDictionary<string, PosterQuery?> _parsed = new(StringComparer.Ordinal);
+    private const int MaxParsedNames = 20000;
 
     public PosterService(IHttpClientFactory httpFactory, IConfigStore configStore)
         : this(httpFactory, TimeProvider.System, TimeSpan.FromMilliseconds(300), DefaultApiBase, DefaultImageBase,
@@ -117,7 +124,8 @@ public sealed partial class PosterService : IPosterService, IDisposable
     {
         if (!settings.Enabled || string.IsNullOrWhiteSpace(settings.TmdbApiKey)) return null;
 
-        var query = PosterNameParser.Parse(fileName);
+        if (_parsed.Count > MaxParsedNames) _parsed.Clear();
+        var query = _parsed.GetOrAdd(fileName, PosterNameParser.Parse);
         if (query is null) return null;
 
         MaybeCleanUp();
@@ -125,8 +133,20 @@ public sealed partial class PosterService : IPosterService, IDisposable
         var id = query.Id;
         lock (_lock)
         {
-            // Marks made by earlier requests are written out here once a few minutes have passed since the last write.
-            if (_indexDirty && _time.GetUtcNow() - _lastIndexSave >= IndexSaveInterval) SaveIndex();
+            // Marks made by earlier requests are written out once a few minutes have passed since the last write - on a background
+            // thread, so a status poll never waits on the disk.
+            if (_indexDirty && !_flushing && _time.GetUtcNow() - _lastIndexSave >= IndexSaveInterval)
+            {
+                _flushing = true;
+                _ = Task.Run(() =>
+                {
+                    lock (_lock)
+                    {
+                        if (_indexDirty) SaveIndex();
+                        _flushing = false;
+                    }
+                });
+            }
 
             if (LoadIndex().TryGetValue(id, out var entry))
             {
@@ -285,6 +305,36 @@ public sealed partial class PosterService : IPosterService, IDisposable
         var file = Path.Combine(AppPaths.GetPostersDirectory(), size, posterPath.TrimStart('/'));
         if (File.Exists(file)) return file;
 
+        // Several requests for one picture (one show, many queued episodes) share one download rather than racing to write the same file.
+        // It is not tied to the first requester's cancellation: whoever is still waiting gets the result.
+        Task<string?> download;
+        lock (_lock)
+        {
+            if (!_downloads.TryGetValue(file, out download!) || download.IsCompleted)
+            {
+                download = Task.Run(() => DownloadImageAsync(id, posterPath, size, file, _stop.Token));
+                _downloads[file] = download;
+            }
+        }
+
+        try
+        {
+            return await download.WaitAsync(cancellationToken);
+        }
+        finally
+        {
+            if (download.IsCompleted)
+            {
+                lock (_lock)
+                {
+                    if (_downloads.TryGetValue(file, out var current) && current == download) _downloads.Remove(file);
+                }
+            }
+        }
+    }
+
+    private async Task<string?> DownloadImageAsync(string id, string posterPath, string size, string file, CancellationToken cancellationToken)
+    {
         try
         {
             using var client = _httpFactory.CreateClient();
@@ -317,9 +367,29 @@ public sealed partial class PosterService : IPosterService, IDisposable
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-            var temp = file + ".tmp";
-            await File.WriteAllBytesAsync(temp, buffer.ToArray(), cancellationToken);
-            File.Move(temp, file, overwrite: true);
+            // A temp name of its own: the same picture is often asked for by several requests at once (one show, many queued episodes).
+            var temp = $"{file}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                await File.WriteAllBytesAsync(temp, buffer.ToArray(), cancellationToken);
+                for (var attempt = 1; ; attempt++)
+                {
+                    try
+                    {
+                        File.Move(temp, file, overwrite: true);
+                        break;
+                    }
+                    catch (IOException) when (attempt < 5)
+                    {
+                        await Task.Delay(50 * attempt, cancellationToken);   // a virus scanner or indexer may hold a new file for a moment
+                    }
+                }
+            }
+            finally
+            {
+                try { if (File.Exists(temp)) File.Delete(temp); } catch (IOException) { /* the cleanup sweeps stale .tmp files */ }
+            }
+
             return file;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

@@ -84,9 +84,13 @@ internal static class ConfigMapping
         config.Arrs.Radarr = new ArrServiceSettings { Enabled = dto.Radarr.Enabled, Url = dto.Radarr.Url, ApiKey = dto.Radarr.ApiKey };
         config.Web.Port = dto.WebPort;
         config.Startup.RunAtLogin = dto.RunAtLogin;
-        config.Announcements.Enabled = dto.AnnouncementsEnabled;
-        // An unknown or missing value (an older page) falls back to the default for this release.
-        config.UpdateCheck.Channel = Enum.TryParse<UpdateChannel>(dto.UpdateChannel, ignoreCase: true, out var updateChannel) ? updateChannel : UpdateCheckSettings.DefaultChannel;
+        // Like the poster and HDR choices: a page that does not send these (an older cached one) leaves the saved values alone.
+        if (dto.AnnouncementsEnabled is { } announcementsEnabled) config.Announcements.Enabled = announcementsEnabled;
+        // Not sent: left alone. Sent but not a known channel: the default for this release.
+        if (dto.UpdateChannel is not null)
+        {
+            config.UpdateCheck.Channel = Enum.TryParse<UpdateChannel>(dto.UpdateChannel, ignoreCase: true, out var updateChannel) ? updateChannel : UpdateCheckSettings.DefaultChannel;
+        }
         config.Backup.FolderPath = dto.BackupFolderPath;
         config.Backup.IntervalDays = dto.BackupIntervalDays;
         config.Backup.RetentionDays = dto.BackupRetentionDays;

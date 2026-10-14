@@ -23,8 +23,8 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
     public string Generate(ReportModel model)
     {
         var totalFiles = model.Lanes.Sum(l => l.Results.Count);
-        var totalBeg = Math.Round(model.Lanes.Sum(l => l.Results.Where(r => !r.IsPassthrough).Sum(r => r.BeginSizeGb)), 3);
-        var totalEnd = Math.Round(model.Lanes.Sum(l => l.Results.Where(r => !r.IsPassthrough).Sum(r => r.EndSizeGb)), 3);
+        var totalBeg = Math.Round(model.TotalBeforeGb, 3);
+        var totalEnd = Math.Round(model.TotalAfterGb, 3);
         var totalSavings = Math.Round(totalBeg - totalEnd, 3);
         var savingsPct = totalBeg > 0 ? Math.Round(100 - (totalEnd / totalBeg) * 100, 2) : 0;
         var errorCount = model.ErrorCount;
@@ -183,8 +183,8 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
             return;
         }
 
-        var beg = Math.Round(lane.Results.Where(r => !r.IsPassthrough).Sum(r => r.BeginSizeGb), 3);
-        var end = Math.Round(lane.Results.Where(r => !r.IsPassthrough).Sum(r => r.EndSizeGb), 3);
+        var beg = Math.Round(lane.Results.Sum(r => r.CountedBeginGb), 3);
+        var end = Math.Round(lane.Results.Sum(r => r.CountedEndGb), 3);
         var passedThrough = lane.Results.Count(r => r.IsPassthrough);
         var passthroughNote = passedThrough > 0 ? $" ({passedThrough} passed through, not counted in the sizes)" : "";
 

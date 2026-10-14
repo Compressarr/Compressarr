@@ -32,7 +32,8 @@ public static class NetworkProblem
         }
     }
 
-    private static string DescribeStatus(int status, string service) => status switch
+    /// <summary>The sentence for an HTTP status that came back as an error (rate limit, missing, server trouble).</summary>
+    public static string DescribeStatus(int status, string service = "GitHub") => status switch
     {
         403 or 429 => $"{service} is limiting requests from this computer right now. Try again in a few minutes.",
         404 => $"{service} doesn't have what was asked for (HTTP 404).",

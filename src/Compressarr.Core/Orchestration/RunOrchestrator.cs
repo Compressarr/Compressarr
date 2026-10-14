@@ -430,8 +430,8 @@ public sealed class RunOrchestrator : IRunOrchestrator
             // in which every file failed is still recorded (it has a report and a run number) with 0 files.
             var counted = allResults.Where(r => r.CountsTowardTotals).ToList();
             // The file count includes a passed-through file; the bytes do not (nothing was saved - see ConversionResult.IsPassthrough).
-            var totalBeg = counted.Where(r => !r.IsPassthrough).Sum(r => r.BeginSizeGb);
-            var totalEnd = counted.Where(r => !r.IsPassthrough).Sum(r => r.EndSizeGb);
+            var totalBeg = counted.Sum(r => r.CountedBeginGb);
+            var totalEnd = counted.Sum(r => r.CountedEndGb);
             // Mirrors ReportModel.ErrorCount/WarningCount - computed here too since the history
             // record is written before reportModel exists below.
             var errorCount = allResults.Count(r => !r.Success);
@@ -563,8 +563,8 @@ public sealed class RunOrchestrator : IRunOrchestrator
         {
             if (config.Notifications.ToastEnabled)
             {
-                var toastBeg = allResults.Where(r => !r.IsPassthrough).Sum(r => r.BeginSizeGb);
-                var toastEnd = allResults.Where(r => !r.IsPassthrough).Sum(r => r.EndSizeGb);
+                var toastBeg = allResults.Sum(r => r.CountedBeginGb);
+                var toastEnd = allResults.Sum(r => r.CountedEndGb);
 
                 _notifications.NotifyRunComplete(
                     new RunCompletionSummary(totalFiles, toastBeg, toastEnd, runTime),

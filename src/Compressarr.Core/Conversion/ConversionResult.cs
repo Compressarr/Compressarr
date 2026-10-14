@@ -19,6 +19,12 @@ public sealed class ConversionResult
     /// the real savings.</summary>
     public bool IsPassthrough { get; init; }
 
+    /// <summary>The sizes that go into totals (History, the report, the toast): zero for a passed-through file, so no total can forget the rule.</summary>
+    public double CountedBeginGb => IsPassthrough ? 0 : BeginSizeGb;
+
+    /// <summary>See <see cref="CountedBeginGb"/>.</summary>
+    public double CountedEndGb => IsPassthrough ? 0 : EndSizeGb;
+
     public double BeginSizeGb { get; init; }
     public double EndSizeGb { get; init; }
     public bool Success { get; init; }

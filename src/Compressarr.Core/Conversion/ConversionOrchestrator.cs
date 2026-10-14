@@ -151,6 +151,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
     private readonly IArrUnmonitorService _arrUnmonitor;
     private readonly ITrashService _trash;
     private readonly IRunLogger _logger;
+    /// <summary>Set once the "HDR check skipped" notice has been logged in this pass; PrepareLaneAsync clears it, so every pass says it again.</summary>
     private bool _loggedHdrCheckSkipped;
     private readonly IResumeStateStore _resumeStore;
     private readonly IRunProgressReporter _progress;
@@ -212,6 +213,8 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         List<ReportErrorCode>? reportProblems = null,
         CancellationToken cancellationToken = default)
     {
+        _loggedHdrCheckSkipped = false; // a new pass: the notice belongs in this run's log too
+
         var inputPath = _pathExpander.Expand(lane.Input);
         var outputBase = _pathExpander.Expand(lane.Output);
         var tvShowBasePath = _pathExpander.Expand(lane.TvShowBasePath);
@@ -323,9 +326,11 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         else
         {
             // A file held after an encode failure is shown with its ERROR badge but is not work to do.
+            var heldPaths = resumeState.Where(e => e.LaneId == lane.Id && e.HeldAfterFailure).Select(e => e.FullName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var keptSources = ResumeKeeping.KeptSources(resumeState, lane.Id);
             videoFiles = scanned
-                .Where(f => !resumeState.Any(e => e.LaneId == lane.Id && e.HeldAfterFailure && string.Equals(e.FullName, f.FullName, StringComparison.OrdinalIgnoreCase)))
-                .Where(f => !ResumeKeeping.AlreadyConverted(resumeState, lane.Id, f)) // converted already, source kept (Maintain) and unchanged
+                .Where(f => !heldPaths.Contains(f.FullName))
+                .Where(f => !ResumeKeeping.AlreadyConverted(keptSources, f)) // converted already, source kept (Maintain) and unchanged
                 .ToList();
             _resumeStore.Save(resumeState, resumeFilePath);
         }

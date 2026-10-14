@@ -422,6 +422,56 @@ public class PosterServiceTests : AppDataTestBase
     }
 
     [Fact]
+    public async Task SeveralRequestsForTheSamePicture_AtOnce_AllGetIt_AndLeaveNoTempFileBehind()
+    {
+        _http.Respond = r => r.RequestUri!.Host == "tmdb.test"
+            ? Results("/abcdef12345.jpg")
+            : Slow(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[] { 5, 5, 5, 5 }) });
+        using var service = Service();
+        var id = (await WaitForId(service, On, "Inception (2010).mkv"))!;
+
+        var paths = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => service.GetImagePathAsync(On, id, "w154"))));
+
+        Assert.All(paths, p => Assert.NotNull(p));
+        Assert.Single(paths.Distinct());
+        Assert.Equal(new byte[] { 5, 5, 5, 5 }, await ReadWhenFree(paths[0]!));
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(paths[0]!)!, "*.tmp"));
+    }
+
+    private static async Task<byte[]> ReadWhenFree(string path)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try { return await File.ReadAllBytesAsync(path); }
+            catch (IOException) when (attempt < 10) { await Task.Delay(50); }   // a virus scanner can hold a new file for a moment
+        }
+    }
+
+    private static HttpResponseMessage Slow(HttpResponseMessage response)
+    {
+        Thread.Sleep(80);   // long enough for the parallel requests to overlap
+        return response;
+    }
+
+    [Fact]
+    public async Task ASeenAgainMark_IsWrittenInTheBackground_OnceAFewMinutesHavePassed()
+    {
+        _http.Respond = r => r.RequestUri!.Host == "tmdb.test" ? Results("/abcdef12345.jpg") : new HttpResponseMessage(HttpStatusCode.OK);
+        using var service = Service();
+        var id = (await WaitForId(service, On, "Inception (2010).mkv"))!;
+        var indexFile = Path.Combine(Compressarr.Core.Config.AppPaths.GetPostersDirectory(), "index.json");
+        var before = await File.ReadAllTextAsync(indexFile);
+
+        _clock.Now = _clock.Now.AddDays(2);
+        Assert.Equal(id, service.GetPosterId(On, "Inception (2010).mkv"));   // the mark is made in memory
+        _clock.Now = _clock.Now.AddMinutes(6);
+        Assert.Equal(id, service.GetPosterId(On, "Inception (2010).mkv"));   // a few minutes on: written out, without making this call wait
+
+        for (var i = 0; i < 250 && await File.ReadAllTextAsync(indexFile) == before; i++) await Task.Delay(20);
+        Assert.NotEqual(before, await File.ReadAllTextAsync(indexFile));
+    }
+
+    [Fact]
     public async Task ThatATitleWasSeenAgain_IsNotLostWhenTheAppCloses_EvenRightAfterAnotherWrite()
     {
         _http.Respond = r => r.RequestUri!.Host == "tmdb.test"

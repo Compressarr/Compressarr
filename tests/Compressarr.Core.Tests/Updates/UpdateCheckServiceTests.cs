@@ -120,6 +120,19 @@ public class UpdateCheckServiceTests
     }
 
     [Fact]
+    public async Task CheckNowAsync_RateLimited_SaysSoInPlainWords_NotWithTheRawStatus()
+    {
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden));
+        var service = new UpdateCheckService(new FakeHttpClientFactory(handler));
+
+        var result = await service.CheckNowAsync();
+
+        Assert.False(result.CheckedOk);
+        Assert.Contains("limiting requests", result.Error);
+        Assert.DoesNotContain("returned HTTP", result.Error);
+    }
+
+    [Fact]
     public async Task Start_RunsFirstCheckImmediately_WithoutWaitingOutTheInterval()
     {
         var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)

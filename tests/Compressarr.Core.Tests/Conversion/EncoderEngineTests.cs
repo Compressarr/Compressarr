@@ -572,6 +572,18 @@ public class EncoderEngineTests : IDisposable
     }
 
     [Fact]
+    public async Task TheSkippedHdrCheckNote_IsSaidAgainInTheNextRun_NotOnlyOncePerProcess()
+    {
+        var rig = HandBrakeRig("x264", dynamicMetadata: true, probe: null);
+
+        await RunAsync(rig);
+        File.WriteAllText(rig.Source, "source bytes");   // the first run may have moved or deleted it
+        await RunAsync(rig);
+
+        Assert.Equal(2, rig.Logger.Logs.Count(l => l.Message.Contains("HDR check skipped")));
+    }
+
+    [Fact]
     public async Task AnUnknownProfile_IsNotJudged()
     {
         var rig = BuildRig(EncoderEngine.HandBrake, "HB Preset"); // no traits registered for it

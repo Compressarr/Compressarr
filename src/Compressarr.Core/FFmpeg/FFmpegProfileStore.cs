@@ -122,9 +122,16 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
             copy.IsBuiltIn = false;
             copy.IsCatalog = false; // stored plain; the flag is set when it is read back
 
+            // The file as it is, damaged entries included; one that cannot be read is never overwritten.
+            var inFile = ReadCatalogProfilesLocked() ?? throw new InvalidOperationException("The catalog profile file could not be read, so nothing was changed. Delete catalog-ffmpeg.json to start it again.");
+            if (inFile.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"A catalog profile named '{name}' is already stored but reads as damaged. Delete it first, then add it again.");
+            }
+
             // The record first: a record without its profile is harmless, a profile without its record would read as damaged.
             Compressarr.Core.Catalog.CatalogRecordFile.Add(record with { Name = name, Engine = "ffmpeg", DefinitionSha = Compressarr.Core.Catalog.CatalogHash.OfFFmpegProfile(copy) });
-            WriteCatalogLocked(ReadCatalogProfilesLocked().Append(copy).ToList());
+            WriteCatalogLocked(inFile.Append(copy).ToList());
         }
     }
 
@@ -133,7 +140,7 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
         lock (_gate)
         {
             LoadCatalogLocked();
-            var all = ReadCatalogProfilesLocked();
+            var all = ReadCatalogProfilesLocked() ?? throw new InvalidOperationException("The catalog profile file could not be read, so nothing was changed. Delete catalog-ffmpeg.json to start it again.");
             var index = all.FindIndex(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
             if (index < 0) throw new InvalidOperationException($"There is no catalog profile named '{name}'.");
 
@@ -273,7 +280,7 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
             .Where(r => string.Equals(r.Engine, "ffmpeg", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
         var profiles = new List<FFmpegProfile>();
-        foreach (var profile in ReadCatalogProfilesLocked())
+        foreach (var profile in ReadCatalogProfilesLocked() ?? new List<FFmpegProfile>())
         {
             if (records.TryGetValue(profile.Name, out var record) && record.DefinitionSha == Compressarr.Core.Catalog.CatalogHash.OfFFmpegProfile(profile))
             {
@@ -290,7 +297,8 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
         return _catalogCache = profiles;
     }
 
-    private static List<FFmpegProfile> ReadCatalogProfilesLocked()
+    /// <summary>Every profile in the catalog file (also ones that read as damaged); empty when there is no file, null when there is one that cannot be read.</summary>
+    private static List<FFmpegProfile>? ReadCatalogProfilesLocked()
     {
         var path = AppPaths.GetCatalogFFmpegFilePath();
         try
@@ -301,7 +309,7 @@ public sealed class FFmpegProfileStore : IFFmpegProfileStore
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            return new List<FFmpegProfile>();
+            return null;
         }
     }
 
