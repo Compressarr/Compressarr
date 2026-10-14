@@ -332,6 +332,45 @@ public class CompanionFileServiceTests : IDisposable
     }
 
     [Fact]
+    public void CleanUpEmptySourceFolder_AFolderThatDeniesListing_IsKept_BecauseItsContentsAreUnknown()
+    {
+        if (!OperatingSystem.IsWindows()) return;   // the permission is set with a Windows ACL
+
+        var inputRoot = Path.Combine(_tempDir, "Input");
+        var movieDir = Path.Combine(inputRoot, "Movie");
+        var locked = Path.Combine(movieDir, "Extras");
+        Directory.CreateDirectory(locked);
+        var queued = Path.Combine(locked, "unprocessed.mkv");
+        File.WriteAllText(queued, "x");
+
+        var me = System.Security.Principal.WindowsIdentity.GetCurrent().User!;
+        var denyListing = new System.Security.AccessControl.FileSystemAccessRule(me, System.Security.AccessControl.FileSystemRights.ListDirectory, System.Security.AccessControl.AccessControlType.Deny);
+        var info = new DirectoryInfo(locked);
+        var acl = info.GetAccessControl();
+        acl.AddAccessRule(denyListing);
+        info.SetAccessControl(acl);
+        try
+        {
+            // The deny only counts as set up when listing really is refused (an elevated account may not be stopped by it).
+            var strict = new EnumerationOptions { IgnoreInaccessible = false };
+            try { _ = Directory.EnumerateFileSystemEntries(locked, "*", strict).ToList(); return; }
+            catch (UnauthorizedAccessException) { }
+
+            _service.CleanUpEmptySourceFolder(movieDir, inputRoot, VidTypes, DeleteAfterConvertMode.Delete, DeleteAfterConvertMode.Delete);
+
+            Assert.True(Directory.Exists(locked), "a folder that cannot be listed must not be treated as empty of video");
+        }
+        finally
+        {
+            acl = info.GetAccessControl();
+            acl.RemoveAccessRule(denyListing);
+            info.SetAccessControl(acl);
+        }
+
+        Assert.True(File.Exists(queued));
+    }
+
+    [Fact]
     public void CleanUpEmptySourceFolder_AJunctionInsideTheFolder_IsLeftAlone_AndNothingBehindItIsTouched()
     {
         if (!OperatingSystem.IsWindows()) return;   // mklink /J is Windows-only, like the scanner's own junction test

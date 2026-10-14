@@ -248,12 +248,13 @@ public sealed class CompanionFileService : ICompanionFileService
 
     /// <summary>True only when nothing at any depth below <paramref name="directory"/> is a video (by extension - the size filter and queue state
     /// are deliberately not consulted: a file that could ever be queued counts). A link (junction/symlink) cannot be vouched for, an unreadable
-    /// folder cannot be inspected, so both answer false.</summary>
+    /// folder cannot be inspected, so both answer false. IgnoreInaccessible is off on purpose: its default would let a folder that denies listing
+    /// read as empty - and so as "free of video".</summary>
     private static bool IsProvablyFreeOfVideo(string directory, HashSet<string> videoExtensions)
     {
         try
         {
-            foreach (var entry in Directory.EnumerateFileSystemEntries(directory, "*", new EnumerationOptions { AttributesToSkip = 0 }))
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory, "*", new EnumerationOptions { AttributesToSkip = 0, IgnoreInaccessible = false }))
             {
                 var attributes = File.GetAttributes(entry);
                 if (attributes.HasFlag(FileAttributes.ReparsePoint)) return false;
