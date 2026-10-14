@@ -41,7 +41,7 @@
 #endif
 
 #define MyAppName "Compressarr"
-#define MyAppVersion "2.1.9"
+#define MyAppVersion "2.1.10"
 #define MyAppPublisher "Mark Wasserman"
 #define MyAppURL "https://github.com/Compressarr/Compressarr"
 #define MyAppExeName "Compressarr.Desktop.exe"
