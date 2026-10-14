@@ -108,8 +108,10 @@ public sealed class EncoderResolver : IEncoderResolver
 
         var encoder = definition["VideoEncoder"]?.GetValue<string>() ?? "";
         // HandBrake's own values: all, hdr10plus, dolbyvision, or off/none. Anything but those three means "not passed through".
-        var dynamic = (definition["VideoPasshtruHDRDynamicMetadata"]?.ToString() ?? "").Trim().ToLowerInvariant() is "all" or "hdr10plus" or "dolbyvision";
-        return new HandBrakeProfileTraits(encoder, dynamic);
+        var mode = (definition["VideoPasshtruHDRDynamicMetadata"]?.ToString() ?? "").Trim().ToLowerInvariant();
+        var dolbyVision = mode is "all" or "dolbyvision";
+        var hdr10Plus = mode is "all" or "hdr10plus";
+        return new HandBrakeProfileTraits(encoder, dolbyVision || hdr10Plus, dolbyVision, hdr10Plus);
     }
 }
 

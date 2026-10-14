@@ -1,5 +1,6 @@
 using Compressarr.Core.Config;
 using Compressarr.Core.Conversion;
+using Compressarr.Core.FFmpeg;
 using Compressarr.Core.Presets;
 using Compressarr.Web.Dtos;
 using Microsoft.AspNetCore.Builder;
@@ -61,7 +62,7 @@ public static class HandBrakeProfileEndpoints
             return Results.Json(new { name });
         });
 
-        app.MapPut("/api/profiles/handbrake/{name}", (string name, SaveProfileRequest request, IHandBrakeProfileStore store, IConfigStore configStore, IResumeStateStore resumeStore) =>
+        app.MapPut("/api/profiles/handbrake/{name}", (string name, SaveProfileRequest request, IHandBrakeProfileStore store, IConfigStore configStore, IResumeStateStore resumeStore, IFFmpegProfileStore ffmpegStore) =>
         {
             var existing = store.Find(name);
             if (existing is null) return Results.NotFound(new { message = $"There is no profile named '{name}'." });
@@ -78,29 +79,46 @@ public static class HandBrakeProfileEndpoints
                 return Invalid("name", $"A profile named '{newName}' already exists.");
             }
 
+            var renamed = !string.Equals(existing.Name, newName, StringComparison.Ordinal);
+            var fallbackUsers = renamed ? ffmpegStore.GetAll().Where(p => string.Equals(p.FallbackHandBrakePreset, existing.Name, StringComparison.OrdinalIgnoreCase)).ToList() : new List<Compressarr.Core.FFmpeg.FFmpegProfile>();
+
+            // An ffmpeg profile that names this one as its fallback follows a rename - unless it is a built-in or catalog profile, which
+            // cannot be edited. Refused up front, before anything is written, rather than leaving that fallback pointing at a name that is gone.
+            var locked = fallbackUsers.Where(p => p.IsBuiltIn || p.IsCatalog).Select(p => p.Name).ToList();
+            if (locked.Count > 0)
+            {
+                return Invalid("name", $"'{existing.Name}' is the HandBrake fallback of the ffmpeg profile{(locked.Count == 1 ? "" : "s")} {string.Join(", ", locked)}, which can't be edited, so it can't be renamed. Keep the name, or duplicate it to make a renamed copy.");
+            }
+
             var definition = (System.Text.Json.Nodes.JsonObject)existing.Definition.DeepClone();
             request.Form.ApplyTo(definition);
             store.ReplaceUserProfile(existing.Name, definition);
 
-            if (!string.Equals(existing.Name, newName, StringComparison.Ordinal))
+            if (renamed)
             {
                 ProfileReferences.Repoint(configStore, resumeStore, new Dictionary<string, string> { [existing.Name] = newName });
+                foreach (var user in fallbackUsers)
+                {
+                    user.FallbackHandBrakePreset = newName;
+                    ffmpegStore.ReplaceUserProfile(user.Name, user);
+                }
             }
             return Results.Json(new { name = newName });
         });
 
-        app.MapDelete("/api/profiles/handbrake/{name}", (string name, IHandBrakeProfileStore store, IConfigStore configStore, IResumeStateStore resumeStore) =>
+        app.MapDelete("/api/profiles/handbrake/{name}", (string name, IHandBrakeProfileStore store, IConfigStore configStore, IResumeStateStore resumeStore, IFFmpegProfileStore ffmpegStore) =>
         {
             var existing = store.Find(name);
             if (existing is null) return Results.NotFound(new { message = $"There is no profile named '{name}'." });
             if (existing.IsBuiltIn) return Results.BadRequest(new { message = $"'{existing.Name}' is a built-in profile and can't be deleted." });
 
-            var usage = ProfileReferences.Find(configStore.Load(AppPaths.GetConfigFilePath()), resumeStore.Load(AppPaths.GetResumeFilePath()), existing.Name);
+            var usage = ProfileReferences.Find(configStore.Load(AppPaths.GetConfigFilePath()), resumeStore.Load(AppPaths.GetResumeFilePath()), existing.Name, EncoderEngine.HandBrake, ffmpegStore.GetAll());
             if (usage.InUse)
             {
                 var where = new List<string>();
                 if (usage.Lanes.Count > 0) where.Add($"lane{(usage.Lanes.Count == 1 ? "" : "s")} {string.Join(", ", usage.Lanes)}");
                 if (usage.QueuedFiles > 0) where.Add($"{usage.QueuedFiles} queued file{(usage.QueuedFiles == 1 ? "" : "s")}");
+                if (usage.FallbackFor is { Count: > 0 }) where.Add($"the HandBrake fallback of ffmpeg profile{(usage.FallbackFor.Count == 1 ? "" : "s")} {string.Join(", ", usage.FallbackFor)}");
                 return Results.Conflict(new { message = $"'{existing.Name}' is still used by {string.Join(" and ", where)}. Pick another profile there first." });
             }
 

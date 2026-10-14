@@ -771,7 +771,8 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
     }
 
     /// <summary>Persists this one file's own processing-owned fields (Status, EncodedFilePath,
-    /// EncodedFileDesiredName, PendingCompanionSourceDirectory, PendingCompanionVideoDestPath) onto
+    /// EncodedFileDesiredName, PendingCompanionSourceDirectory, PendingCompanionVideoDestPath,
+    /// LastRetryFailureMessage, HeldAfterFailure, KeptSourceSize/ModifiedUtc - see ResumeResults) onto
     /// the freshest disk copy of resume.json, instead of blindly overwriting the whole file with
     /// ProcessOneFileAsync's own in-memory resumeState snapshot. Code-review finding: that snapshot
     /// is only fresh as of RefreshResumeState's own one-time call right after HandBrake finishes -
@@ -784,28 +785,5 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
     /// Skipped/PresetOverride/Removed/CreatedByQueueEdit) on the disk entry - whatever's freshest
     /// there for those wins, the same merge direction RefreshResumeState above already uses, just
     /// going the other way for the fields this method actually owns.</summary>
-    private void SaveEntryResult(ResumeEntry resumeEntry, string resumeFilePath)
-    {
-        _resumeStore.Update(resumeFilePath, diskState =>
-        {
-            var diskEntry = diskState.FirstOrDefault(e =>
-                e.LaneId == resumeEntry.LaneId &&
-                string.Equals(e.FullName, resumeEntry.FullName, StringComparison.OrdinalIgnoreCase));
-            if (diskEntry is null)
-            {
-                // Genuinely rare (e.g. Reset Resume File fired mid-pass) - fall back to persisting
-                // our own in-memory copy rather than silently dropping this file's result entirely.
-                diskState.Add(resumeEntry);
-            }
-            else
-            {
-                diskEntry.Status = resumeEntry.Status;
-                diskEntry.EncodedFilePath = resumeEntry.EncodedFilePath;
-                diskEntry.EncodedFileDesiredName = resumeEntry.EncodedFileDesiredName;
-                diskEntry.PendingCompanionSourceDirectory = resumeEntry.PendingCompanionSourceDirectory;
-                diskEntry.PendingCompanionVideoDestPath = resumeEntry.PendingCompanionVideoDestPath;
-            }
-            return true;
-        });
-    }
+    private void SaveEntryResult(ResumeEntry resumeEntry, string resumeFilePath) => ResumeResults.Save(_resumeStore, resumeEntry, resumeFilePath);
 }

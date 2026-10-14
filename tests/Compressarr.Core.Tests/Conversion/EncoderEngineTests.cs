@@ -450,10 +450,10 @@ public class EncoderEngineTests : IDisposable
     private static MediaProbeResult Hdr10() => FFprobeParser.Parse(FFmpegFixtures.UhdHdr10Rip);
     private static MediaProbeResult Sdr() => FFmpegFixtures.Dvd();
 
-    private Rig HandBrakeRig(string encoder, bool dynamicMetadata, MediaProbeResult? probe, bool allowHdrLoss = false)
+    private Rig HandBrakeRig(string encoder, bool dynamicMetadata, MediaProbeResult? probe, bool allowHdrLoss = false, bool keepsDolbyVision = true, bool keepsHdr10Plus = true)
     {
         var rig = BuildRig(EncoderEngine.HandBrake, "HB Preset");
-        rig.Resolver.Traits["HB Preset"] = new HandBrakeProfileTraits(encoder, dynamicMetadata);
+        rig.Resolver.Traits["HB Preset"] = new HandBrakeProfileTraits(encoder, dynamicMetadata, keepsDolbyVision, keepsHdr10Plus);
         rig.Resolver.Probe = probe;
         rig.Lane.AllowHdrLoss = allowHdrLoss;
         return rig;
@@ -569,6 +569,29 @@ public class EncoderEngineTests : IDisposable
 
         Assert.True(result.Success);
         Assert.Single(rig.Logger.Logs, l => l.Message.Contains("HDR check skipped"));
+    }
+
+    [Fact]
+    public async Task AProfileThatPassesOnlyHdr10Plus_StillRefusesADolbyVisionProfile5File()
+    {
+        var rig = HandBrakeRig("x265_10bit", dynamicMetadata: true, DvRip(5, 0), keepsDolbyVision: false);   // "hdr10plus" only
+
+        var result = await RunAsync(rig);
+
+        Assert.Equal(ReportErrorCode.ProfileCannotKeepHdr, result.ErrorCode);
+        Assert.Contains("profile 5", result.FailureReason);
+        Assert.Empty(rig.Resolver.HandBrake.Requests);
+    }
+
+    [Fact]
+    public async Task An8BitX265Profile_WithDynamicMetadataOn_DoesNotSkipTheCheck_ForADolbyVisionFile()
+    {
+        var rig = HandBrakeRig("x265", dynamicMetadata: true, DvRip(8, 1));
+
+        var result = await RunAsync(rig);
+
+        Assert.Equal(ReportErrorCode.ProfileCannotKeepHdr, result.ErrorCode);
+        Assert.Empty(rig.Resolver.HandBrake.Requests);
     }
 
     [Fact]

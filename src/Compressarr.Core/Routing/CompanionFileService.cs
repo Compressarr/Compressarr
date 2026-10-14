@@ -211,7 +211,11 @@ public sealed class CompanionFileService : ICompanionFileService
             {
                 if (Directory.Exists(item))
                 {
-                    _trash.DeleteFolder(item, unmatchedCompanionAction);
+                    // Input is scanned recursively, so a subfolder can hold a video that is still queued (or skipped, or under the
+                    // size filter) - that is not an "unmatched leftover", and sweeping it would lose the file before its own turn.
+                    // Only a folder proven to hold no video anywhere below it is disposed of; any doubt keeps it, and the folder
+                    // above it then stays too (it is not empty).
+                    if (IsProvablyFreeOfVideo(item, extensions)) _trash.DeleteFolder(item, unmatchedCompanionAction);
                 }
                 else
                 {
@@ -239,6 +243,35 @@ public sealed class CompanionFileService : ICompanionFileService
                 _trash.DeleteFolder(current, deleteAfterConvert);
                 current = Path.GetDirectoryName(current);
             }
+        }
+    }
+
+    /// <summary>True only when nothing at any depth below <paramref name="directory"/> is a video (by extension - the size filter and queue state
+    /// are deliberately not consulted: a file that could ever be queued counts). A link (junction/symlink) cannot be vouched for, an unreadable
+    /// folder cannot be inspected, so both answer false.</summary>
+    private static bool IsProvablyFreeOfVideo(string directory, HashSet<string> videoExtensions)
+    {
+        try
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory, "*", new EnumerationOptions { AttributesToSkip = 0 }))
+            {
+                var attributes = File.GetAttributes(entry);
+                if (attributes.HasFlag(FileAttributes.ReparsePoint)) return false;
+                if (attributes.HasFlag(FileAttributes.Directory))
+                {
+                    if (!IsProvablyFreeOfVideo(entry, videoExtensions)) return false;
+                }
+                else if (videoExtensions.Contains(Path.GetExtension(entry)))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 

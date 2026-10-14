@@ -14,7 +14,9 @@ namespace Compressarr.Core.Conversion;
 ///
 /// Split out of ConversionOrchestrator.PrepareLaneAsync, where this was most of the method. The
 /// code moved as-is - same order, same logging, same saves - and is covered by the same tests; only
-/// its home changed. Returns how many entries were resolved this pass (RunResult.RetriesSucceeded).
+/// its home changed - except the saves: each one now merges just the entry it handled into the file as it is now (ResumeResults), because
+/// a retry can wait minutes on a Sonarr/Radarr rescan, and a save of the whole in-memory list would wipe a queue edit made meanwhile.
+/// Returns how many entries were resolved this pass (RunResult.RetriesSucceeded).
 /// </summary>
 internal sealed class RetryRecovery
 {
@@ -81,7 +83,7 @@ internal sealed class RetryRecovery
                 _logger.Log($"Resume entry for '{dead.FullName}' no longer exists - removing it.", LogSeverity.Error);
                 resumeState.Remove(dead);
             }
-            _resumeStore.Save(resumeState, resumeFilePath);
+            ResumeResults.Remove(_resumeStore, deadEntries, resumeFilePath);
         }
 
         // A CompanionMoveFailed entry whose companions' own source folder is gone (removed by
@@ -99,7 +101,7 @@ internal sealed class RetryRecovery
                 _logger.Log($"Resume entry for '{dead.FullName}' (awaiting companion retry) no longer has its source folder - removing it.", LogSeverity.Error);
                 resumeState.Remove(dead);
             }
-            _resumeStore.Save(resumeState, resumeFilePath);
+            ResumeResults.Remove(_resumeStore, deadCompanionEntries, resumeFilePath);
         }
 
         // MoveFailed entries from a prior pass: the encode already succeeded, only the move needs
@@ -117,7 +119,7 @@ internal sealed class RetryRecovery
             {
                 _logger.Log($"Resume entry for '{entry.FullName}' (awaiting move retry) no longer has its encoded file - removing it.", LogSeverity.Error);
                 resumeState.Remove(entry);
-                _resumeStore.Save(resumeState, resumeFilePath);
+                ResumeResults.Remove(_resumeStore, new[] { entry }, resumeFilePath);
                 continue;
             }
 
@@ -304,7 +306,7 @@ internal sealed class RetryRecovery
                 entry.PendingCompanionVideoDestPath = retryDestPath;
             }
 
-            _resumeStore.Save(resumeState, resumeFilePath);
+            ResumeResults.Save(_resumeStore, entry, resumeFilePath);
         }
 
         // CompanionMoveFailed entries from a prior pass: the video itself is fully done, only its
@@ -382,7 +384,7 @@ internal sealed class RetryRecovery
                 entry.LastRetryFailureMessage = ex.Message;
             }
 
-            _resumeStore.Save(resumeState, resumeFilePath);
+            ResumeResults.Save(_resumeStore, entry, resumeFilePath);
         }
 
         // CleanupPending entries from a prior pass: the video and its companions (if any) are both
@@ -411,7 +413,7 @@ internal sealed class RetryRecovery
                 entry.PendingCompanionSourceDirectory = null;
                 entry.PendingCompanionVideoDestPath = null;
                 entry.LastRetryFailureMessage = null;
-                _resumeStore.Save(resumeState, resumeFilePath);
+                ResumeResults.Save(_resumeStore, entry, resumeFilePath);
                 continue;
             }
 
@@ -468,7 +470,7 @@ internal sealed class RetryRecovery
                 entry.LastRetryFailureMessage = reasonKey;
             }
 
-            _resumeStore.Save(resumeState, resumeFilePath);
+            ResumeResults.Save(_resumeStore, entry, resumeFilePath);
         }
 
         return retriesSucceeded;

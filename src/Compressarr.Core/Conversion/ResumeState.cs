@@ -87,6 +87,53 @@ public static class ResumeKeeping
         keptSources.TryGetValue(found.FullName, out var entry) && IsConvertedAndUnchanged(entry, found);
 }
 
+/// <summary>How processing writes its results to resume.json: one entry at a time, merged into the file as it is now. Never a save of the
+/// whole in-memory list - the Monitor page can change the queue (skip, reorder, override, remove, new files) while processing waits on a
+/// move, a Sonarr/Radarr rescan or an encode, and a whole-list save would write the older picture back over those edits.
+/// An entry's processing-owned fields (below) are copied over; the user-owned ones (Order, Skipped, PresetOverride, Removed,
+/// CreatedByQueueEdit, DestinationLaneId) stay whatever is freshest on disk.</summary>
+internal static class ResumeResults
+{
+    private static bool Same(ResumeEntry a, ResumeEntry b) =>
+        a.LaneId == b.LaneId && string.Equals(a.FullName, b.FullName, StringComparison.OrdinalIgnoreCase);
+
+    public static void Save(IResumeStateStore store, ResumeEntry entry, string resumeFilePath)
+    {
+        store.Update(resumeFilePath, disk =>
+        {
+            var onDisk = disk.FirstOrDefault(e => Same(e, entry));
+            if (onDisk is null)
+            {
+                // Genuinely rare (Reset Resume File fired mid-pass): keep this file's result rather than dropping it.
+                disk.Add(entry);
+                return true;
+            }
+
+            onDisk.Status = entry.Status;
+            onDisk.EncodedFilePath = entry.EncodedFilePath;
+            onDisk.EncodedFileDesiredName = entry.EncodedFileDesiredName;
+            onDisk.PendingCompanionSourceDirectory = entry.PendingCompanionSourceDirectory;
+            onDisk.PendingCompanionVideoDestPath = entry.PendingCompanionVideoDestPath;
+            onDisk.LastRetryFailureMessage = entry.LastRetryFailureMessage;
+            onDisk.HeldAfterFailure = entry.HeldAfterFailure;
+            onDisk.KeptSourceSize = entry.KeptSourceSize;
+            onDisk.KeptSourceModifiedUtc = entry.KeptSourceModifiedUtc;
+            return true;
+        });
+    }
+
+    /// <summary>Drops these entries from the file (they were removed in memory because their file is gone), leaving every other entry as it is.</summary>
+    public static void Remove(IResumeStateStore store, IReadOnlyCollection<ResumeEntry> entries, string resumeFilePath)
+    {
+        if (entries.Count == 0) return;
+        store.Update(resumeFilePath, disk =>
+        {
+            disk.RemoveAll(d => entries.Any(e => Same(d, e)));
+            return true;
+        });
+    }
+}
+
 public sealed class ResumeEntry
 {
     public required string LaneId { get; set; }

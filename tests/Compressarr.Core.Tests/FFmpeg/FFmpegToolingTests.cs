@@ -334,10 +334,8 @@ public class FFmpegToolingTests : IDisposable
     // ---- which HandBrake encoders keep HDR --------------------------------------------------------
 
     [Theory]
-    [InlineData("x265", HandBrakeHdrSupport.DynamicHdr)]
     [InlineData("x265_10bit", HandBrakeHdrSupport.DynamicHdr)]
     [InlineData("x265_12bit", HandBrakeHdrSupport.DynamicHdr)]
-    [InlineData("svt_av1", HandBrakeHdrSupport.DynamicHdr)]
     [InlineData("svt_av1_10bit", HandBrakeHdrSupport.DynamicHdr)]
     [InlineData("vt_h265_10bit", HandBrakeHdrSupport.DynamicHdr)]
     [InlineData("x264", HandBrakeHdrSupport.SdrOnly)]
@@ -358,6 +356,17 @@ public class FFmpegToolingTests : IDisposable
         Assert.Equal(expected, HandBrakeHdrGuard.SupportOf(encoder));
     }
 
+    [Theory]
+    [InlineData("x265", HandBrakeHdrSupport.StaticHdr)]
+    [InlineData("svt_av1", HandBrakeHdrSupport.StaticHdr)]
+    [InlineData("vt_h265", HandBrakeHdrSupport.StaticHdr)]
+    [InlineData("x265_10bit", HandBrakeHdrSupport.DynamicHdr)]
+    [InlineData("x265_12bit", HandBrakeHdrSupport.DynamicHdr)]
+    [InlineData("svt_av1_10bit", HandBrakeHdrSupport.DynamicHdr)]
+    [InlineData("vt_h265_10bit", HandBrakeHdrSupport.DynamicHdr)]
+    public void DynamicHdrPassthrough_IsOnlyClaimedForTheDeepColourEncoders(string encoder, HandBrakeHdrSupport expected) =>
+        Assert.Equal(expected, HandBrakeHdrGuard.SupportOf(encoder));
+
     [Fact]
     public void OnlyAProfileThatCannotBeRelied_OnForHdr_NeedsTheSourceRead()
     {
@@ -365,6 +374,9 @@ public class FFmpegToolingTests : IDisposable
         Assert.True(HandBrakeHdrGuard.NeedsProbe(new HandBrakeProfileTraits("x265_10bit", false)));  // switched off: Dolby Vision profile 5 still matters
         Assert.True(HandBrakeHdrGuard.NeedsProbe(new HandBrakeProfileTraits("x264", true)));
         Assert.True(HandBrakeHdrGuard.NeedsProbe(new HandBrakeProfileTraits("nvenc_h265", true)));
+        Assert.True(HandBrakeHdrGuard.NeedsProbe(new HandBrakeProfileTraits("x265", true)));                       // 8-bit x265 cannot carry Dolby Vision / HDR10+
+        Assert.True(HandBrakeHdrGuard.NeedsProbe(new HandBrakeProfileTraits("x265_10bit", true, KeepsDolbyVision: false)));  // "hdr10plus" only
+        Assert.True(HandBrakeHdrGuard.NeedsProbe(new HandBrakeProfileTraits("x265_10bit", true, KeepsHdr10Plus: false)));    // "dolbyvision" only
     }
 
     // ---- Dolby Vision base layer (for "encode anyway") --------------------------------------------

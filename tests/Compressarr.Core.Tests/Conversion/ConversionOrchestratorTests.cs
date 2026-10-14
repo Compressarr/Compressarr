@@ -657,6 +657,100 @@ public class ConversionOrchestratorTests : IDisposable
         Assert.True(entry.HeldAfterFailure);
     }
 
+    private ConversionOrchestrator OrchestratorWithRealStore(IEncoderRunner runner, LaneConfig lane, CompressarrConfig config, IResumeStateStore store, IArrUnmonitorService? arr = null) =>
+        new(new PassThroughPathExpander(), new RealFolderScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), new MetadataService(),
+            runner, new FileRouter(), new NoOpCompanionFileService(), arr ?? new NoOpArrUnmonitorService(),
+            new RecordingTrashService(), new NoOpRunLogger(), store, new NoOpProgressReporter(), new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue));
+
+    [Fact]
+    public async Task FailedEncode_HoldSurvivesAReloadFromDisk_SoTheNextPassDoesNotRetryIt()
+    {
+        var inputDir = Path.Combine(_tempDir, "Input");
+        var outputDir = Path.Combine(_tempDir, "Output");
+        Directory.CreateDirectory(inputDir);
+        Directory.CreateDirectory(outputDir);
+        File.WriteAllText(Path.Combine(inputDir, "file1.mkv"), "source");
+        var lane = new LaneConfig { Id = "lane1", DisplayName = "Test Lane", Enabled = true, Input = inputDir, Output = outputDir, MoviePreset = "Any Preset" };
+        var config = BuildConfig(DeleteAfterConvertMode.Maintain);
+        config.Lanes.Add(lane);
+        var store = new JsonResumeStateStore();
+        var resumePath = Path.Combine(_tempDir, "resume.json");
+        var orchestrator = OrchestratorWithRealStore(new FailingProcessRunner(), lane, config, store);
+
+        var first = await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), resumePath, CancellationToken.None);
+        var onDisk = Assert.Single(store.Load(resumePath));
+        var second = await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000100", store.Load(resumePath), resumePath, CancellationToken.None);   // as after a restart
+
+        Assert.False(Assert.Single(first).Success);
+        Assert.Equal(ResumeStatus.Error, onDisk.Status);
+        Assert.True(onDisk.HeldAfterFailure, "the hold must be in the file, not only in memory");
+        Assert.Empty(second);
+    }
+
+    [Fact]
+    public async Task MaintainedSource_FingerprintIsSavedWithTheResult_SoAReloadDoesNotConvertItAgain()
+    {
+        var inputDir = Path.Combine(_tempDir, "Input");
+        var outputDir = Path.Combine(_tempDir, "Output");
+        Directory.CreateDirectory(inputDir);
+        Directory.CreateDirectory(outputDir);
+        var source = Path.Combine(inputDir, "file1.mkv");
+        File.WriteAllText(source, "source");
+        var lane = new LaneConfig { Id = "lane1", DisplayName = "Test Lane", Enabled = true, Input = inputDir, Output = outputDir, MoviePreset = "Any Preset" };
+        var config = BuildConfig(DeleteAfterConvertMode.Maintain);
+        config.Lanes.Add(lane);
+        var store = new JsonResumeStateStore();
+        var resumePath = Path.Combine(_tempDir, "resume.json");
+        var orchestrator = OrchestratorWithRealStore(new FakeProcessRunner(), lane, config, store);
+
+        var first = await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), resumePath, CancellationToken.None);
+        var onDisk = Assert.Single(store.Load(resumePath));      // read straight after the file's own save, before any end-of-pass repair
+        var second = await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000100", store.Load(resumePath), resumePath, CancellationToken.None);
+
+        Assert.True(Assert.Single(first).Success);
+        Assert.Equal(ResumeStatus.Completed, onDisk.Status);
+        Assert.Equal(new FileInfo(source).Length, onDisk.KeptSourceSize);
+        Assert.NotNull(onDisk.KeptSourceModifiedUtc);
+        Assert.Empty(second);                                    // the unchanged source is not converted again
+    }
+
+    [Fact]
+    public async Task RetryRecovery_KeepsAQueueEditMadeWhileTheRetryWaitedOnTheArrRescan()
+    {
+        var inputDir = Path.Combine(_tempDir, "Input");
+        var outputDir = Path.Combine(_tempDir, "Output");
+        Directory.CreateDirectory(inputDir);
+        Directory.CreateDirectory(outputDir);
+        var pending = Path.Combine(inputDir, "episode2.mkv");
+        File.WriteAllText(pending, "2");
+        var staged = Path.Combine(outputDir, "Movie A (1999).compressarr-abc12345.mkv");
+        File.WriteAllText(staged, "encoded");
+        var lane = new LaneConfig { Id = "lane1", DisplayName = "Test Lane", Enabled = true, Input = inputDir, Output = outputDir, MoviePreset = "Any Preset" };
+        var config = new CompressarrConfig { Processing = new ProcessingSettings { MoveFiles = false, ClearTitleMetadata = false } };
+        config.Lanes.Add(lane);
+        var store = new JsonResumeStateStore();
+        var resumePath = Path.Combine(_tempDir, "resume.json");
+        store.Save(new List<ResumeEntry>
+        {
+            new() { LaneId = "lane1", FullName = Path.Combine(inputDir, "Movie A (1999).mkv"), Status = ResumeStatus.MoveFailed, EncodedFilePath = staged, EncodedFileDesiredName = "Movie A (1999).mkv", Order = 0 },
+            new() { LaneId = "lane1", FullName = pending, Status = ResumeStatus.Pending, Order = 1 }
+        }, resumePath);
+
+        // A skip made on the Monitor page while the retry is waiting on Sonarr/Radarr's rescan.
+        var arr = new ConcurrentEditArrUnmonitorService(() => store.Update(resumePath, state =>
+        {
+            state.Single(e => e.FullName == pending).Skipped = true;
+            return true;
+        }));
+        var orchestrator = OrchestratorWithRealStore(new FakeProcessRunner(), lane, config, store, arr);
+
+        await orchestrator.PrepareLaneAsync(lane, config, store.Load(resumePath), resumePath);
+
+        var after = store.Load(resumePath);
+        Assert.True(after.Single(e => e.FullName == pending).Skipped, "the skip made during the retry must survive its save");
+        Assert.Equal(ResumeStatus.Completed, after.Single(e => e.FullName.Contains("Movie A")).Status);
+    }
+
     [Fact]
     public async Task ProcessLaneAsync_RespectsOrder_NotScanOrder()
     {
