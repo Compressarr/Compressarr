@@ -40,5 +40,48 @@ public static class ArrEndpoints
                 return Results.Json(new { success = false, message = $"Connection failed: {ex.Message}" });
             }
         });
+
+        // Radarr's "Delete empty folders" (see ArrMediaManagement): what the Radarr column's note and button on Settings use. Like the test button,
+        // they act on the URL / API key typed into the form, saved or not. Nothing here runs by itself - the change is made only when the button is pressed.
+        app.MapPost("/api/arr/radarr/delete-empty-folders/check", async (ArrServiceDto dto, IArrClient client) =>
+        {
+            if (string.IsNullOrWhiteSpace(dto.Url) || string.IsNullOrWhiteSpace(dto.ApiKey))
+            {
+                return Results.Json(new { success = false, message = "URL and API key are both required." });
+            }
+
+            try
+            {
+                var on = await ArrMediaManagement.GetDeleteEmptyFoldersAsync(client, dto.Url, dto.ApiKey);
+                return Results.Json(new { success = true, deleteEmptyFolders = on, message = on switch { true => "\"Delete empty folders\" is on in Radarr.", false => "\"Delete empty folders\" is off in Radarr.", _ => "This version of Radarr does not report that setting." } });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { success = false, message = $"Couldn't read Radarr's settings: {ex.Message}" });
+            }
+        });
+
+        app.MapPost("/api/arr/radarr/delete-empty-folders/disable", async (ArrServiceDto dto, IArrClient client) =>
+        {
+            if (string.IsNullOrWhiteSpace(dto.Url) || string.IsNullOrWhiteSpace(dto.ApiKey))
+            {
+                return Results.Json(new { success = false, message = "URL and API key are both required." });
+            }
+
+            try
+            {
+                var changed = await ArrMediaManagement.TurnOffDeleteEmptyFoldersAsync(client, dto.Url, dto.ApiKey);
+                return Results.Json(new
+                {
+                    success = true,
+                    deleteEmptyFolders = false,
+                    message = changed ? "Turned off \"Delete empty folders\" in Radarr." : "\"Delete empty folders\" was already off in Radarr."
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { success = false, message = $"Couldn't change it in Radarr: {ex.Message}" });
+            }
+        });
     }
 }

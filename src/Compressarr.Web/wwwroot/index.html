@@ -243,7 +243,8 @@
               <label for="radarrApiKey">API Key<span class="help-tag" tabindex="0" title="Found in Radarr under Settings &gt; General &gt; Security.">?<span class="help-tip">Found in Radarr under Settings &gt; General &gt; Security.</span></span></label>
               <div class="field-with-btn"><input type="password" id="radarrApiKey" /><button id="radarrTestBtn">Test Connection</button></div>
             </div>
-            <p class="enc-note">To ensure Compressarr acts properly with Radarr, please uncheck "Delete empty folders" in Settings, Media Management, Folders.</p>
+            <p class="enc-note" id="radarrFolderNote">To ensure Compressarr acts properly with Radarr, please uncheck "Delete empty folders" in Settings, Media Management, Folders.</p>
+            <button type="button" id="radarrFolderBtn" title="Switches off that one setting in Radarr for you (Settings &gt; Media Management &gt; Folders &gt; Delete empty folders). Nothing else in Radarr is changed.">Turn it off in Radarr</button>
           </div>
         </div>
       </div>

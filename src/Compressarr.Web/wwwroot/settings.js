@@ -254,7 +254,46 @@ async function testArrConnection(service) {
   });
   const body = await res.json();
   setStatus(body.message, body.success ? true : 'error');
+  if (service === 'radarr' && body.success) refreshRadarrFolderNote();
 }
+
+// ---- Radarr's "Delete empty folders": the note always says what to do; once Radarr has been asked (Test Connection, or the button) the
+// ---- card says what it found, and the button goes away when the setting is already off.
+const RADARR_FOLDER_NOTE = 'To ensure Compressarr acts properly with Radarr, please uncheck "Delete empty folders" in Settings, Media Management, Folders.';
+
+function radarrCredentials() {
+  return { enabled: true, url: document.getElementById('radarrUrl').value, apiKey: document.getElementById('radarrApiKey').value };
+}
+
+async function refreshRadarrFolderNote() {
+  const note = document.getElementById('radarrFolderNote');
+  const button = document.getElementById('radarrFolderBtn');
+  try {
+    const res = await fetch('/api/arr/radarr/delete-empty-folders/check', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(radarrCredentials())
+    });
+    const body = await res.json();
+    if (!body.success || body.deleteEmptyFolders === null || body.deleteEmptyFolders === undefined) return;   // unknown: leave the note as it is
+    if (body.deleteEmptyFolders) {
+      note.textContent = RADARR_FOLDER_NOTE;
+      button.classList.remove('hidden');
+    } else {
+      note.textContent = 'Radarr\'s "Delete empty folders" is off, as Compressarr needs.';
+      button.classList.add('hidden');
+    }
+  } catch { /* best-effort: the note stays as it was */ }
+}
+
+document.getElementById('radarrFolderBtn').addEventListener('click', async () => {
+  if (!confirm('Switch off "Delete empty folders" in Radarr (Settings > Media Management > Folders)? Nothing else in Radarr is changed.')) return;
+  setStatus('Changing it in Radarr...');
+  const res = await fetch('/api/arr/radarr/delete-empty-folders/disable', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(radarrCredentials())
+  });
+  const body = await res.json();
+  setStatus(body.message, body.success ? true : 'error');
+  if (body.success) refreshRadarrFolderNote();
+});
 
 // ---- Queue Posters: Test Key checks what is typed (saved or not); the cache line says what is stored and whether TMDB is refusing the key.
 document.getElementById('tmdbTestBtn').addEventListener('click', async () => {
