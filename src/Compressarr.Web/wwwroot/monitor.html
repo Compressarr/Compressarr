@@ -54,6 +54,7 @@
 
     <h2>Recent log</h2>
     <div id="log-panel"></div>
+    <div class="log-actions"><button type="button" id="viewLogBtn" title="Opens the log in a window that does not refresh, so you can select and copy text from it.">View Log</button></div>
 
     <p style="color: var(--text-dim); font-size: 12px; margin-top: 16px;">
       Note: Stop Monitoring finishes the current pass before stopping - it does not abort a
@@ -61,6 +62,19 @@
       stops monitoring.
     </p>
   </main>
+
+  <div id="logOverlay" class="modal-overlay hidden">
+    <div class="modal log-modal" role="dialog" aria-label="Log">
+      <h3>Log</h3>
+      <div id="logViewText" class="log-view" tabindex="0"></div>
+      <div class="modal-actions">
+        <span class="enc-note" id="logViewNote" style="margin:auto auto auto 0"></span>
+        <button type="button" id="logCopy">Copy all</button>
+        <button type="button" id="logRefresh">Refresh</button>
+        <button type="button" id="logClose" class="primary">Close</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/nav.js"></script>
   <script src="/monitor.js"></script>

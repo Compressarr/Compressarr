@@ -127,7 +127,11 @@ abortBtn.addEventListener('click', async () => {
   poll();
 });
 
+// The lines the live panel last drew: what the View Log window shows when it is opened or refreshed.
+let latestLogLines = [];
+
 function renderLog(lines) {
+  latestLogLines = lines || [];
   // poll() calls this every 1.5s - unconditionally forcing scrollTop to the bottom every time
   // means scrolling up to read something gets yanked back down before you can read it. Only
   // auto-scroll if the user was already at (or very near) the bottom, same "stick to bottom"
@@ -143,6 +147,52 @@ function renderLog(lines) {
     logPanel.scrollTop = logPanel.scrollHeight;
   }
 }
+
+// --- View Log: the same lines in a window that does not refresh by itself, so text can be selected and copied.
+// The live panel above is redrawn every poll (which clears any selection in it); this one only changes when Refresh is pressed.
+const logOverlay = document.getElementById('logOverlay');
+const logViewText = document.getElementById('logViewText');
+const logViewNote = document.getElementById('logViewNote');
+let viewedLogLines = [];
+
+function fillLogView() {
+  viewedLogLines = latestLogLines.slice();
+  logViewText.innerHTML = viewedLogLines
+    .map(l => `<div class="log-line${l.severity === 'Error' ? ' error' : ''}">${escapeHtml(l.text)}</div>`)
+    .join('');
+  logViewText.scrollTop = logViewText.scrollHeight;
+  logViewNote.textContent = `${viewedLogLines.length} line${viewedLogLines.length === 1 ? '' : 's'}, as of ${new Date().toLocaleTimeString()}. It does not refresh by itself.`;
+}
+
+function closeLogView() { logOverlay.classList.add('hidden'); }
+
+// navigator.clipboard only exists on a secure page (https or localhost); when Compressarr is opened by another machine's address it is missing, so the
+// older select-and-copy route is the fallback.
+async function copyTextToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through to the older route */ }
+  const box = document.createElement('textarea');
+  box.value = text;
+  box.style.position = 'fixed';
+  box.style.opacity = '0';
+  document.body.appendChild(box);
+  box.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  box.remove();
+  return ok;
+}
+
+document.getElementById('viewLogBtn').addEventListener('click', () => { fillLogView(); logOverlay.classList.remove('hidden'); });
+document.getElementById('logRefresh').addEventListener('click', fillLogView);
+document.getElementById('logClose').addEventListener('click', closeLogView);
+document.getElementById('logCopy').addEventListener('click', async () => {
+  const ok = await copyTextToClipboard(viewedLogLines.map(l => l.text).join('\n'));
+  logViewNote.textContent = ok ? `Copied ${viewedLogLines.length} line${viewedLogLines.length === 1 ? '' : 's'}.` : 'Could not copy automatically - select the text and press Ctrl+C.';
+});
+logOverlay.addEventListener('click', e => { if (e.target === logOverlay) closeLogView(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !logOverlay.classList.contains('hidden')) closeLogView(); });
 
 // --- In Queue: drag-to-reorder, skip/remove, per-file preset override -----------------------
 //

@@ -1464,6 +1464,24 @@ td { font-variant-numeric: tabular-nums; }
 
 .log-line.error { color: var(--log-err); }
 
+/* The View Log button under the live log, and its window: the same lines, shown as text that does not refresh on its own. */
+.log-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+.log-modal { width: 900px; }
+.log-modal .modal-actions button { white-space: nowrap; flex-shrink: 0; }
+.log-view {
+  background: var(--log-bg);
+  color: var(--log-text);
+  border-radius: 8px;
+  padding: 12px 14px;
+  height: 60vh;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
 .browse-btn { padding: 6px 10px; flex-shrink: 0; }
 
 .modal-overlay {
