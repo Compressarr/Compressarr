@@ -1466,7 +1466,7 @@ td { font-variant-numeric: tabular-nums; }
 
 /* The View Log button under the live log, and its window: the same lines, shown as text that does not refresh on its own. */
 .log-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
-.log-modal { width: 900px; }
+.modal.log-modal { width: 780px; }   /* 50% wider than the standard 520px dialog; .modal comes later in this file, so the width needs the extra specificity */
 .log-modal .modal-actions button { white-space: nowrap; flex-shrink: 0; }
 .log-view {
   background: var(--log-bg);
