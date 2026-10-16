@@ -54,13 +54,14 @@
 
     <h2>Recent log</h2>
     <div id="log-panel"></div>
-    <div class="log-actions"><button type="button" id="viewLogBtn" title="Opens the log in a window that does not refresh, so you can select and copy text from it.">View Log</button></div>
-
-    <p style="color: var(--text-dim); font-size: 12px; margin-top: 16px;">
-      Note: Stop Monitoring finishes the current pass before stopping - it does not abort a
-      conversion that's already in progress. Abort kills the current conversion immediately and
-      stops monitoring.
-    </p>
+    <div class="log-footer">
+      <p class="log-footer-note">
+        Note: Stop Monitoring finishes the current pass before stopping - it does not abort a
+        conversion that's already in progress. Abort kills the current conversion immediately and
+        stops monitoring.
+      </p>
+      <button type="button" id="viewLogBtn" title="Opens the log in a window that does not refresh, so you can select and copy text from it.">View Log</button>
+    </div>
   </main>
 
   <div id="logOverlay" class="modal-overlay hidden">
