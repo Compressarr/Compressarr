@@ -161,7 +161,7 @@ function fillLogView() {
     .map(l => `<div class="log-line${l.severity === 'Error' ? ' error' : ''}">${escapeHtml(l.text)}</div>`)
     .join('');
   logViewText.scrollTop = logViewText.scrollHeight;
-  logViewNote.textContent = `${viewedLogLines.length} line${viewedLogLines.length === 1 ? '' : 's'}, as of ${new Date().toLocaleTimeString()}. It does not refresh by itself.`;
+  logViewNote.textContent = `${viewedLogLines.length} line${viewedLogLines.length === 1 ? '' : 's'}, as of ${new Date().toLocaleTimeString()}.`;
 }
 
 function closeLogView() { logOverlay.classList.add('hidden'); }
