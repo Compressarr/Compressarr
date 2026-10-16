@@ -24,7 +24,7 @@ document.getElementById('fileBotFixNetworkBtn').addEventListener('click', async 
   setStatus('Applying FileBot network fix...');
   const res = await fetch('/api/filebot/fix-network', { method: 'POST' });
   const body = await res.json().catch(() => ({}));
-  setStatus(body.message || 'Fix failed - see the recent log for details.', body.success ? true : 'error');
+  setStatus(body.message || 'Fix failed - see the Live Log on the Monitor page for details.', body.success ? true : 'error');
 });
 
 const MIN_SIZE_UNIT_MULTIPLIERS = { KB: 1024, MB: 1024 * 1024, GB: 1024 * 1024 * 1024 };
@@ -373,7 +373,7 @@ async function runMaintenanceAction(url, confirmMessage, successMessage) {
   setStatus('Working...');
 
   const res = await fetch(url, { method: 'POST' });
-  setStatus(res.ok ? successMessage : 'Failed - see the recent log for details.', res.ok ? true : 'error');
+  setStatus(res.ok ? successMessage : 'Failed - see the Live Log on the Monitor page for details.', res.ok ? true : 'error');
 
   // Every maintenance action only ever writes a file - reloading the form (which re-fetches
   // /api/settings) is how the effect actually shows up immediately, no app restart needed. A

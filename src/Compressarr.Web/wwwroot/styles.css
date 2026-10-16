@@ -1449,6 +1449,9 @@ td { font-variant-numeric: tabular-nums; }
 .banner.ok { background: var(--ok-bg); color: var(--ok); }
 .banner.err { background: var(--err-bg); color: var(--err); }
 
+/* The dim "last 200 lines" beside the Live Log heading: lighter and plain, so it reads as a note rather than part of the title. */
+h2 .log-hint { font-weight: 400; letter-spacing: normal; text-transform: none; margin-left: 8px; opacity: 0.7; }
+
 #log-panel {
   background: var(--log-bg);
   color: var(--log-text);
