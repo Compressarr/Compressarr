@@ -184,7 +184,8 @@ async function copyTextToClipboard(text) {
   return ok;
 }
 
-document.getElementById('viewLogBtn').addEventListener('click', () => { fillLogView(); logOverlay.classList.remove('hidden'); });
+// Shown first, then filled: a hidden window has no height, so scrolling it to the end would do nothing and it would open at the top.
+document.getElementById('viewLogBtn').addEventListener('click', () => { logOverlay.classList.remove('hidden'); fillLogView(); });
 document.getElementById('logRefresh').addEventListener('click', fillLogView);
 document.getElementById('logClose').addEventListener('click', closeLogView);
 document.getElementById('logCopy').addEventListener('click', async () => {
