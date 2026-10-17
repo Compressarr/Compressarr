@@ -9,7 +9,13 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
-## [2.1.10] - Unreleased
+## [2.1.10] - 2026-10-17
+
+> **What's new in 2.1.10:** a failed encode now stays held (and a kept source is remembered) across a
+> restart, a source folder's cleanup no longer removes a video that is still waiting in a subfolder,
+> the license ships with the program, Compressarr has a new home on GitHub, the update check has a
+> Stable / Stable-and-beta choice, and a bell shows project announcements (on by default, easy to
+> turn off). New changes only - earlier versions' entries are below.
 
 - **A file whose encode failed now stays held after a restart, and a kept source is remembered across one.** The "held" mark that keeps a failed file out of the retry loop (2.1.9) and the size and date that stop a kept source being converted again (below) were saved in memory but not written to the resume file with the file's result. So the next pass, or a restart, found the file as if nothing had happened: a failed encode was tried again and reported again, and a kept source could be converted again. Both are now saved with the result.
 - **A source folder's cleanup could remove a video that was still waiting.** Input folders are scanned recursively, so a movie folder can hold a subfolder (Extras, Featurettes) with a video that is still queued, skipped, or under the size filter. When the movie next to it finished, the cleanup treated that subfolder as an unmatched leftover and sent the whole thing to the Recycle Bin (or deleted it, if recycling failed). A subfolder is now only cleaned up when nothing at any depth below it is a video; a link (junction) or a folder that can't be read (including one that denies listing) is left alone, and the folder above it then stays too.
