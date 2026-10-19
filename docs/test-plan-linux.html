@@ -66,7 +66,7 @@
   <div class="card">
     <h2>How to use this</h2>
     <p>Work through the sections on the dedicated Linux test machine, running the program from a terminal so you can see what it prints. For each test mark <b>Pass</b>, <b>Fail</b>, <b>Blocked</b> (couldn't run it) or <b>N/A</b>, and write a note for anything that isn't a clean pass - what you saw and any file name involved. <b>Copy results (Markdown)</b> at the top gives text to paste back into the chat; <b>Save results file</b> keeps your progress.</p>
-    <div class="warnbox"><b>Already seen working (first test):</b> unpacking and starting the program, the web interface, and HandBrake encodes of several files (E3). Mark those quickly. <b>Known gaps</b> are written in the tests as <i>Known gap</i>: for those, a "pass" means the program behaves the way the test says, and your notes are what we use to decide the work. Section <b>L</b> is for the official release and stays Blocked until the .deb and the Linux defaults exist.</div>
+    <div class="warnbox"><b>Already seen working (first test, Ubuntu 26.04.1):</b> unpacking and starting the program, the web interface, the tray icon and its menu (B1, B2), and HandBrake encodes of several files (E3). Mark those quickly. <b>Known gaps</b> are written in the tests as <i>Known gap</i>: for those, a "pass" means the program behaves the way the test says, and your notes are what we use to decide the work. Section <b>L</b> is for the official release and stays Blocked until the .deb and the Linux defaults exist.</div>
     <h3>Machine</h3>
     <div class="grid" id="env"></div>
     <h3>Set-up on the test machine</h3>
@@ -704,16 +704,16 @@ const SECTIONS = [
    {
     "id": "K1",
     "pri": 1,
-    "title": "Ubuntu 24.04 LTS, GNOME (X11 session)",
-    "steps": "Run the quick set above.",
-    "expect": "Everything passes; tray icon shows."
+    "title": "Ubuntu 26.04 LTS, GNOME (its default session)",
+    "steps": "Run the quick set above. The first test on 26.04.1 already showed the tray icon and its menu working.",
+    "expect": "Everything passes; tray icon and menu work. Note the session type (current Ubuntu releases may offer only Wayland)."
    },
    {
     "id": "K2",
     "pri": 1,
-    "title": "Ubuntu 24.04 LTS, GNOME (Wayland session)",
-    "steps": "Same, at the login screen choose the Wayland session.",
-    "expect": "Same result; note any window or tray difference."
+    "title": "Ubuntu 24.04 LTS, GNOME (X11 and Wayland sessions)",
+    "steps": "Same, once under each session (choose it with the cog on the login screen).",
+    "expect": "Same result in both; note any window or tray difference."
    },
    {
     "id": "K3",
