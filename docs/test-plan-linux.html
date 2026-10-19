@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Compressarr - Linux test plan</title>
+<style>
+  :root { --bg:#f2f4f8; --card:#fff; --text:#1d2130; --dim:#6b7280; --border:#e4e7ee; --accent:#3b6df0; --ok:#1f9c50; --okbg:#e7f7ed; --err:#d63c3c; --errbg:#fdeaea; --warn:#c97a12; --warnbg:#fdf1e0; --code:#eef1f7; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1c1f2b; --card:#262b3c; --text:#e6e9f4; --dim:#a8adc2; --border:#363c52; --accent:#7ea0ff; --ok:#4bcf85; --okbg:#163b28; --err:#ff8a8a; --errbg:#452222; --warn:#f0aa4d; --warnbg:#3f3016; --code:#1f2331; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  header { position:sticky; top:0; z-index:5; background:var(--card); border-bottom:1px solid var(--border); padding:10px 20px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; }
+  .bar { flex:1; min-width:180px; height:10px; background:var(--border); border-radius:99px; overflow:hidden; display:flex; }
+  .bar span { display:block; height:100%; }
+  .b-pass { background:var(--ok); } .b-fail { background:var(--err); } .b-block { background:var(--warn); } .b-na { background:var(--dim); }
+  .counts { font-size:12px; color:var(--dim); }
+  button { font:inherit; padding:5px 12px; border:1px solid var(--border); background:var(--card); color:var(--text); border-radius:7px; cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  main { max-width:1100px; margin:0 auto; padding:18px 20px 80px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px 18px; margin-bottom:14px; }
+  h2 { font-size:15px; margin:0; }
+  h3 { font-size:13px; margin:14px 0 6px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:10px; }
+  label.f { display:block; font-size:12px; color:var(--dim); }
+  input[type=text], textarea, select { width:100%; font:inherit; padding:5px 8px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); }
+  textarea { min-height:44px; resize:vertical; }
+  details.sec { background:var(--card); border:1px solid var(--border); border-radius:10px; margin-bottom:12px; }
+  details.sec > summary { cursor:pointer; padding:12px 18px; display:flex; gap:12px; align-items:center; list-style:none; }
+  details.sec > summary::-webkit-details-marker { display:none; }
+  details.sec > summary h2 { flex:1; }
+  .secdesc { padding:0 18px 6px; color:var(--dim); font-size:13px; }
+  .test { border-top:1px solid var(--border); padding:12px 18px; }
+  .test.pass { border-left:4px solid var(--ok); } .test.fail { border-left:4px solid var(--err); background:var(--errbg); } .test.block { border-left:4px solid var(--warn); } .test.na { border-left:4px solid var(--dim); opacity:.75; }
+  .thead { display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+  .tid { font:600 12px ui-monospace,Consolas,monospace; color:var(--dim); }
+  .ttitle { font-weight:600; flex:1; min-width:200px; }
+  .pri { font-size:11px; font-weight:700; padding:1px 7px; border-radius:99px; background:var(--code); color:var(--dim); }
+  .pri.p1 { background:var(--errbg); color:var(--err); } .pri.p2 { background:var(--warnbg); color:var(--warn); }
+  .steps, .expect { font-size:13px; margin:6px 0 0; }
+  .expect { color:var(--dim); } .expect b, .steps b { color:var(--text); }
+  .res { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; align-items:flex-start; }
+  .res label { display:inline-flex; align-items:center; gap:4px; padding:3px 9px; border:1px solid var(--border); border-radius:99px; font-size:12px; cursor:pointer; }
+  .res input { margin:0; }
+  .note { flex:1; min-width:240px; }
+  code { background:var(--code); padding:1px 5px; border-radius:4px; font:12px ui-monospace,Consolas,monospace; }
+  ul { margin:4px 0 4px 20px; padding:0; }
+  .filters { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:0 0 12px; }
+  .hidden { display:none !important; }
+  .warnbox { background:var(--warnbg); color:var(--warn); border-radius:8px; padding:10px 14px; margin-bottom:14px; font-size:13px; }
+  table.t { border-collapse:collapse; width:100%; font-size:13px; } table.t td, table.t th { border-bottom:1px solid var(--border); padding:6px 8px; text-align:left; vertical-align:top; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Compressarr Linux test plan</h1>
+  <div class="bar" id="bar"></div>
+  <div class="counts" id="counts"></div>
+  <button id="copyBtn" class="primary">Copy results (Markdown)</button>
+  <button id="saveBtn">Save results file</button>
+  <button id="loadBtn">Load results file</button>
+  <input type="file" id="loadFile" accept=".json" class="hidden" />
+  <button id="resetBtn">Reset</button>
+</header>
+<main>
+  <div class="card">
+    <h2>How to use this</h2>
+    <p>Work through the sections on the dedicated Linux test machine, running the program from a terminal so you can see what it prints. For each test mark <b>Pass</b>, <b>Fail</b>, <b>Blocked</b> (couldn't run it) or <b>N/A</b>, and write a note for anything that isn't a clean pass - what you saw and any file name involved. <b>Copy results (Markdown)</b> at the top gives text to paste back into the chat; <b>Save results file</b> keeps your progress.</p>
+    <div class="warnbox"><b>Already seen working (first test):</b> unpacking and starting the program, the web interface, and HandBrake encodes of several files (E3). Mark those quickly. <b>Known gaps</b> are written in the tests as <i>Known gap</i>: for those, a "pass" means the program behaves the way the test says, and your notes are what we use to decide the work. Section <b>L</b> is for the official release and stays Blocked until the .deb and the Linux defaults exist.</div>
+    <h3>Machine</h3>
+    <div class="grid" id="env"></div>
+    <h3>Set-up on the test machine</h3>
+    <ul>
+      <li><code>sudo apt install handbrake-cli ffmpeg</code> (Ubuntu/Debian names; use your distribution's equivalents), then set the paths in Settings and on the Encoder page.</li>
+      <li>Make a scratch area: <code>/srv/test/in</code>, <code>/srv/test/out</code>, <code>/srv/test/lib/TV Shows</code>, <code>/srv/test/lib/Movies</code> (or anywhere you own).</li>
+      <li>Test media: a few 10-30 second clips (H.264 1080p with two audio tracks and subtitles, an HDR10 HEVC clip, a Dolby Vision clip if you have one, an interlaced clip, a truncated copy of a good file), plus an <code>.srt</code> named like one of them.</li>
+      <li>Optional: an NFS or SMB share, a second disk or small tmpfs, a reachable Sonarr/Radarr, a Slack/Discord webhook.</li>
+    </ul>
+    <h3>If something fails, collect</h3>
+    <ul>
+      <li>The terminal output of <code>./Compressarr.Desktop</code>, the relevant lines from the <b>Live Log</b> (use View Log - Copy all), and the run's log in <code>~/.config/Compressarr/Logs</code>.</li>
+      <li>For an encode problem: the file's detail log (<code>*_HBdetails.txt</code> or <code>*_FFdetails.txt</code>) and the HTML report.</li>
+      <li>Distribution and version (<code>cat /etc/os-release</code>), the desktop and session type (<code>echo $XDG_CURRENT_DESKTOP $XDG_SESSION_TYPE</code>), and your <code>compressarr.settings.json</code> with API keys and webhooks removed.</li>
+    </ul>
+  </div>
+
+  <div class="filters">
+    <label>Show <select id="fStatus"><option value="all">all tests</option><option value="open">not run yet</option><option value="fail">failed</option><option value="block">blocked</option></select></label>
+    <label>Priority <select id="fPri"><option value="all">all</option><option value="p1">P1 only</option><option value="p12">P1 + P2</option></select></label>
+    <button id="expandBtn">Expand all</button><button id="collapseBtn">Collapse all</button>
+  </div>
+  <div id="sections"></div>
+</main>
+
+<script>
+const SECTIONS = [
+ {
+  "id": "A",
+  "title": "Install and first start",
+  "desc": "The tarball build today (a .deb later, see section L). Work from a terminal so you can see anything the app prints.",
+  "tests": [
+   {
+    "id": "A1",
+    "pri": 1,
+    "title": "Unpack and launch from a terminal",
+    "steps": "Extract the tarball, <code>chmod +x Compressarr.Desktop</code>, run <code>./Compressarr.Desktop</code> on a desktop session.",
+    "expect": "The app starts; the terminal shows no unhandled exception; the web UI answers on <code>http://localhost:1212/</code>."
+   },
+   {
+    "id": "A2",
+    "pri": 1,
+    "title": "What the first-run settings show",
+    "steps": "Open Settings and the Encoder page on a brand-new profile (no <code>~/.config/Compressarr</code>). Write down the HandBrakeCLI, ffmpeg, ffprobe and FileBot path fields exactly as shown.",
+    "expect": "<b>Known gap:</b> the defaults are Windows-style (<code>%ProgramFiles%\\HandBrake\\HandBrakeCLI.exe</code>, <code>%CompressarrAppData%\\tools\\ffmpeg\\ffmpeg.exe</code>, ...). Expect red \"not found\" notices until you set the paths by hand. Record the text; nothing should crash."
+   },
+   {
+    "id": "A3",
+    "pri": 1,
+    "title": "Where data lives",
+    "steps": "After the first start run <code>ls -la ~/.config/Compressarr</code> and <code>ls -R</code> it after saving Settings once.",
+    "expect": "Settings, profiles, resume file, logs and reports are under <code>~/.config/Compressarr</code> (or <code>$XDG_CONFIG_HOME/Compressarr</code>); owned by you; no files written next to the program."
+   },
+   {
+    "id": "A4",
+    "pri": 1,
+    "title": "Reaching the web UI from another computer",
+    "steps": "From another machine open <code>http://&lt;linux-ip&gt;:1212/</code>. If it fails, check the firewall (<code>sudo ufw status</code>; <code>sudo ufw allow 1212/tcp</code>).",
+    "expect": "Every page loads over the LAN (the app listens on all addresses)."
+   },
+   {
+    "id": "A5",
+    "pri": 2,
+    "title": "Port already in use",
+    "steps": "Start a second program on port 1212 (<code>python3 -m http.server 1212</code>), then start Compressarr.",
+    "expect": "A clear failure or message, not a hang; record what you see."
+   },
+   {
+    "id": "A6",
+    "pri": 2,
+    "title": "No display (SSH only)",
+    "steps": "From an SSH session with no <code>DISPLAY</code>/<code>WAYLAND_DISPLAY</code>, run the program.",
+    "expect": "<b>Known gap:</b> it cannot start without a desktop session. Record the error text."
+   },
+   {
+    "id": "A7",
+    "pri": 2,
+    "title": "Started from another folder or a launcher",
+    "steps": "Run it by absolute path from a different working directory, and from a desktop launcher or a systemd user unit.",
+    "expect": "The web UI still finds its pages (no 404s); settings are the same as when started from the program folder."
+   },
+   {
+    "id": "A8",
+    "pri": 3,
+    "title": "Missing system libraries",
+    "steps": "On a minimal install, note any library the program asks for on first start.",
+    "expect": "List the exact packages needed (this becomes the .deb dependency list)."
+   }
+  ]
+ },
+ {
+  "id": "B",
+  "title": "Desktop integration and process behavior",
+  "desc": "The tray icon, the single-instance check and what happens to child processes.",
+  "tests": [
+   {
+    "id": "B1",
+    "pri": 1,
+    "title": "Tray icon",
+    "steps": "Look for the Compressarr icon in the panel/tray. Note the desktop (GNOME/KDE/XFCE) and session (X11/Wayland).",
+    "expect": "The icon appears. Ubuntu GNOME has AppIndicator support; plain GNOME (Fedora) does not and needs the AppIndicator extension."
+   },
+   {
+    "id": "B2",
+    "pri": 1,
+    "title": "Tray menu",
+    "steps": "Open the tray menu and use every entry (Open Web UI, start/stop monitoring, quit, any others).",
+    "expect": "Each entry works; \"Open Web UI\" opens your default browser at the Monitor page."
+   },
+   {
+    "id": "B3",
+    "pri": 1,
+    "title": "Second copy",
+    "steps": "With the app running, start it again.",
+    "expect": "The small \"already running\" window appears and the first copy keeps running; no second web server."
+   },
+   {
+    "id": "B4",
+    "pri": 1,
+    "title": "Quit leaves nothing behind",
+    "steps": "Start an encode, then Quit from the tray. Then <code>ps aux | grep -i -E \"handbrake|ffmpeg|Compressarr\"</code>.",
+    "expect": "The app exits and no HandBrakeCLI/ffmpeg process remains; the temporary output file is gone."
+   },
+   {
+    "id": "B5",
+    "pri": 1,
+    "title": "Closing the launching terminal",
+    "steps": "Start it from a terminal, then close that terminal.",
+    "expect": "Record whether it keeps running. (If it dies, running it from a launcher or <code>nohup</code> is the answer, and the .deb must start it that way.)"
+   },
+   {
+    "id": "B6",
+    "pri": 2,
+    "title": "Crash recovery",
+    "steps": "During an encode run <code>kill -9</code> on the Compressarr process, then start it again.",
+    "expect": "The lock does not block the restart; the interrupted file is resumed or re-queued; check for an orphaned HandBrakeCLI left running (kill it and note it) and a stray temp file."
+   },
+   {
+    "id": "B7",
+    "pri": 2,
+    "title": "Run at login",
+    "steps": "Turn on Settings > Run at login, save, look in <code>~/.config/autostart</code>.",
+    "expect": "<b>Known gap:</b> nothing is written on Linux. No error either."
+   },
+   {
+    "id": "B8",
+    "pri": 2,
+    "title": "Desktop notification",
+    "steps": "Enable the desktop notification option and finish a small run.",
+    "expect": "<b>Known gap:</b> no pop-up on Linux; no crash; other channels (Slack etc.) still deliver."
+   },
+   {
+    "id": "B9",
+    "pri": 3,
+    "title": "Log out, reboot",
+    "steps": "With \"monitor on start\" enabled, log out and back in; reboot.",
+    "expect": "It does not start by itself (see B7); once started, monitoring resumes as configured."
+   }
+  ]
+ },
+ {
+  "id": "C",
+  "title": "Web UI on Linux",
+  "desc": "The pages themselves, and the parts that touch the Linux file system or desktop.",
+  "tests": [
+   {
+    "id": "C1",
+    "pri": 1,
+    "title": "Every page opens",
+    "steps": "Open Monitor, Encoder, Profiles, Lanes, Scheduler, Notifications, History, Settings, About.",
+    "expect": "All load with no console errors; fonts and icons render."
+   },
+   {
+    "id": "C2",
+    "pri": 1,
+    "title": "Settings persist",
+    "steps": "Change a setting, Save, quit and restart the app.",
+    "expect": "The change is still there; <code>compressarr.settings.json</code> is readable by you only as expected."
+   },
+   {
+    "id": "C3",
+    "pri": 1,
+    "title": "Folder browser",
+    "steps": "On Settings or Lanes press Browse next to a folder field. Navigate <code>/</code>, <code>/home</code>, <code>/mnt</code>, <code>/media</code>; try a hidden folder, a symlinked folder and a folder you cannot read.",
+    "expect": "Linux paths (forward slashes) list and select correctly; an unreadable folder gives a clear message, not an empty list; the chosen path fills the field."
+   },
+   {
+    "id": "C4",
+    "pri": 1,
+    "title": "Live Log and View Log",
+    "steps": "During an encode open View Log, press Copy all, paste into a text editor.",
+    "expect": "The Log Snapshot window opens at the newest lines and the text pastes. (Copy needs a secure page - localhost works; over the LAN the fallback or Ctrl+C is used.)"
+   },
+   {
+    "id": "C5",
+    "pri": 2,
+    "title": "About page and update check",
+    "steps": "Press Check for Updates for Compressarr, HandBrake and ffmpeg.",
+    "expect": "Compressarr reports its own status; HandBrake/ffmpeg checks give a plain message (they cannot install on Linux). HTTPS works (the distribution has its CA certificates)."
+   },
+   {
+    "id": "C6",
+    "pri": 2,
+    "title": "Opening a report",
+    "steps": "Open an HTML report from History.",
+    "expect": "It opens in the browser; the \"Full Details\" links work."
+   }
+  ]
+ },
+ {
+  "id": "D",
+  "title": "Paths and file system",
+  "desc": "Where Linux differs from Windows: case-sensitive names, symlinks, permissions, mounts.",
+  "tests": [
+   {
+    "id": "D1",
+    "pri": 1,
+    "title": "Lane with Linux paths",
+    "steps": "Create a lane with Input <code>/srv/test/in</code>, Output <code>/srv/test/out</code> and library folders under <code>/srv/test/lib</code>.",
+    "expect": "No warnings; a missing folder is flagged under the field; files dropped into Input appear in the queue."
+   },
+   {
+    "id": "D2",
+    "pri": 1,
+    "title": "A Windows-exported settings file",
+    "steps": "Export settings on a Windows install, import the file on the Linux machine.",
+    "expect": "No crash; record what the tool paths and lane paths look like afterwards (Windows paths on Linux are the open issue)."
+   },
+   {
+    "id": "D3",
+    "pri": 1,
+    "title": "Letter case",
+    "steps": "Put <code>Movie (2020).MKV</code> and <code>movie (2020).mkv</code> (different folders) in Input. Also a file with an upper-case extension.",
+    "expect": "Both are recognised as videos; names that differ only by case are treated as different files; no wrong merge."
+   },
+   {
+    "id": "D4",
+    "pri": 1,
+    "title": "Two lanes, folders differing by case",
+    "steps": "Make lanes watching <code>/srv/test/TV</code> and <code>/srv/test/tv</code> (two real folders).",
+    "expect": "They are different folders on Linux, so both lanes can be enabled; a lane inside another lane's folder is still refused."
+   },
+   {
+    "id": "D5",
+    "pri": 2,
+    "title": "Awkward names",
+    "steps": "Files with spaces, apostrophes, <code>[ ] { }</code>, unicode, and a name near 250 characters.",
+    "expect": "Queued, encoded and filed with the same names; no truncation or encoding errors."
+   },
+   {
+    "id": "D6",
+    "pri": 2,
+    "title": "Symlinks",
+    "steps": "Make Input a symlink to another folder; put a symlinked file and a symlinked sub-folder in it.",
+    "expect": "Record what is found: links to folders are skipped by the scanner (by design); say if the symlinked Input itself works."
+   },
+   {
+    "id": "D7",
+    "pri": 2,
+    "title": "Hidden and temporary files",
+    "steps": "Put <code>.hidden.mkv</code>, <code>.Trash-1000/</code> and a half-copied file in Input.",
+    "expect": "Hidden or system folders do not turn into queue entries unexpectedly."
+   },
+   {
+    "id": "D8",
+    "pri": 2,
+    "title": "Network storage (NFS/SMB)",
+    "steps": "Use a mounted NFS or SMB share as Input and/or library. Encode one file, then unmount the share during a move.",
+    "expect": "The cross-filesystem move works (copy then delete); an unreachable library shows the move-failed message and the file is kept and retried; check owner and mode of the created files."
+   },
+   {
+    "id": "D9",
+    "pri": 2,
+    "title": "Output on another disk / same folder",
+    "steps": "Run once with Output on a different disk, once with \"output to same folder as input\".",
+    "expect": "Both work; temp files named <code>.compressarr-xxxx</code> never survive."
+   },
+   {
+    "id": "D10",
+    "pri": 2,
+    "title": "Permissions",
+    "steps": "Make Input read-only, then make the library read-only (<code>chmod</code>/<code>chattr</code>).",
+    "expect": "A clear error naming the problem; the source and the encoded file are not lost. Note the owner, group and mode of files Compressarr creates (<code>umask</code>) - is Plex/Sonarr able to read them?"
+   },
+   {
+    "id": "D11",
+    "pri": 3,
+    "title": "Disk full",
+    "steps": "Fill the Output disk (a small tmpfs works) during an encode.",
+    "expect": "The run reports a disk-full problem and stops monitoring, as on Windows (HandBrake's \"No space left on device\" wording)."
+   },
+   {
+    "id": "D12",
+    "pri": 3,
+    "title": "Time stamps on other file systems",
+    "steps": "With \"Maintain\" on, use a source on exFAT/NTFS (different time precision) and run twice.",
+    "expect": "The unchanged source is not converted again."
+   }
+  ]
+ },
+ {
+  "id": "E",
+  "title": "HandBrake",
+  "desc": "HandBrakeCLI from the package manager (<code>sudo apt install handbrake-cli</code>).",
+  "tests": [
+   {
+    "id": "E1",
+    "pri": 1,
+    "title": "Set the HandBrakeCLI path",
+    "steps": "In Settings set the path (<code>/usr/bin/HandBrakeCLI</code>); open the Encoder page.",
+    "expect": "It shows the HandBrake version and the red setup notice on Monitor goes away."
+   },
+   {
+    "id": "E2",
+    "pri": 1,
+    "title": "Check/Install on Linux",
+    "steps": "Press the HandBrake Check/Install button on the Encoder page.",
+    "expect": "<b>Known gap:</b> no download on Linux; a plain message tells you to install it with your package manager. Record the wording."
+   },
+   {
+    "id": "E3",
+    "pri": 1,
+    "title": "A normal encode",
+    "steps": "Encode a small file with a built-in profile (SD-HD).",
+    "expect": "Progress and ETA move; the result is filed; the History line and report are correct. (Basic version already passed in the first test.)"
+   },
+   {
+    "id": "E4",
+    "pri": 1,
+    "title": "The AV1 / 10-bit profiles",
+    "steps": "Encode a short file with the built-in AV1 (SVT-AV1) and x265 10-bit profiles.",
+    "expect": "They encode; the output plays; note the speed on this CPU."
+   },
+   {
+    "id": "E5",
+    "pri": 1,
+    "title": "Abort",
+    "steps": "Start an encode and press Abort.",
+    "expect": "HandBrakeCLI ends at once (check <code>ps</code>); the partial file is removed; the file returns to the queue or is held, as on Windows."
+   },
+   {
+    "id": "E6",
+    "pri": 1,
+    "title": "Pause and Resume",
+    "steps": "Start an encode and press Pause, wait ten seconds, then Resume. Watch <code>top</code>.",
+    "expect": "<b>Known gap:</b> the freeze is Windows-only, so on Linux Pause probably does nothing (HandBrakeCLI keeps using CPU). Record exactly what the button and Monitor show."
+   },
+   {
+    "id": "E7",
+    "pri": 2,
+    "title": "Scheduler hold",
+    "steps": "Set a schedule window that holds new work, with and without \"suspend the running encode\" at the start of the day.",
+    "expect": "Holding between files works. The \"suspend the running encode\" option shares the gap in E6; record what happens."
+   },
+   {
+    "id": "E8",
+    "pri": 2,
+    "title": "A broken source",
+    "steps": "Queue a truncated or corrupt video.",
+    "expect": "Error 101 (or the matching code) with a clear message; the file is held, not retried every pass."
+   },
+   {
+    "id": "E9",
+    "pri": 2,
+    "title": "Process priority",
+    "steps": "Set the Processing priority to Low and start an encode; <code>ps -o pid,ni,cmd -C HandBrakeCLI</code>.",
+    "expect": "The encode runs with a higher nice value (lower priority) when Low is chosen."
+   },
+   {
+    "id": "E10",
+    "pri": 3,
+    "title": "Flatpak or Snap HandBrake",
+    "steps": "If HandBrake is only available as a Flatpak/Snap, try pointing the path at it.",
+    "expect": "Record what works (a wrapper script may be needed). A package-manager build is the supported way."
+   }
+  ]
+ },
+ {
+  "id": "F",
+  "title": "ffmpeg",
+  "desc": "ffmpeg and ffprobe from the package manager (<code>sudo apt install ffmpeg</code>). The ffmpeg part has not been tried on Linux yet.",
+  "tests": [
+   {
+    "id": "F1",
+    "pri": 1,
+    "title": "Set ffmpeg and ffprobe",
+    "steps": "On the Encoder page set <code>/usr/bin/ffmpeg</code> and <code>/usr/bin/ffprobe</code>.",
+    "expect": "The capability report lists the encoders (x265, SVT-AV1, ...); NVENC is reported as unavailable without an NVIDIA GPU."
+   },
+   {
+    "id": "F2",
+    "pri": 1,
+    "title": "Check/Install on Linux",
+    "steps": "Press the ffmpeg Check/Install button.",
+    "expect": "<b>Known gap:</b> no download on Linux; the message says to install ffmpeg with the package manager."
+   },
+   {
+    "id": "F3",
+    "pri": 1,
+    "title": "A normal ffmpeg encode",
+    "steps": "Set a lane to an ffmpeg profile and encode a small file with audio and subtitles.",
+    "expect": "It encodes; progress works; the result plays; the detail log (<code>*_FFdetails.txt</code>) has the exact command."
+   },
+   {
+    "id": "F4",
+    "pri": 1,
+    "title": "Profile preview",
+    "steps": "On Profiles open an ffmpeg profile and use Preview with a real file.",
+    "expect": "The preview shows the track decisions and the command with Linux paths."
+   },
+   {
+    "id": "F5",
+    "pri": 2,
+    "title": "HDR and Dolby Vision",
+    "steps": "Run an HDR10 file and a Dolby Vision file through an ffmpeg lane.",
+    "expect": "HDR10 keeps its HDR information; a Dolby Vision file follows the profile's fallback or refusal (ERROR 112), never silently losing the HDR."
+   },
+   {
+    "id": "F6",
+    "pri": 2,
+    "title": "Abort an ffmpeg encode",
+    "steps": "Start an ffmpeg encode and press Abort.",
+    "expect": "ffmpeg ends at once (check <code>ps</code>); the partial output is removed."
+   },
+   {
+    "id": "F7",
+    "pri": 2,
+    "title": "Different ffmpeg builds",
+    "steps": "If you have a Snap or a static ffmpeg, point at it.",
+    "expect": "Record the version and whether progress and the capability check still work."
+   },
+   {
+    "id": "F8",
+    "pri": 3,
+    "title": "Hardware encoders",
+    "steps": "On a machine with an NVIDIA GPU and drivers, run the capability check.",
+    "expect": "NVENC is listed as usable only if a session really opens. (VAAPI/QSV are not used by Compressarr profiles; record only.)"
+   }
+  ]
+ },
+ {
+  "id": "G",
+  "title": "Passthrough and file handling",
+  "desc": "What happens to the source and to companion files.",
+  "tests": [
+   {
+    "id": "G1",
+    "pri": 1,
+    "title": "Passthrough",
+    "steps": "Choose Passthrough (no re-encode) for a lane and put a small file in Input.",
+    "expect": "The file is copied, filed like any other, the teal Passthrough badge shows, the History line counts the file but not its size."
+   },
+   {
+    "id": "G2",
+    "pri": 1,
+    "title": "Delete",
+    "steps": "Set the source handling to Delete and convert a file.",
+    "expect": "The source is gone after the file is filed."
+   },
+   {
+    "id": "G3",
+    "pri": 1,
+    "title": "Recycle",
+    "steps": "Set it to Recycle and convert a file; look in <code>~/.local/share/Trash/files</code> and the <code>info</code> folder. Repeat with a source on another mount.",
+    "expect": "The source is in the trash with a <code>.trashinfo</code> entry and can be restored from the file manager; on another mount it goes to that mount's <code>.Trash-1000</code>. If the trash is not available, the log says so (note whether it deletes permanently)."
+   },
+   {
+    "id": "G4",
+    "pri": 1,
+    "title": "Maintain",
+    "steps": "Set it to Maintain and convert; run another pass and restart the app.",
+    "expect": "The source stays and is not converted again, also after a restart."
+   },
+   {
+    "id": "G5",
+    "pri": 1,
+    "title": "Filing into the library",
+    "steps": "Convert one TV episode and one movie with subtitle files beside them.",
+    "expect": "TV goes to <code>Show/Season N</code>, the movie to its own folder; subtitles with the same name follow the video."
+   },
+   {
+    "id": "G6",
+    "pri": 2,
+    "title": "Name collisions",
+    "steps": "Convert a file whose name already exists in the library, once with each collision setting.",
+    "expect": "Overwrite replaces, Rename adds a suffix, Skip leaves both; nothing is lost."
+   },
+   {
+    "id": "G7",
+    "pri": 2,
+    "title": "Cleanup of the source folder",
+    "steps": "Convert a movie that sits in a folder with a <code>Featurettes</code> sub-folder holding another video.",
+    "expect": "The movie's folder is cleaned up but the sub-folder with the video is left alone (the rc.1 fix)."
+   },
+   {
+    "id": "G8",
+    "pri": 2,
+    "title": "A folder that cannot be deleted",
+    "steps": "Make a leftover sub-folder unreadable (<code>chmod 000</code>) before the cleanup.",
+    "expect": "It is kept with a clear message; the run continues."
+   }
+  ]
+ },
+ {
+  "id": "H",
+  "title": "Sonarr, Radarr and FileBot",
+  "desc": "Only if you can reach a Sonarr/Radarr.",
+  "tests": [
+   {
+    "id": "H1",
+    "pri": 1,
+    "title": "Test Connection",
+    "steps": "Enter the URL and API key of Sonarr and Radarr (same machine and another machine) and press Test Connection.",
+    "expect": "Reports the version; a wrong key or an unreachable host gives a plain message."
+   },
+   {
+    "id": "H2",
+    "pri": 1,
+    "title": "Unmonitor and rescan",
+    "steps": "Convert a file that Sonarr/Radarr knows about.",
+    "expect": "It is unmonitored and the rescan is confirmed. Note whether Sonarr/Radarr see the same folder path as Compressarr (a Docker volume mapping that differs is not translated)."
+   },
+   {
+    "id": "H3",
+    "pri": 1,
+    "title": "Turn it off in Radarr",
+    "steps": "Press the button on the ...arr card with a real Radarr that has Delete empty folders on.",
+    "expect": "The setting is switched off in Radarr and the note changes; nothing else in Radarr changes."
+   },
+   {
+    "id": "H4",
+    "pri": 3,
+    "title": "FileBot",
+    "steps": "If FileBot is installed, set its path (the default is a Windows path) and run a rename.",
+    "expect": "Works with a Linux path; otherwise record the problem."
+   }
+  ]
+ },
+ {
+  "id": "I",
+  "title": "Stability and long runs",
+  "desc": "Things that only show up over time.",
+  "tests": [
+   {
+    "id": "I1",
+    "pri": 1,
+    "title": "A longer queue",
+    "steps": "Queue 20 or more small files and let monitoring run.",
+    "expect": "They run one at a time without errors; the Monitor, Live Log and ETA stay correct; memory of the Compressarr process stays flat (<code>ps -o rss</code>)."
+   },
+   {
+    "id": "I2",
+    "pri": 2,
+    "title": "Restart in the middle",
+    "steps": "Quit with files still queued, start it again.",
+    "expect": "The queue is resumed with the Resumed badge; nothing is converted twice."
+   },
+   {
+    "id": "I3",
+    "pri": 2,
+    "title": "Stop, Abort, Run now",
+    "steps": "Use Stop Monitoring, Abort and Run now during a run.",
+    "expect": "Each behaves as the note on the Monitor page says."
+   },
+   {
+    "id": "I4",
+    "pri": 2,
+    "title": "CPU figure",
+    "steps": "Compare the Monitor page's CPU number with <code>top</code> during an encode.",
+    "expect": "They roughly agree."
+   },
+   {
+    "id": "I5",
+    "pri": 3,
+    "title": "Time zone",
+    "steps": "Set a schedule window; check <code>timedatectl</code>.",
+    "expect": "Windows apply in the machine's local time."
+   }
+  ]
+ },
+ {
+  "id": "J",
+  "title": "Notifications, history, backup, locale",
+  "desc": "Everything around the edges.",
+  "tests": [
+   {
+    "id": "J1",
+    "pri": 1,
+    "title": "Notifications",
+    "steps": "Send a test message on a channel (Slack, Discord, e-mail...).",
+    "expect": "Delivered; with \"Include machine name\" the suggested name is this machine's host name."
+   },
+   {
+    "id": "J2",
+    "pri": 1,
+    "title": "History and reports",
+    "steps": "After a few runs open History; look in the Reports folder.",
+    "expect": "History lines and HTML reports are right; the retention cleanup removes old ones when due."
+   },
+   {
+    "id": "J3",
+    "pri": 1,
+    "title": "Backup and restore",
+    "steps": "Settings > Backup now (to a Linux folder), then Restore from the list; also export and import settings.",
+    "expect": "The zip is created; Restore brings back lanes, settings and profiles."
+   },
+   {
+    "id": "J4",
+    "pri": 2,
+    "title": "Posters",
+    "steps": "Turn on Queue Posters with a TMDb key.",
+    "expect": "Posters appear; the cache sits under <code>~/.config/Compressarr/posters</code>."
+   },
+   {
+    "id": "J5",
+    "pri": 2,
+    "title": "Announcements and offline wording",
+    "steps": "Turn the network off and press the update checks.",
+    "expect": "Plain \"couldn't reach\" messages, not raw exceptions."
+   },
+   {
+    "id": "J6",
+    "pri": 2,
+    "title": "Another locale",
+    "steps": "Start the app with <code>LANG=de_DE.UTF-8</code> (decimal comma) and run a file.",
+    "expect": "Sizes, savings and dates read correctly in the report, History and the web pages; nothing fails to parse."
+   }
+  ]
+ },
+ {
+  "id": "K",
+  "title": "Distribution and desktop matrix",
+  "desc": "Repeat A1, A2, B1-B4 and E3 on each. One line in the notes per distribution is enough.",
+  "tests": [
+   {
+    "id": "K1",
+    "pri": 1,
+    "title": "Ubuntu 24.04 LTS, GNOME (X11 session)",
+    "steps": "Run the quick set above.",
+    "expect": "Everything passes; tray icon shows."
+   },
+   {
+    "id": "K2",
+    "pri": 1,
+    "title": "Ubuntu 24.04 LTS, GNOME (Wayland session)",
+    "steps": "Same, at the login screen choose the Wayland session.",
+    "expect": "Same result; note any window or tray difference."
+   },
+   {
+    "id": "K3",
+    "pri": 2,
+    "title": "Kubuntu (KDE Plasma)",
+    "steps": "Same.",
+    "expect": "Tray icon shows natively."
+   },
+   {
+    "id": "K4",
+    "pri": 2,
+    "title": "Xubuntu or Linux Mint (XFCE / Cinnamon)",
+    "steps": "Same.",
+    "expect": "Tray icon shows natively."
+   },
+   {
+    "id": "K5",
+    "pri": 2,
+    "title": "Fedora Workstation (GNOME, no AppIndicator)",
+    "steps": "Same.",
+    "expect": "The app works; the tray icon is missing unless the AppIndicator extension is installed. Record that."
+   },
+   {
+    "id": "K6",
+    "pri": 2,
+    "title": "Debian 13",
+    "steps": "Same.",
+    "expect": "Passes; list the packages you had to add."
+   },
+   {
+    "id": "K7",
+    "pri": 3,
+    "title": "A newer or rolling distribution (Arch, openSUSE Tumbleweed)",
+    "steps": "Same.",
+    "expect": "Passes; note newer library versions."
+   }
+  ]
+ },
+ {
+  "id": "L",
+  "title": "Needed before an official Linux release (not built yet)",
+  "desc": "Planned work, listed so the checks are ready. Leave as Blocked until each item exists.",
+  "tests": [
+   {
+    "id": "L1",
+    "pri": 1,
+    "title": ".deb install",
+    "steps": "Build the .deb, then <code>sudo apt install ./compressarr_2.x_amd64.deb</code> on a clean machine.",
+    "expect": "Program under <code>/opt/compressarr</code> (or similar), a <code>compressarr</code> command, a menu entry with its icon; Recommends <code>handbrake-cli</code> and <code>ffmpeg</code> are offered; no manual <code>chmod</code>."
+   },
+   {
+    "id": "L2",
+    "pri": 1,
+    "title": ".deb upgrade",
+    "steps": "Install a newer .deb over an older one while the app is running.",
+    "expect": "The app is replaced; settings in <code>~/.config/Compressarr</code> are kept; no stale files."
+   },
+   {
+    "id": "L3",
+    "pri": 1,
+    "title": ".deb remove and purge",
+    "steps": "Remove and purge the package.",
+    "expect": "The program is gone; the user's settings and library are left alone."
+   },
+   {
+    "id": "L4",
+    "pri": 1,
+    "title": "First-run defaults for Linux",
+    "steps": "Start with no <code>~/.config/Compressarr</code> on a machine that has handbrake-cli and ffmpeg installed.",
+    "expect": "Tool paths show Linux locations (<code>/usr/bin/HandBrakeCLI</code>, <code>/usr/bin/ffmpeg</code>, <code>/usr/bin/ffprobe</code>) or are found on the PATH; none of <code>%ProgramFiles%</code>, <code>.exe</code> or backslashes remain; the Encoder page is green without any editing."
+   },
+   {
+    "id": "L5",
+    "pri": 1,
+    "title": "A Windows settings file imported on Linux",
+    "steps": "Import a Windows export (D2) after L4 exists.",
+    "expect": "Windows tool paths are replaced by the Linux defaults or flagged with a clear message; lane paths that do not exist are flagged."
+   },
+   {
+    "id": "L6",
+    "pri": 2,
+    "title": "Run at login",
+    "steps": "Turn it on and off in Settings.",
+    "expect": "An autostart entry is created in <code>~/.config/autostart</code> and removed again."
+   },
+   {
+    "id": "L7",
+    "pri": 1,
+    "title": "Pause and Resume on Linux",
+    "steps": "Repeat E6 and E7 once Linux suspend exists.",
+    "expect": "Pause freezes the encode (CPU drops to zero), Resume continues it; the schedule's suspend hold works."
+   },
+   {
+    "id": "L8",
+    "pri": 3,
+    "title": "Desktop notification",
+    "steps": "Finish a run with the desktop notification option on.",
+    "expect": "A desktop pop-up appears."
+   },
+   {
+    "id": "L9",
+    "pri": 2,
+    "title": "Headless / server mode",
+    "steps": "Start with no display (SSH, systemd service, or a Docker container).",
+    "expect": "The web UI is served with no tray; a sample systemd unit (or the container) keeps it running across reboots."
+   },
+   {
+    "id": "L10",
+    "pri": 3,
+    "title": "Release hygiene",
+    "steps": "Look at the release page for the Linux asset.",
+    "expect": "A checksum and the file naming are published; an arm64 package exists if one is promised."
+   }
+  ]
+ }
+];
+
+const STATUSES = [['', 'Not run'], ['pass', 'Pass'], ['fail', 'Fail'], ['block', 'Blocked'], ['na', 'N/A']];
+const ENV_FIELDS = ['Tester', 'Date', 'Distribution + version', 'Desktop + session (X11/Wayland)', 'CPU / GPU', 'Compressarr build (tarball name or SHA)', 'HandBrakeCLI version', 'ffmpeg version', 'Media location (local / NFS / SMB)'];
+const KEY = 'compressarr-linux-testplan-v1';
+
+let state = { env: {}, tests: {} };
+try { state = JSON.parse(localStorage.getItem(KEY)) || state; } catch {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// environment fields
+document.getElementById('env').innerHTML = ENV_FIELDS.map((f, i) => `<div><label class="f">${esc(f)}</label><input type="text" data-env="${i}" value="${esc(state.env[f] || '')}" /></div>`).join('');
+document.getElementById('env').addEventListener('input', e => { const i = e.target.dataset.env; if (i === undefined) return; state.env[ENV_FIELDS[i]] = e.target.value; save(); });
+
+function render() {
+  const host = document.getElementById('sections');
+  const open = new Set([...host.querySelectorAll('details[open]')].map(d => d.dataset.id));
+  host.innerHTML = SECTIONS.map(sec => {
+    const tests = sec.tests.map(t => {
+      const r = state.tests[t.id] || {};
+      const st = r.s || '';
+      return `<div class="test ${st}" data-t="${t.id}" data-pri="${t.pri}">
+        <div class="thead"><span class="tid">${t.id}</span><span class="ttitle">${esc(t.title)}</span><span class="pri p${t.pri}">P${t.pri}</span></div>
+        <div class="steps"><b>Do:</b> ${t.steps}</div>
+        <div class="expect"><b>Expect:</b> ${t.expect}</div>
+        <div class="res">${STATUSES.map(([v, l]) => `<label><input type="radio" name="r-${t.id}" value="${v}" ${st === v ? 'checked' : ''} />${l}</label>`).join('')}
+          <textarea class="note" placeholder="Notes - what you saw, file used, anything odd" data-n="${t.id}">${esc(r.n || '')}</textarea></div>
+      </div>`;
+    }).join('');
+    return `<details class="sec" data-id="${sec.id}" ${open.has(sec.id) ? 'open' : ''}><summary><h2>${sec.id}. ${esc(sec.title)}</h2><span class="counts" data-c="${sec.id}"></span></summary><div class="secdesc">${esc(sec.desc)}</div>${tests}</details>`;
+  }).join('');
+  applyFilters();
+  updateCounts();
+}
+
+function updateCounts() {
+  const all = SECTIONS.flatMap(s => s.tests);
+  const c = { pass: 0, fail: 0, block: 0, na: 0, open: 0 };
+  for (const t of all) c[(state.tests[t.id] || {}).s || 'open']++;
+  const total = all.length;
+  document.getElementById('bar').innerHTML = ['pass', 'fail', 'block', 'na'].map(k => `<span class="b-${k}" style="width:${c[k] / total * 100}%"></span>`).join('');
+  document.getElementById('counts').textContent = `${c.pass} pass · ${c.fail} fail · ${c.block} blocked · ${c.na} n/a · ${c.open} to do (of ${total})`;
+  for (const sec of SECTIONS) {
+    const done = sec.tests.filter(t => (state.tests[t.id] || {}).s).length;
+    const fails = sec.tests.filter(t => (state.tests[t.id] || {}).s === 'fail').length;
+    const el = document.querySelector(`[data-c="${sec.id}"]`);
+    if (el) el.textContent = `${done}/${sec.tests.length}${fails ? ` · ${fails} failed` : ''}`;
+  }
+}
+
+function applyFilters() {
+  const fs = document.getElementById('fStatus').value, fp = document.getElementById('fPri').value;
+  for (const el of document.querySelectorAll('.test')) {
+    const st = (state.tests[el.dataset.t] || {}).s || '';
+    const pri = Number(el.dataset.pri);
+    const showStatus = fs === 'all' || (fs === 'open' && !st) || fs === st;
+    const showPri = fp === 'all' || (fp === 'p1' && pri === 1) || (fp === 'p12' && pri <= 2);
+    el.classList.toggle('hidden', !(showStatus && showPri));
+  }
+}
+
+document.getElementById('sections').addEventListener('change', e => {
+  if (e.target.type === 'radio') {
+    const id = e.target.name.slice(2);
+    (state.tests[id] ||= {}).s = e.target.value;
+    e.target.closest('.test').className = `test ${e.target.value}`;
+    save(); updateCounts(); applyFilters();
+  }
+});
+document.getElementById('sections').addEventListener('input', e => {
+  if (e.target.dataset.n) { (state.tests[e.target.dataset.n] ||= {}).n = e.target.value; save(); }
+});
+document.getElementById('fStatus').addEventListener('change', applyFilters);
+document.getElementById('fPri').addEventListener('change', applyFilters);
+document.getElementById('expandBtn').addEventListener('click', () => document.querySelectorAll('details.sec').forEach(d => d.open = true));
+document.getElementById('collapseBtn').addEventListener('click', () => document.querySelectorAll('details.sec').forEach(d => d.open = false));
+
+function toMarkdown() {
+  const L = [];
+  L.push('# Compressarr Linux test results', '');
+  for (const f of ENV_FIELDS) if (state.env[f]) L.push(`- **${f}:** ${state.env[f]}`);
+  const all = SECTIONS.flatMap(s => s.tests);
+  const n = k => all.filter(t => ((state.tests[t.id] || {}).s || 'open') === k).length;
+  L.push('', `**Summary:** ${n('pass')} pass, ${n('fail')} fail, ${n('block')} blocked, ${n('na')} n/a, ${n('open')} not run (of ${all.length})`, '');
+  const label = { pass: 'PASS', fail: 'FAIL', block: 'BLOCKED', na: 'N/A', open: 'not run' };
+  for (const sec of SECTIONS) {
+    L.push(`## ${sec.id}. ${sec.title}`, '');
+    for (const t of sec.tests) {
+      const r = state.tests[t.id] || {};
+      const s = r.s || 'open';
+      L.push(`- **${t.id}** [P${t.pri}] ${t.title} - **${label[s]}**${r.n ? `\n  - Notes: ${r.n.replace(/\n/g, '\n    ')}` : ''}`);
+    }
+    L.push('');
+  }
+  return L.join('\n');
+}
+
+document.getElementById('copyBtn').addEventListener('click', async () => {
+  const text = toMarkdown();
+  try { await navigator.clipboard.writeText(text); alert('Results copied - paste them back into the chat.'); }
+  catch { const w = window.open('', '_blank'); w.document.write('<pre>' + esc(text) + '</pre>'); }
+});
+document.getElementById('saveBtn').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `compressarr-linux-test-results-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+});
+document.getElementById('loadBtn').addEventListener('click', () => document.getElementById('loadFile').click());
+document.getElementById('loadFile').addEventListener('change', async e => {
+  const file = e.target.files[0]; if (!file) return;
+  try { state = JSON.parse(await file.text()); save(); location.reload(); } catch { alert('That file is not a saved results file.'); }
+});
+document.getElementById('resetBtn').addEventListener('click', () => {
+  if (confirm('Clear every result and note?')) { state = { env: {}, tests: {} }; save(); location.reload(); }
+});
+
+render();
+</script>
+</body>
+</html>
