@@ -256,10 +256,18 @@
         <h2>Queue Posters</h2>
       </div>
       <div class="card-body">
-        <div class="check-row"><span class="lane-switch"><input type="checkbox" id="postersEnabled" /><span class="knob"></span></span><label for="postersEnabled">Show Posters on Queue<span class="help-tag" tabindex="0" title="Small poster pictures beside each file on the Monitor page. When this is on, the show or movie title (and year) from each file name is sent to TMDB to find its poster, and the posters are saved in Compressarr&#39;s data folder. Nothing is sent while this is off.">?<span class="help-tip">Small poster pictures beside each file on the Monitor page. When this is on, the show or movie title (and year) from each file name is sent to TMDB to find its poster, and the posters are saved in Compressarr&#39;s data folder. Nothing is sent while this is off.</span></span></label></div>
+        <div class="check-row"><span class="lane-switch"><input type="checkbox" id="postersEnabled" /><span class="knob"></span></span><label for="postersEnabled">Show Posters on Queue<span class="help-tag" tabindex="0" title="Small poster pictures beside each file on the Monitor page. When this is on, the show or movie title (and year) from each file name is sent to the poster source you choose below (and to the other source too, if you tick the backup option and enter its key) to find its poster, and the posters are saved in Compressarr&#39;s data folder. Nothing is sent while this is off.">?<span class="help-tip">Small poster pictures beside each file on the Monitor page. When this is on, the show or movie title (and year) from each file name is sent to the poster source you choose below (and to the other source too, if you tick the backup option and enter its key) to find its poster, and the posters are saved in Compressarr&#39;s data folder. Nothing is sent while this is off.</span></span></label></div>
         <div class="field-block">
-          <label for="tmdbApiKey">TMDB API Key<span class="help-tag" tabindex="0" title="Your free TMDB API key (the shorter &quot;API Key&quot;, not the Read Access Token). Found on your TMDB account under Settings &gt; API.">?<span class="help-tip">Your free TMDB API key (the shorter "API Key", not the Read Access Token). Found on your TMDB account under Settings &gt; API.</span></span></label>
+          <label for="posterSource">Poster source<span class="help-tag" tabindex="0" title="Where the pictures come from. TMDb gives the best quality and several sizes but needs a free account. OMDb needs only an email address to get a free key, and gives one picture size.">?<span class="help-tip">Where the pictures come from. TMDb gives the best quality and several sizes but needs a free account. OMDb needs only an email address to get a free key, and gives one picture size.</span></span></label>
+          <select id="posterSource"><option value="Tmdb">TMDb - best pictures (free account needed)</option><option value="Omdb">OMDb - no account, key by email (one picture size)</option></select>
+        </div>
+        <div class="field-block">
+          <label for="tmdbApiKey"><span id="tmdbKeyLabel">TMDB API Key</span><span class="help-tag" tabindex="0" title="Your free TMDB API key (the shorter &quot;API Key&quot;, not the Read Access Token). Found on your TMDB account under Settings > API.">?<span class="help-tip">Your free TMDB API key (the shorter &quot;API Key&quot;, not the Read Access Token). Found on your TMDB account under Settings > API.</span></span></label>
           <div class="field-with-btn"><input type="password" id="tmdbApiKey" autocomplete="off" /><button id="tmdbTestBtn">Test Key</button></div>
+        </div>
+        <div class="field-block">
+          <label for="omdbApiKey"><span id="omdbKeyLabel">OMDb API Key</span><span class="help-tag" tabindex="0" title="The free key OMDb emails you (8 characters, letters and numbers). The free key allows 1,000 lookups a day, far more than Compressarr needs because each show or movie is looked up once and remembered.">?<span class="help-tip">The free key OMDb emails you (8 characters, letters and numbers). The free key allows 1,000 lookups a day, far more than Compressarr needs because each show or movie is looked up once and remembered.</span></span></label>
+          <div class="field-with-btn"><input type="password" id="omdbApiKey" autocomplete="off" /><button id="omdbTestBtn">Test Key</button></div>
         </div>
         <div class="two-col">
           <div class="field-block">
@@ -268,15 +276,23 @@
           </div>
           <div class="field-block">
             <label>&nbsp;</label>
-            <div class="check-row"><input type="checkbox" id="posterSmaller" /><label for="posterSmaller">Use smaller images<span class="help-tag" tabindex="0" title="Download TMDB's smaller picture sizes: faster and lighter, a little less sharp on a high-resolution screen.">?<span class="help-tip">Download TMDB's smaller picture sizes: faster and lighter, a little less sharp on a high-resolution screen.</span></span></label></div>
+            <div class="check-row"><input type="checkbox" id="posterSmaller" /><label for="posterSmaller">Use smaller images<span class="help-tag" tabindex="0" title="Download TMDB&#39;s smaller picture sizes: faster and lighter, a little less sharp on a high-resolution screen. (TMDB only: OMDb has a single picture size.)">?<span class="help-tip">Download TMDB&#39;s smaller picture sizes: faster and lighter, a little less sharp on a high-resolution screen. (TMDB only: OMDb has a single picture size.)</span></span></label></div>
+            <p class="muted hidden" id="posterSmallerNote" style="margin: 4px 0 0; font-size: 12px;">OMDb has one picture size, so this does nothing there.</p>
           </div>
         </div>
+        <div class="check-row hidden" id="posterFallbackRow"><input type="checkbox" id="posterFallback" /><label for="posterFallback"><span>If <span id="posterFallbackFrom">OMDb</span> has no picture for a title, try <span id="posterFallbackTo">TMDb</span></span><span class="help-tag" tabindex="0" title="Shown when a key is entered for both sources. The title is sent to the second source only when the first finds nothing.">?<span class="help-tip">Shown when a key is entered for both sources. The title is sent to the second source only when the first finds nothing.</span></span></label></div>
         <p class="muted" id="posterCacheInfo" style="margin: 4px 0 0;"></p>
-        <div class="tmdb-credit">
+        <div class="tmdb-credit" id="tmdbCredit">
           <img class="tmdb-logo" src="/assets/tmdb-logo.svg" alt="TMDB" onerror="this.parentNode.classList.add('no-logo');this.remove()" />
           <div class="tmdb-credit-text">
             <p class="muted">This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
-            <p class="muted">Get your free API key by signing up for a free account at <a href="https://www.themoviedb.org/login" target="_blank" rel="noopener">https://www.themoviedb.org/login</a></p>
+            <p class="muted" id="tmdbGetKey">Get your free API key by signing up for a free account at <a href="https://www.themoviedb.org/login" target="_blank" rel="noopener">https://www.themoviedb.org/login</a></p>
+          </div>
+        </div>
+        <div class="tmdb-credit no-logo hidden" id="omdbCredit">
+          <div class="tmdb-credit-text">
+            <p class="muted">Poster information from the OMDb API (omdbapi.com). Not affiliated with or endorsed by IMDb.</p>
+            <p class="muted" id="omdbGetKey">Get your free API key (1,000 lookups a day, no account): enter your email at <a href="https://www.omdbapi.com/apikey.aspx" target="_blank" rel="noopener">https://www.omdbapi.com/apikey.aspx</a> and the key is emailed to you.</p>
           </div>
         </div>
       </div>
@@ -412,7 +428,7 @@
             <button id="cleanupNowBtn">Clean Up Now</button>
           </div>
           <div class="field-row">
-            <label>Clear cached posters<span class="help-tag" tabindex="0" title="Deletes every saved queue poster and what was looked up for them. They are downloaded again when needed. Your settings and TMDB key are not touched.">?<span class="help-tip">Deletes every saved queue poster and what was looked up for them. They are downloaded again when needed. Your settings and TMDB key are not touched.</span></span></label>
+            <label>Clear cached posters<span class="help-tag" tabindex="0" title="Deletes every saved queue poster and what was looked up for them. They are downloaded again when needed. Your settings and API keys are not touched.">?<span class="help-tip">Deletes every saved queue poster and what was looked up for them. They are downloaded again when needed. Your settings and API keys are not touched.</span></span></label>
             <button id="posterClearBtn">Clear Cached Posters</button>
           </div>
           <div class="maintenance-divider adv-only"></div>

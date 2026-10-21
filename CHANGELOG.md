@@ -9,7 +9,10 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
-## [2.2.0-rc.1] - 2026-10-17
+## [Unreleased]
+
+### Added
+- **OMDb as a second poster source.** Settings > **Queue Posters** has a new **Poster source** choice: **TMDb** (the best pictures, several sizes, a free account needed, as before) or **OMDb** ([omdbapi.com](https://www.omdbapi.com): no account, just an email address to get a free key of 1,000 lookups a day, and one picture size). Each source has its own key field and **Test Key** button. Enter a key for the other source too and a tick appears, **If _[chosen source]_ has no picture for a title, try _[the other one]_**, so either source can be the backup for the other; the title is sent to the second source only when the first finds nothing. OMDb matches loosely, so its answer is only used when it is plainly the same thing: the same kind (movie or series), the same title (ignoring case, punctuation and a leading "The") and a portrait picture. Anything else counts as no match, so a wrong show never gets a poster (no poster, or the backup source's, is better than the wrong one). **Use smaller images** only affects TMDb pictures. Switching sources shows nothing from the old source: each title is looked up again with the new one, and a title that one source did not know is not asked of that source again. Nothing changes for existing setups: TMDb stays the source unless you pick OMDb.
 
 > [!NOTE]
 > Changes since [2.2.0-beta.5](https://github.com/Compressarr/Compressarr/releases/tag/v2.2.0-beta.5)

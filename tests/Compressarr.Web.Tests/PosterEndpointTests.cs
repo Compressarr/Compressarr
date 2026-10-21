@@ -23,12 +23,19 @@ public class PosterEndpointTests
         response.EnsureSuccessStatusCode();
     }
 
-    private static async Task Turn(QueueHost host, bool enabled, string key = "test-key", string size = "Medium", bool smaller = false)
+    private static async Task Turn(QueueHost host, bool enabled, string key = "test-key", string size = "Medium", bool smaller = false,
+        string? source = null, string? omdbKey = null, bool? fallback = null)
     {
         var settings = await Settings(host);
-        settings["posters"] = new JsonObject { ["enabled"] = enabled, ["tmdbApiKey"] = key, ["size"] = size, ["smallerImages"] = smaller };
+        var posters = new JsonObject { ["enabled"] = enabled, ["tmdbApiKey"] = key, ["size"] = size, ["smallerImages"] = smaller };
+        if (source is not null) posters["source"] = source;
+        if (omdbKey is not null) posters["omdbApiKey"] = omdbKey;
+        if (fallback is { } tick) posters["fallbackToOther"] = tick;
+        settings["posters"] = posters;
         await Save(host, settings);
     }
+
+    private static int OmdbRequests(QueueHost host) => host.Http.Requests.Count(u => u.Host == "www.omdbapi.com");
 
     /// <summary>Remembers a poster for a file name as if TMDb had already been asked, so no lookup is needed.</summary>
     private static string Seed(string fileName, string posterPath = "/abcdef12345.jpg")
@@ -73,6 +80,119 @@ public class PosterEndpointTests
 
         await Turn(host, true, size: "Gigantic");
         Assert.Equal("Medium", (await Settings(host))["posters"]!["size"]!.GetValue<string>());   // an unknown size falls back
+    }
+
+    [Fact]
+    public async Task TheOmdbChoices_AreKept_AndAPageThatDoesNotSendThemLeavesThemAlone()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+
+        var posters = (await Settings(host))["posters"]!;
+        Assert.Equal("Tmdb", posters["source"]!.GetValue<string>());           // a config from before OMDb stays on TMDb
+        Assert.Equal("", posters["omdbApiKey"]!.GetValue<string>());
+        Assert.False(posters["fallbackToOther"]!.GetValue<bool>());
+
+        await Turn(host, true, source: "Omdb", omdbKey: "  omdbkey1  ", fallback: true);
+        posters = (await Settings(host))["posters"]!;
+        Assert.Equal("Omdb", posters["source"]!.GetValue<string>());
+        Assert.Equal("omdbkey1", posters["omdbApiKey"]!.GetValue<string>());   // trimmed
+        Assert.True(posters["fallbackToOther"]!.GetValue<bool>());
+
+        await Turn(host, true, size: "Large");                                 // a cached page from before rc.2 sends only the old fields
+        posters = (await Settings(host))["posters"]!;
+        Assert.Equal("Omdb", posters["source"]!.GetValue<string>());
+        Assert.Equal("omdbkey1", posters["omdbApiKey"]!.GetValue<string>());
+        Assert.True(posters["fallbackToOther"]!.GetValue<bool>());
+        Assert.Equal("Large", posters["size"]!.GetValue<string>());
+
+        await Turn(host, true, source: "Nonsense");
+        Assert.Equal("Tmdb", (await Settings(host))["posters"]!["source"]!.GetValue<string>());   // an unknown source falls back
+    }
+
+    [Fact]
+    public async Task TurnedOnWithoutTheChosenSourcesKey_IsFlaggedOnThatKeyField()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+
+        await Turn(host, true, key: "tmdb-key", source: "Omdb", omdbKey: "");     // OMDb chosen, only a TMDb key entered
+        var issues = (await Settings(host))["validationIssues"]!.AsArray();
+        Assert.Contains(issues, i => i!["field"]!.GetValue<string>() == "omdbApiKey");
+        Assert.DoesNotContain(issues, i => i!["field"]!.GetValue<string>() == "tmdbApiKey");
+
+        await Turn(host, true, key: "", source: "Tmdb", omdbKey: "omdbkey1");     // TMDb chosen, only an OMDb key entered
+        issues = (await Settings(host))["validationIssues"]!.AsArray();
+        Assert.Contains(issues, i => i!["field"]!.GetValue<string>() == "tmdbApiKey");
+        Assert.DoesNotContain(issues, i => i!["field"]!.GetValue<string>() == "omdbApiKey");
+
+        await Turn(host, true, key: "", source: "Omdb", omdbKey: "omdbkey1");    // OMDb chosen and keyed: no TMDb key needed
+        issues = (await Settings(host))["validationIssues"]!.AsArray();
+        Assert.DoesNotContain(issues, i => i!["field"]!.GetValue<string>() is "tmdbApiKey" or "omdbApiKey");
+    }
+
+    [Fact]
+    public async Task WhenOmdbIsChosen_ATitleIsLookedUpOnOmdb_AndTmdbIsNeverAsked()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        host.Drop("hdsd", "Inception (2010).mkv");
+        await Turn(host, true, key: "", source: "Omdb", omdbKey: "omdbkey1");
+
+        await Status(host);
+
+        for (var i = 0; i < 100 && OmdbRequests(host) == 0; i++) await Task.Delay(20);
+        Assert.Equal(1, OmdbRequests(host));
+        var request = host.Http.Requests.First(u => u.Host == "www.omdbapi.com");
+        Assert.Contains("t=Inception", request.Query);
+        Assert.Contains("y=2010", request.Query);
+        Assert.Contains("apikey=omdbkey1", request.Query);
+        Assert.Equal(0, TmdbRequests(host));
+    }
+
+    [Fact]
+    public async Task AnOmdbPicture_IsServedFromTheLocalCache_AtAnySize()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var query = PosterNameParser.Parse("Fight Club (1999).mkv")!;
+        var directory = AppPaths.GetPostersDirectory();
+        Directory.CreateDirectory(Path.Combine(directory, "omdb"));
+        await File.WriteAllBytesAsync(Path.Combine(directory, "omdb", "tt0137523.jpg"), new byte[] { 0xFF, 0xD8, 0xFF, 1, 2, 3, 4 });
+        var index = new Dictionary<string, object>
+        {
+            [query.Id] = new
+            {
+                Title = query.Title, Year = query.Year, IsTv = false, Source = "omdb", ImdbId = "tt0137523",
+                PosterUrl = "https://m.media-amazon.com/images/M/abc.jpg", CheckedUtc = DateTimeOffset.UtcNow
+            }
+        };
+        await File.WriteAllTextAsync(Path.Combine(directory, "index.json"), JsonSerializer.Serialize(index));
+        await Turn(host, true, key: "", source: "Omdb", omdbKey: "omdbkey1");
+
+        using var small = await host.Client.GetAsync($"/api/posters/{query.Id}?size=w92");
+        using var large = await host.Client.GetAsync($"/api/posters/{query.Id}?size=w185");
+
+        Assert.Equal(HttpStatusCode.OK, small.StatusCode);
+        Assert.Equal(7, (await small.Content.ReadAsByteArrayAsync()).Length);
+        Assert.Equal(HttpStatusCode.OK, large.StatusCode);
+        Assert.Equal(7, (await large.Content.ReadAsByteArrayAsync()).Length);
+        Assert.Empty(host.Http.Requests);                                      // already cached: nothing downloaded
+
+        var info = JsonNode.Parse(await host.Client.GetStringAsync("/api/posters/info"))!;
+        Assert.Equal(1, info["posters"]!.GetValue<int>());
+        Assert.Equal(7, info["bytes"]!.GetValue<long>());
+    }
+
+    [Fact]
+    public async Task TheTestButton_ChecksTheTypedKeyWithTheChosenSource()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+
+        using var response = await host.Client.PostAsync("/api/posters/test", new StringContent("""{ "source": "Omdb", "apiKey": "typed-key" }""", Encoding.UTF8, "application/json"));
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+
+        Assert.False(body["success"]!.GetValue<bool>());       // the test host answers 404
+        Assert.Contains("OMDb", body["message"]!.GetValue<string>());
+        var request = Assert.Single(host.Http.Requests);
+        Assert.Equal("www.omdbapi.com", request.Host);
+        Assert.Contains("apikey=typed-key", request.Query);
     }
 
     [Fact]

@@ -48,10 +48,11 @@ public class PosterNameParserTests
     }
 }
 
-public class PosterServiceTests : AppDataTestBase
+public partial class PosterServiceTests : AppDataTestBase
 {
     private const string Api = "https://tmdb.test/3";
     private const string Img = "https://img.test/t/p";
+    private const string OmdbApi = "https://omdb.test";
 
     private sealed class FakeHttp : IHttpClientFactory
     {
@@ -77,7 +78,7 @@ public class PosterServiceTests : AppDataTestBase
     private readonly FakeClock _clock = new(new DateTimeOffset(2026, 10, 14, 9, 0, 0, TimeSpan.Zero));
     private static readonly PosterSettings On = new() { Enabled = true, TmdbApiKey = "test-key-123" };
 
-    private PosterService Service() => new(_http, _clock, TimeSpan.Zero, Api, Img);
+    private PosterService Service() => new(_http, _clock, TimeSpan.Zero, Api, Img, omdbBase: OmdbApi);
 
     private static HttpResponseMessage Results(params string[] posterPaths) => new(HttpStatusCode.OK)
     {
@@ -277,20 +278,20 @@ public class PosterServiceTests : AppDataTestBase
         using var service = Service();
 
         _http.Respond = _ => new HttpResponseMessage(HttpStatusCode.OK);
-        Assert.True((await service.TestKeyAsync("good")).Success);
+        Assert.True((await service.TestKeyAsync(PosterSource.Tmdb, "good")).Success);
         Assert.Equal("/3/authentication", _http.Requests.Last().AbsolutePath);
 
         _http.Respond = _ => new HttpResponseMessage(HttpStatusCode.Unauthorized);
-        var rejected = await service.TestKeyAsync("bad");
+        var rejected = await service.TestKeyAsync(PosterSource.Tmdb, "bad");
         Assert.False(rejected.Success);
         Assert.Contains("Read Access Token", rejected.Message);   // the usual mistake is named
 
         _http.Respond = _ => throw new HttpRequestException("no network");
-        var offline = await service.TestKeyAsync("x");
+        var offline = await service.TestKeyAsync(PosterSource.Tmdb, "x");
         Assert.False(offline.Success);
         Assert.Contains("Could not reach", offline.Message);
 
-        Assert.False((await service.TestKeyAsync("  ")).Success);
+        Assert.False((await service.TestKeyAsync(PosterSource.Tmdb, "  ")).Success);
     }
 
     [Fact]

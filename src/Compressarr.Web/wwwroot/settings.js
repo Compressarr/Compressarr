@@ -12,6 +12,7 @@ function setStatus(text, success) { setStatusMessage(text, success === 'error' ?
 // note on why these can differ).
 const SETTINGS_FIELD_MAP = {
   tmdbApiKey: '#tmdbApiKey',
+  omdbApiKey: '#omdbApiKey',
   fileBotCliPath: '#fileBotCliPath',
   vidTypes: '#vidTypes'
 };
@@ -93,8 +94,12 @@ function fillForm(dto) {
   const posters = dto.posters || { enabled: false, tmdbApiKey: '', size: 'Medium', smallerImages: false };
   document.getElementById('postersEnabled').checked = posters.enabled;
   document.getElementById('tmdbApiKey').value = posters.tmdbApiKey;
+  document.getElementById('posterSource').value = posters.source || 'Tmdb';
+  document.getElementById('omdbApiKey').value = posters.omdbApiKey || '';
+  document.getElementById('posterFallback').checked = !!posters.fallbackToOther;
   document.getElementById('posterSize').value = posters.size;
   document.getElementById('posterSmaller').checked = posters.smallerImages;
+  updatePosterCard();
   document.getElementById('updateChannel').value = dto.updateChannel || 'Stable';
   document.getElementById('postExecCmd').value = dto.postExecCmd;
   document.getElementById('postExecArgs').value = dto.postExecArgs;
@@ -162,6 +167,9 @@ function readForm() {
     posters: {
       enabled: document.getElementById('postersEnabled').checked,
       tmdbApiKey: document.getElementById('tmdbApiKey').value.trim(),
+      source: document.getElementById('posterSource').value,
+      omdbApiKey: document.getElementById('omdbApiKey').value.trim(),
+      fallbackToOther: document.getElementById('posterFallback').checked,
       size: document.getElementById('posterSize').value,
       smallerImages: document.getElementById('posterSmaller').checked
     },
@@ -296,16 +304,49 @@ document.getElementById('radarrFolderBtn').addEventListener('click', async () =>
 });
 
 // ---- Queue Posters: Test Key checks what is typed (saved or not); the cache line says what is stored and whether TMDB is refusing the key.
-document.getElementById('tmdbTestBtn').addEventListener('click', async () => {
+async function testPosterKey(source, inputId) {
   setStatus('Testing...');
   const res = await fetch('/api/posters/test', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ apiKey: document.getElementById('tmdbApiKey').value.trim() })
+    body: JSON.stringify({ source, apiKey: document.getElementById(inputId).value.trim() })
   });
   const body = await res.json();
   setStatus(body.message, body.success ? true : 'error');
-});
+}
+document.getElementById('tmdbTestBtn').addEventListener('click', () => testPosterKey('Tmdb', 'tmdbApiKey'));
+document.getElementById('omdbTestBtn').addEventListener('click', () => testPosterKey('Omdb', 'omdbApiKey'));
+
+// The card follows the choices: the other source is a backup (offered only when its key is entered), "smaller images" is TMDb's, and each
+// source shows its credit while it is in use.
+function updatePosterCard() {
+  const omdbChosen = document.getElementById('posterSource').value === 'Omdb';
+  const tmdbKey = document.getElementById('tmdbApiKey').value.trim();
+  const omdbKey = document.getElementById('omdbApiKey').value.trim();
+  const otherKey = omdbChosen ? tmdbKey : omdbKey;
+  const fallbackOn = otherKey !== '' && document.getElementById('posterFallback').checked;
+
+  document.getElementById('tmdbKeyLabel').textContent = omdbChosen ? 'TMDB API Key (optional backup)' : 'TMDB API Key';
+  document.getElementById('omdbKeyLabel').textContent = omdbChosen ? 'OMDb API Key' : 'OMDb API Key (optional backup)';
+
+  document.getElementById('posterFallbackRow').classList.toggle('hidden', otherKey === '');
+  document.getElementById('posterFallbackFrom').textContent = omdbChosen ? 'OMDb' : 'TMDb';
+  document.getElementById('posterFallbackTo').textContent = omdbChosen ? 'TMDb' : 'OMDb';
+
+  const tmdbUsed = !omdbChosen || fallbackOn;
+  const omdbUsed = omdbChosen || fallbackOn;
+  document.getElementById('tmdbCredit').classList.toggle('hidden', !tmdbUsed);
+  document.getElementById('omdbCredit').classList.toggle('hidden', !omdbUsed);
+  document.getElementById('tmdbGetKey').classList.toggle('hidden', omdbChosen);
+  document.getElementById('omdbGetKey').classList.toggle('hidden', !omdbChosen);
+
+  const smallerDoesNothing = !tmdbUsed;
+  document.getElementById('posterSmaller').disabled = smallerDoesNothing;
+  document.getElementById('posterSmallerNote').classList.toggle('hidden', !smallerDoesNothing);
+}
+for (const id of ['posterSource', 'tmdbApiKey', 'omdbApiKey', 'posterFallback']) {
+  document.getElementById(id).addEventListener(id === 'posterSource' || id === 'posterFallback' ? 'change' : 'input', updatePosterCard);
+}
 
 async function refreshPosterCacheInfo() {
   const el = document.getElementById('posterCacheInfo');

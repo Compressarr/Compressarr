@@ -315,8 +315,16 @@ public enum PosterSize
     Large
 }
 
-/// <summary>"Show posters on queue" (Settings): small poster pictures beside each file on the Monitor page, looked up by title on TMDb with
-/// the user's own free API key. Nothing is requested while Enabled is false. See PosterService for exactly what is sent and stored.</summary>
+/// <summary>Where queue posters come from. TMDb has the best pictures and several sizes but needs a free account; OMDb needs only an email
+/// address for its free key and has one picture size.</summary>
+public enum PosterSource
+{
+    Tmdb,
+    Omdb
+}
+
+/// <summary>"Show posters on queue" (Settings): small poster pictures beside each file on the Monitor page, looked up by title on TMDb or OMDb
+/// with the user's own free API key. Nothing is requested while Enabled is false. See PosterService for exactly what is sent and stored.</summary>
 public sealed class PosterSettings
 {
     public bool Enabled { get; set; } = false;
@@ -324,10 +332,19 @@ public sealed class PosterSettings
     /// <summary>The user's TMDb API key (the shorter "API Key", not the Read Access Token). Stored like the Sonarr/Radarr keys.</summary>
     public string TmdbApiKey { get; set; } = "";
 
+    /// <summary>Which source is asked first. A config from before OMDb existed has no value here and stays on TMDb.</summary>
+    public PosterSource Source { get; set; } = PosterSource.Tmdb;
+
+    /// <summary>The user's OMDb API key (the 8-character key OMDb emails out). Stored like the TMDb key.</summary>
+    public string OmdbApiKey { get; set; } = "";
+
+    /// <summary>When the chosen source has no picture for a title, ask the other one too. Only used when a key for the other source is entered.</summary>
+    public bool FallbackToOther { get; set; } = false;
+
     /// <summary>How big a poster is drawn on the page.</summary>
     public PosterSize Size { get; set; } = PosterSize.Medium;
 
-    /// <summary>Download TMDb's smaller picture sizes: faster and lighter, a little less sharp on a high-resolution screen.</summary>
+    /// <summary>Download TMDb's smaller picture sizes: faster and lighter, a little less sharp on a high-resolution screen. OMDb has one size, so this does nothing there.</summary>
     public bool SmallerImages { get; set; } = false;
 }
 

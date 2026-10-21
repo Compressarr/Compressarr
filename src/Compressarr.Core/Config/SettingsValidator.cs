@@ -21,7 +21,11 @@ public static class SettingsValidator
             }
         }
 
-        if (config.Posters.Enabled && string.IsNullOrWhiteSpace(config.Posters.TmdbApiKey))
+        if (config.Posters.Enabled && config.Posters.Source == PosterSource.Omdb && string.IsNullOrWhiteSpace(config.Posters.OmdbApiKey))
+        {
+            issues.Add(new ValidationIssue("omdbApiKey", "Show posters on queue is on, but it needs an OMDb API key (free at omdbapi.com)."));
+        }
+        else if (config.Posters.Enabled && config.Posters.Source == PosterSource.Tmdb && string.IsNullOrWhiteSpace(config.Posters.TmdbApiKey))
         {
             issues.Add(new ValidationIssue("tmdbApiKey", "Show posters on queue is on, but it needs a TMDb API key (free at themoviedb.org)."));
         }

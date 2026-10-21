@@ -55,6 +55,31 @@ public static partial class PosterNameParser
         return new PosterQuery(IsTv: false, title, year);
     }
 
+    /// <summary>Whether a source's title is the title the file name gave: equal once case, accents, punctuation and a leading "The" are set aside
+    /// ("Mission Impossible Fallout" is "Mission: Impossible - Fallout"). A longer title that merely contains the name does not match, so a
+    /// different show that happens to share the words ("Live with Lil! Agents of SHIELD") is never taken for it.</summary>
+    internal static bool TitlesMatch(string wanted, string found)
+    {
+        var a = Plain(wanted);
+        var b = Plain(found);
+        return a.Length > 0 && a == b;
+    }
+
+    private static string Plain(string title)
+    {
+        var decomposed = title.Replace("&", " and ").Normalize(System.Text.NormalizationForm.FormD).TrimStart();
+        if (decomposed.StartsWith("the ", StringComparison.OrdinalIgnoreCase)) decomposed = decomposed[4..];
+
+        var letters = new StringBuilder(decomposed.Length);
+        foreach (var c in decomposed)
+        {
+            if (char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.NonSpacingMark) continue;
+            if (char.IsLetterOrDigit(c)) letters.Append(char.ToLowerInvariant(c));
+        }
+
+        return letters.ToString();
+    }
+
     private static PosterQuery? ParseShow(string showName)
     {
         var name = showName.Trim();

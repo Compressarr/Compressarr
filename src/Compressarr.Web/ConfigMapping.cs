@@ -48,7 +48,8 @@ internal static class ConfigMapping
         BackupRetentionDays: config.Backup.RetentionDays,
         BackupLastRunUtc: config.Backup.LastRunUtc,
         ValidationIssues: validationIssues,
-        Posters: new PosterSettingsDto(config.Posters.Enabled, config.Posters.TmdbApiKey, config.Posters.Size.ToString(), config.Posters.SmallerImages));
+        Posters: new PosterSettingsDto(config.Posters.Enabled, config.Posters.TmdbApiKey, config.Posters.Size.ToString(), config.Posters.SmallerImages,
+            config.Posters.Source.ToString(), config.Posters.OmdbApiKey, config.Posters.FallbackToOther));
 
     public static void ApplySettingsDto(CompressarrConfig config, SettingsDto dto)
     {
@@ -100,6 +101,10 @@ internal static class ConfigMapping
             config.Posters.TmdbApiKey = (posters.TmdbApiKey ?? "").Trim();
             config.Posters.Size = Enum.TryParse<PosterSize>(posters.Size, ignoreCase: true, out var posterSize) ? posterSize : PosterSize.Medium;
             config.Posters.SmallerImages = posters.SmallerImages;
+            // Added in 2.2.0-rc.2: a page that does not send them (an older cached one) leaves the saved choice alone.
+            if (posters.Source is not null) config.Posters.Source = Enum.TryParse<PosterSource>(posters.Source, ignoreCase: true, out var posterSource) ? posterSource : PosterSource.Tmdb;
+            if (posters.OmdbApiKey is not null) config.Posters.OmdbApiKey = posters.OmdbApiKey.Trim();
+            if (posters.FallbackToOther is { } fallback) config.Posters.FallbackToOther = fallback;
         }
 
         // BackupLastRunUtc is read-only from the client's perspective - set only by BackupService
