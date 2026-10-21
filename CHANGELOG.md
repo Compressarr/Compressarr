@@ -9,7 +9,11 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
-## [Unreleased]
+## [2.2.0-rc.2] - Unreleased
+
+> [!NOTE]
+> Changes since [2.2.0-rc.1](https://github.com/Compressarr/Compressarr/releases/tag/v2.2.0-rc.1)
+> only - everything else is in the entries below.
 
 ### Added
 - **Plex editions (`{edition-Name}`) are filed the way Plex expects.** Plex lets you keep more than one edition of a movie or a TV show (Plex Pass). Compressarr now handles both. **Movies:** every edition of a movie goes into the one `Title (Year)` folder, with the tag left in the file name, as before - this is now pinned by tests. **TV shows:** Plex puts an edition on the show's top-level folder (it has no episode-level edition), so `Babylon 5 (1994) {edition-Bluray Remaster} - S01E01 - Title.mkv` is filed in `Babylon 5 (1994) {edition-Bluray Remaster}\Season 01\`, kept exactly as written and next to the plain `Babylon 5 (1994)` folder. A tag after the episode name stays in the file name only. **A tag carried only by the source show folder works too:** a file at `Input\Babylon 5 (1994) {edition-Bluray Remaster}\Season 01\Babylon 5 (1994) - S01E01 - Midnight.mkv` (no tag in its own name) is filed in `Babylon 5 (1994) {edition-Bluray Remaster}\Season 01\`, also when a failed move is retried later. The folder is the file's own folder or, when that is a season folder ("Season 01", "Specials"), the one above it; it must be inside the lane's Input folder and be the same show as the file name says, so a folder that merely holds shows is never mistaken for it, and a tag already in the file name wins. Anything that is not exactly Plex's form (`{edition Name}` without the hyphen, square brackets, a tag before the year, a name over 32 characters) is filed exactly as it always was.
