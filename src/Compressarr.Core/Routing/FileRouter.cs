@@ -29,21 +29,25 @@ public interface IFileRouter
     /// classification (season/episode for TV, title for movies) and the destination's own leaf
     /// filename are derived FROM, regardless of what sourcePath happens to be called. This is what
     /// lets a caller stage an encoded file under a name that can never collide with another
-    /// in-flight or still-pending attempt, right up until the moment it's actually routed.</summary>
+    /// in-flight or still-pending attempt, right up until the moment it's actually routed.
+    ///
+    /// showEdition is a Plex edition tag ("{edition-Bluray Remaster}") the file's SOURCE show folder carried when the file name itself has none
+    /// (PlexTags.EditionOfSourceShowFolder): a TV episode is then filed in the edition's show folder. Ignored for movies and for a name that
+    /// already carries an edition.</summary>
     string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles,
-        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite);
+        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null);
 }
 
 /// <summary>Ported from Move-CompressarrMovieFile/Move-CompressarrTVFile/Move-CompressarrRoutedFile.</summary>
 public sealed class FileRouter : IFileRouter
 {
     public string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles,
-        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite)
+        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null)
     {
         if (!moveFiles) return null;
 
         return isTv
-            ? MoveTvFile(sourcePath, desiredFileName, tvShowBasePath, collisionMode)
+            ? MoveTvFile(sourcePath, desiredFileName, tvShowBasePath, collisionMode, showEdition)
             : MoveMovieFile(sourcePath, desiredFileName, movieBasePath, collisionMode);
     }
 
@@ -92,7 +96,7 @@ public sealed class FileRouter : IFileRouter
         }
     }
 
-    public string? MoveTvFile(string sourcePath, string desiredFileName, string outputBase, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite)
+    public string? MoveTvFile(string sourcePath, string desiredFileName, string outputBase, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null)
     {
         if (string.IsNullOrWhiteSpace(outputBase))
         {
@@ -106,7 +110,10 @@ public sealed class FileRouter : IFileRouter
         }
 
         RequireBaseFolder(outputBase, "TV Show");
-        var destFolder = Path.Combine(outputBase, info.ShowName, "Season " + info.Season);
+        // Plex keeps two versions of a show apart by an edition tag on the show's folder. A tag in the file's own show name is already part of
+        // the folder name; otherwise the one the source show folder carried is added (and nothing else is ever invented).
+        var showFolderName = showEdition is not null && !PlexTags.HasTrailingEdition(info.ShowName) ? info.ShowName + " " + showEdition : info.ShowName;
+        var destFolder = Path.Combine(outputBase, showFolderName, "Season " + info.Season);
         Directory.CreateDirectory(destFolder);
         var destPath = ResolveCollision(Path.Combine(destFolder, info.EpisodeFileName), collisionMode);
 

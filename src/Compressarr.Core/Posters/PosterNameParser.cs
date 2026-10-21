@@ -82,7 +82,9 @@ public static partial class PosterNameParser
 
     private static PosterQuery? ParseShow(string showName)
     {
-        var name = showName.Trim();
+        // A Plex tag after the year ("Babylon 5 (1994) {edition-Bluray Remaster}", "Show (2020) {tmdb-123}") is not part of the title: it is never
+        // sent to a poster source, and the year in front of it still narrows the search.
+        var name = PlexTags.StripTrailing(showName.Trim()).Trim();
         int? year = null;
 
         // "Show Name (2019)" narrows the search; a different tag such as "(US)" or "(UK)" is not part of the title TMDb knows it by.

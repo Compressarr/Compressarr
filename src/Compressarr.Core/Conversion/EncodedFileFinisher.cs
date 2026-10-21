@@ -142,7 +142,9 @@ internal sealed class EncodedFileFinisher
         try
         {
             var libraries = LaneDestination.Resolve(config, _pathExpander, resumeEntry, tvShowBasePath, movieBasePath);
-            routedDestPath = _fileRouter.RouteFile(tempFileName, desiredFileName, isTv, libraries.TvShowBasePath, libraries.MovieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision);
+            // A TV file whose own name carries no edition still lands in the edition's show folder when its source show folder had the tag.
+            var showEdition = isTv ? PlexTags.EditionOfSourceShowFolder(file.FullName, inputPath, ContentClassifier.GetEpisodeInfo(desiredFileName).ShowName) : null;
+            routedDestPath = _fileRouter.RouteFile(tempFileName, desiredFileName, isTv, libraries.TvShowBasePath, libraries.MovieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision, showEdition);
             // Only a file that really reached a library counts as redirected - one resting in Output
             // (MoveFiles off, a Skip) or stuck on a failed move landed nowhere yet.
             if (routedDestPath is not null) redirectedTo = libraries.RedirectedTo;

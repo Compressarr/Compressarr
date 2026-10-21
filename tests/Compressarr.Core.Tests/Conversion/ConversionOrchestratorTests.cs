@@ -198,7 +198,7 @@ file sealed class ThrowingFileRouter : IFileRouter
 {
     private readonly Exception _exception;
     public ThrowingFileRouter(Exception exception) => _exception = exception;
-    public string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite) => throw _exception;
+    public string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null) => throw _exception;
 }
 
 file sealed record TrashCall(string Path, DeleteAfterConvertMode Mode);
@@ -1478,6 +1478,72 @@ public class ConversionOrchestratorTests : IDisposable
         Assert.True(File.Exists(finalPath));
         // Only now that the retry actually succeeded does the original get cleaned up.
         Assert.False(File.Exists(sourcePath));
+    }
+
+    private LaneConfig EditionLane(string tvBase) => new()
+    {
+        Id = "lane1", DisplayName = "Test Lane", Enabled = true,
+        Input = Path.Combine(_tempDir, "Input"), Output = Path.Combine(_tempDir, "Output"),
+        TvPreset = "Any Preset", TvShowBasePath = tvBase
+    };
+
+    private ConversionOrchestrator EditionOrchestrator(CompressarrConfig config) => new(
+        new PassThroughPathExpander(), new RecursiveFolderScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), new MetadataService(),
+        new FakeProcessRunner(), new FileRouter(), new NoOpCompanionFileService(), new NoOpArrUnmonitorService(),
+        new DeletingTrashService(), new NoOpRunLogger(), new NoOpResumeStateStore(), new NoOpProgressReporter(),
+        new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue));
+
+    private string EditionSource()
+    {
+        var source = Path.Combine(_tempDir, "Input", "Babylon 5 (1994) {edition-Bluray Remaster}", "Season 01", "Babylon 5 (1994) - S01E01 - Midnight.mkv");
+        Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+        Directory.CreateDirectory(Path.Combine(_tempDir, "Output"));
+        File.WriteAllText(source, "source");
+        return source;
+    }
+
+    [Fact]
+    public async Task ProcessLaneAsync_ATvSourceShowFolderWithAPlexEdition_FilesTheEpisodeInTheEditionsShowFolder()
+    {
+        // Input\Babylon 5 (1994) {edition-Bluray Remaster}\Season 01\<episode> must come out as <TV>\Babylon 5 (1994) {edition-Bluray Remaster}\Season 01\<episode>:
+        // the edition tag on the show folder is how Plex keeps two versions of a show apart.
+        var tvBase = Path.Combine(_tempDir, "TV");
+        Directory.CreateDirectory(tvBase);
+        var source = EditionSource();
+        var lane = EditionLane(tvBase);
+        var config = new CompressarrConfig { Processing = new ProcessingSettings { DeleteAfterConvert = DeleteAfterConvertMode.Delete, MoveFiles = true, ClearTitleMetadata = false } };
+        config.Lanes.Add(lane);
+
+        await RunLaneAsync(EditionOrchestrator(config), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.True(File.Exists(Path.Combine(tvBase, "Babylon 5 (1994) {edition-Bluray Remaster}", "Season 01", "Babylon 5 (1994) - S01E01 - Midnight.mkv")));
+        Assert.False(Directory.Exists(Path.Combine(tvBase, "Babylon 5 (1994)")));      // and no plain-show folder was made
+        Assert.False(File.Exists(source));
+    }
+
+    [Fact]
+    public async Task ProcessLaneAsync_ARetriedMove_StillFilesTheEpisodeInTheEditionsShowFolder()
+    {
+        // First pass: the TV library is unreachable, so the move fails. Second pass: it is back and only the move is retried - from the recorded source path.
+        var tvBase = Path.Combine(_tempDir, "TV");
+        var source = EditionSource();
+        var lane = EditionLane(@"Z:\Unavailable\TV");
+        var config = new CompressarrConfig { Processing = new ProcessingSettings { DeleteAfterConvert = DeleteAfterConvertMode.Delete, MoveFiles = true, ClearTitleMetadata = false } };
+        config.Lanes.Add(lane);
+        var orchestrator = EditionOrchestrator(config);
+        var resumeState = new List<ResumeEntry>();
+
+        await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000000", resumeState, Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+        Assert.Equal(ResumeStatus.MoveFailed, Assert.Single(resumeState).Status);
+        Assert.True(File.Exists(source));
+
+        Directory.CreateDirectory(tvBase);
+        lane.TvShowBasePath = tvBase;
+        await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000100", resumeState, Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.Equal(ResumeStatus.Completed, Assert.Single(resumeState).Status);
+        Assert.True(File.Exists(Path.Combine(tvBase, "Babylon 5 (1994) {edition-Bluray Remaster}", "Season 01", "Babylon 5 (1994) - S01E01 - Midnight.mkv")));
+        Assert.False(Directory.Exists(Path.Combine(tvBase, "Babylon 5 (1994)")));
     }
 
     [Fact]

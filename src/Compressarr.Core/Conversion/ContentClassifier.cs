@@ -29,7 +29,8 @@ public static partial class ContentClassifier
     {
         var pattern = EpisodePattern();
 
-        var splitFull = pattern.Split(fileName);
+        // Text inside a Plex tag (an edition named "4x3") is a name, not an episode marker: look for the marker with the tags blanked out.
+        var splitFull = pattern.Split(PlexTags.Mask(fileName));
         var season = splitFull.Length > 1 ? splitFull[1] : null;
         var separator = splitFull.Length > 2 ? splitFull[2] : null;
         var episode = splitFull.Length > 3 ? splitFull[3] : null;
@@ -53,8 +54,8 @@ public static partial class ContentClassifier
         }
 
         var epiName = Path.GetFileName(fileName);
-        var splitName = pattern.Split(epiName);
-        var showName = splitName.Length > 0 ? splitName[0] : "";
+        var splitName = pattern.Split(PlexTags.Mask(epiName));
+        var showName = splitName.Length > 0 ? epiName[..splitName[0].Length] : "";      // the text before the marker, from the real name (the masked one only found where it ends)
         if (showName.Length > 0)
         {
             // Drop the single separator character (usually '.', ' ', or '-') that sat directly

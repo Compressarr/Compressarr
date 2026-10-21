@@ -195,7 +195,9 @@ internal sealed class RetryRecovery
             try
             {
                 var retryLibraries = LaneDestination.Resolve(config, _pathExpander, entry, tvShowBasePath, movieBasePath);
-                retryDestPath = _fileRouter.RouteFile(encodedFilePath, desiredFileName, retryIsTv, retryLibraries.TvShowBasePath, retryLibraries.MovieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision);
+                // Same edition rule as the first attempt, worked out from the original source path (which is still recorded when the file itself is gone).
+                var retryShowEdition = retryIsTv ? PlexTags.EditionOfSourceShowFolder(entry.FullName, inputPath, ContentClassifier.GetEpisodeInfo(desiredFileName).ShowName) : null;
+                retryDestPath = _fileRouter.RouteFile(encodedFilePath, desiredFileName, retryIsTv, retryLibraries.TvShowBasePath, retryLibraries.MovieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision, retryShowEdition);
                 ResumeKeeping.MarkCompleted(entry, config.Processing.DeleteAfterConvert);
                 entry.EncodedFilePath = null;
                 entry.EncodedFileDesiredName = null;
