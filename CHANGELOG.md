@@ -9,7 +9,7 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
-## [2.2.0-rc.2] - Unreleased
+## [2.2.0-rc.2] - 2026-10-22
 
 > [!NOTE]
 > Changes since [2.2.0-rc.1](https://github.com/Compressarr/Compressarr/releases/tag/v2.2.0-rc.1)
