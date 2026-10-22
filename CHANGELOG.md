@@ -23,6 +23,8 @@ for that full history.
 - **An edition or ID tag in a name is no longer searched for an episode number.** A movie or show with an edition named after its aspect ratio, such as `Blade Runner (1982) {edition-4x3}.mkv`, was read as season 4, episode 3 and filed as a TV episode. The text inside `{edition-...}`, `{tmdb-...}`, `{tvdb-...}` and `{imdb-...}` is now ignored when looking for the season and episode.
 - **A Plex tag is no longer sent to a poster source.** For a TV show named `Babylon 5 (1994) {edition-Bluray Remaster}` the tag was part of the title sent to TMDb or OMDb (so no poster was found, and the edition's name was sent out). It is now left out, and the show and its editions share one poster lookup.
 
+## [2.2.0-rc.1] - 2026-10-17
+
 > [!NOTE]
 > Changes since [2.2.0-beta.5](https://github.com/Compressarr/Compressarr/releases/tag/v2.2.0-beta.5)
 > only - everything else is in the entries below.
