@@ -9,7 +9,11 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
-## [Unreleased]
+## [2.2.0-rc.3] - Unreleased
+
+> [!NOTE]
+> Changes since [2.2.0-rc.2](https://github.com/Compressarr/Compressarr/releases/tag/v2.2.0-rc.2)
+> only - everything else is in the entries below.
 
 ### Added
 - **The History page Overview has stat cards, a period selector and charts.** Next to **Overview** choose **All time** (the default), **Last year**, **Last 30 days**, **Last 7 days** or **Today**: the stat cards below follow the choice, and the matching row of the period table is highlighted (click a row to choose it too). The five default cards are **Total Runs**, **Files Compressed** (with a movie / TV split bar), **Best Month** (it becomes Best Week, Best Day or Best Run as the period gets shorter), **Time Spent Encoding** and **Clean Runs** (a green / orange / red bar of clean runs, runs with warnings and runs with errors). The new **Stats** button on the toolbar adds more: **Space Saved**, **Movies vs TV**, **Average Saved / File**, **Biggest Run**, **Active Days** and **Redirected Files**. The choice is remembered in the browser, and the cards always fill their rows evenly. A second group, **History at a glance**, always shows the whole history: a space-saved ring, space saved per week, and a ribbon of the last 48 runs (green, orange or red, each linking to its report). Runs in which every file failed and nothing was produced are left out of the cards, as they always were from the period totals.
