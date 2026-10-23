@@ -27,6 +27,7 @@ public class EndpointSmokeTests
     [InlineData("/api/notifications/message-presets")]
     [InlineData("/api/history")]
     [InlineData("/api/history/reports")]
+    [InlineData("/api/history/runs")]
     [InlineData("/api/history/viewed-through")]
     [InlineData("/api/donate/addresses")]
     [InlineData("/api/about")]

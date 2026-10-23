@@ -41,7 +41,7 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
     private static readonly string[] Header =
     {
         "yyyy", "mm", "dd", "BegSize", "EndSize", "FileCount", "ProcessHours", "ProcessMinutes", "ProcessSeconds",
-        "RunNumber", "ReportFileName", "ErrorCount", "WarningCount", "RedirectCount"
+        "RunNumber", "ReportFileName", "ErrorCount", "WarningCount", "RedirectCount", "MovieCount", "TvCount"
     };
 
     public void AppendRun(string legacyLogFolder, RunHistoryRecord record)
@@ -71,7 +71,10 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
             record.ReportFileName,
             record.ErrorCount.ToString(CultureInfo.InvariantCulture),
             record.WarningCount.ToString(CultureInfo.InvariantCulture),
-            record.RedirectCount.ToString(CultureInfo.InvariantCulture)
+            record.RedirectCount.ToString(CultureInfo.InvariantCulture),
+            // Blank = unknown (see RunHistoryRecord.MovieCount).
+            record.MovieCount?.ToString(CultureInfo.InvariantCulture) ?? "",
+            record.TvCount?.ToString(CultureInfo.InvariantCulture) ?? ""
         };
         writer.WriteLine(string.Join(",", fields));
     }
@@ -99,6 +102,9 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
             var warningCount = parts.Length > 12 && int.TryParse(parts[12], NumberStyles.Integer, CultureInfo.InvariantCulture, out var wc) ? wc : 0;
             // Appended at the END (never inserted) so older builds keep reading every earlier column.
             var redirectCount = parts.Length > 13 && int.TryParse(parts[13], NumberStyles.Integer, CultureInfo.InvariantCulture, out var rc) ? rc : 0;
+            // Movie / TV counts: blank or missing = unknown, not zero.
+            int? movieCount = parts.Length > 14 && int.TryParse(parts[14], NumberStyles.Integer, CultureInfo.InvariantCulture, out var mc) ? mc : null;
+            int? tvCount = parts.Length > 15 && int.TryParse(parts[15], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tc) ? tc : null;
 
             results.Add(new RunHistoryRecord(
                 Year: int.Parse(parts[0], CultureInfo.InvariantCulture),
@@ -114,7 +120,9 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
                 ReportFileName: reportFileName,
                 ErrorCount: errorCount,
                 WarningCount: warningCount,
-                RedirectCount: redirectCount));
+                RedirectCount: redirectCount,
+                MovieCount: movieCount,
+                TvCount: tvCount));
         }
 
         return results;

@@ -52,11 +52,56 @@ public class CsvRunHistoryStoreTests : AppDataTestBase
 
         Assert.Equal("WarningCount", header[12]);
         Assert.Equal("RedirectCount", header[13]);
-        Assert.Equal(14, row.Length);
+        Assert.Equal(16, row.Length);                // ...then the movie and TV counts, blank here: unknown
         Assert.Equal("report.html", row[10]);
         Assert.Equal("2", row[11]);
         Assert.Equal("3", row[12]);
         Assert.Equal("4", row[13]);
+    }
+
+    [Fact]
+    public void AppendRun_ThenGetHistory_RoundTripsTheMovieAndTvCounts()
+    {
+        var store = new CsvRunHistoryStore();
+
+        store.AppendRun(_tempDir, new RunHistoryRecord(2026, 9, 3, 10, 4, 5, 0, 5, 0, RunNumber: 42, ReportFileName: "report.html", MovieCount: 2, TvCount: 3));
+
+        var result = Assert.Single(store.GetHistory(_tempDir));
+        Assert.Equal(2, result.MovieCount);
+        Assert.Equal(3, result.TvCount);
+        var row = File.ReadAllLines(AppPaths.GetHistoryFilePath())[1].Split(',');
+        Assert.Equal("2", row[14]);                  // the last two columns, after the redirect count: older builds ignore them
+        Assert.Equal("3", row[15]);
+    }
+
+    [Fact]
+    public void AnUnknownSplit_IsWrittenBlank_AndReadBackAsUnknown_NotAsZero()
+    {
+        var store = new CsvRunHistoryStore();
+
+        store.AppendRun(_tempDir, new RunHistoryRecord(2026, 9, 3, 10, 4, 5, 0, 5, 0, RunNumber: 42, ReportFileName: "report.html"));
+
+        var result = Assert.Single(store.GetHistory(_tempDir));
+        Assert.Null(result.MovieCount);
+        Assert.Null(result.TvCount);
+    }
+
+    [Fact]
+    public void GetHistory_RowsWithoutTheSplitColumns_OrWithThemBlank_AreUnknown_AndARepairedRowIsRead()
+    {
+        File.WriteAllLines(Path.Combine(_tempDir, "Compressarr_History.csv"), new[]
+        {
+            "yyyy,mm,dd,BegSize,EndSize,FileCount,ProcessHours,ProcessMinutes,ProcessSeconds,RunNumber,ReportFileName,ErrorCount,WarningCount,RedirectCount,MovieCount,TvCount",
+            "2026,08,15,10,4,3,0,5,0,1,a.html,0,0",                  // an old row: 13 columns
+            "2026,08,16,10,4,3,0,5,0,2,b.html,0,0,0",                // 14 columns
+            "2026,08,17,10,4,3,0,5,0,3,c.html,0,0,0,,",              // 16 columns, split blank
+            "2026,08,18,10,4,3,0,5,0,4,d.html,0,0,0,1,2"             // a known split
+        });
+
+        var rows = new CsvRunHistoryStore().GetHistory(_tempDir);
+
+        Assert.Equal(new int?[] { null, null, null, 1 }, rows.Select(r => r.MovieCount).ToArray());
+        Assert.Equal(new int?[] { null, null, null, 2 }, rows.Select(r => r.TvCount).ToArray());
     }
 
     [Fact]

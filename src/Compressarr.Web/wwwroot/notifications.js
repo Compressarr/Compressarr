@@ -66,7 +66,7 @@ let messagePresets = {}; // { Minimal: {title, body}, Standard: {...}, Detailed:
 
 // Illustrative numbers only, for the live preview - never sent anywhere, never real run data.
 const PREVIEW_SAMPLE = {
-  run_number: '47', files: '12', saved_gb: '8.42', saved_pct: '31.6',
+  run_number: '47', files: '12', movie_count: '3', tv_count: '9', saved_gb: '8.42', saved_pct: '31.6',
   before_gb: '26.7', after_gb: '18.3', duration: '1h 12m', outcome: 'Success',
   error_count: '0', warning_count: '1', retries_succeeded: '2',
   report_path: 'C:\\Compressarr\\Reports\\Compressarr_2026-09-11_Report.html',

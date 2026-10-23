@@ -39,25 +39,6 @@ function formatDuration(totalSeconds) {
   return `${h}h ${m}m ${sec}s`;
 }
 
-function row(label, bucket) {
-  const saved = bucket.beforeGb > 0 ? Math.round((1 - bucket.afterGb / bucket.beforeGb) * 1000) / 10 : 0;
-  return `<tr><td>${label}</td><td>${bucket.fileCount}</td><td>${bucket.beforeGb.toFixed(2)} GB</td><td>${bucket.afterGb.toFixed(2)} GB</td><td>${saved}%</td><td>${formatDuration(bucket.totalTimeSeconds)}</td></tr>`;
-}
-
-async function loadHistory() {
-  const res = await fetch('/api/history');
-  const h = await res.json();
-
-  document.getElementById('totalRunCount').textContent = h.totalRunCount;
-  document.getElementById('historyRows').innerHTML = [
-    row('Today', h.today),
-    row('Last 7 Days', h.last7Days),
-    row('Last 30 Days', h.last30Days),
-    row('Last Year', h.lastYear),
-    row('All Time', h.allTime)
-  ].join('');
-}
-
 function reportRow(entry) {
   const saved = entry.beforeGb > 0 ? Math.round((1 - entry.afterGb / entry.beforeGb) * 1000) / 10 : 0;
   const date = new Date(entry.date).toLocaleDateString();
@@ -110,5 +91,5 @@ function markHistoryViewed() {
     .catch(() => {});
 }
 
-loadHistory();
+loadOverview();   // history-overview.js: the period selector, the stat cards, the period table and the charts
 loadReports().then(markHistoryViewed);

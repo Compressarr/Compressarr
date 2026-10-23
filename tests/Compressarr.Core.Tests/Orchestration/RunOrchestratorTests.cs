@@ -449,6 +449,22 @@ public class RunOrchestratorTests : IDisposable
     }
 
     [Fact]
+    public async Task RunOnceAsync_RecordsHowManyMoviesAndHowManyTvEpisodesWereCompressed()
+    {
+        var (config, _) = MakeSingleLaneConfig("Fight Club (1999).mkv", "Caddyshack (1980).mkv", "Breaking Bad - S05E14 - Ozymandias.mkv");
+        config.Lanes[0].TvPreset = "Any Preset";
+        var history = new NoOpHistoryStore();
+        var (orchestrator, _) = BuildOrchestrator(config, new RecordingProcessRunner(), historyStore: history);
+
+        await orchestrator.RunOnceAsync(config);
+
+        var record = Assert.Single(history.Appended);
+        Assert.Equal(3, record.FileCount);
+        Assert.Equal(2, record.MovieCount);
+        Assert.Equal(1, record.TvCount);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_WithNoRedirects_RecordsAZeroRedirectCount()
     {
         var (config, _) = MakeSingleLaneConfig("a.mkv");

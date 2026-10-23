@@ -22,23 +22,44 @@
     <div class="page-actions">
       <button id="toggleHistoryBtn">Hide history</button>
       <button id="toggleReportsBtn">Hide reports</button>
+      <span class="tb-sep"></span>
+      <button id="statsBtn" title="Choose which stats are shown at the top of the Overview"><svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><path d="M17.5 14v7M14 17.5h7"></path></svg>Stats</button>
+    </div>
+
+    <div class="ov-pop hidden" id="ovPop" role="dialog" aria-label="Stats on this page">
+      <h3>Stats on this page</h3>
+      <p>Tick the stats to show at the top of the Overview. Saved in this browser only.</p>
+      <div class="ov-grp">Default stats</div><div id="ovPopDefault"></div>
+      <div class="ov-grp">More stats</div><div id="ovPopMore"></div>
+      <div class="ov-foot"><span id="ovPopCount"></span><a id="ovPopReset" role="button" tabindex="0">Reset to defaults</a></div>
     </div>
 
     <div class="card" id="historySection">
       <div class="card-head">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
         <h2>Overview</h2>
+        <div class="ov-periods" id="ovPeriods" role="radiogroup" aria-label="Period">
+          <label><input type="radio" name="ovPeriod" value="all" checked /><span>All time</span></label>
+          <label><input type="radio" name="ovPeriod" value="year" /><span>Last year</span></label>
+          <label><input type="radio" name="ovPeriod" value="d30" /><span>Last 30 days</span></label>
+          <label><input type="radio" name="ovPeriod" value="d7" /><span>Last 7 days</span></label>
+          <label><input type="radio" name="ovPeriod" value="today" /><span>Today</span></label>
+        </div>
       </div>
       <div class="card-body">
-        <div class="stat-grid">
-          <div class="stat"><div class="label">Total Runs</div><div class="value" id="totalRunCount">-</div></div>
-        </div>
+        <div class="ov-sep"><span id="ovGroupTitle">Stats</span></div>
+        <div class="ov-strip" id="ovStrip"></div>
         <table>
           <thead>
             <tr><th>Period</th><th>Files</th><th>Before</th><th>After</th><th>Saved</th><th>Time</th></tr>
           </thead>
           <tbody id="historyRows"></tbody>
         </table>
+        <div id="ovGlobal">
+          <div class="ov-sep second"><span>History at a glance</span><small>always the whole history, not affected by the period above</small></div>
+          <div class="ov-mid" id="ovMid"></div>
+          <div id="ovRibbon"></div>
+        </div>
       </div>
     </div>
 
@@ -60,6 +81,7 @@
   </main>
 
   <script src="/nav.js"></script>
+  <script src="/history-overview.js"></script>
   <script src="/history.js"></script>
 </body>
 </html>

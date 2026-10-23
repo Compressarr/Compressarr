@@ -31,6 +31,29 @@ public class WebHistoryRollupCalculatorTests
     }
 
     [Fact]
+    public void Calculate_CarriesTheMovieAndTvSplit_AndCountsFilesOfRunsWithoutOneAsUnknown()
+    {
+        var now = new DateTime(2026, 1, 10);
+        var store = new FakeRunHistoryStore
+        {
+            Records =
+            {
+                RecordOn(now, fileCount: 5) with { MovieCount = 2, TvCount = 3 },
+                RecordOn(now, fileCount: 4) with { MovieCount = 0, TvCount = 4 },
+                RecordOn(now.AddDays(-20), fileCount: 7),                              // an older run: no split recorded
+                RecordOn(now.AddDays(-400), fileCount: 6)
+            }
+        };
+        var calc = new WebHistoryRollupCalculator(store) { Now = now };
+
+        var result = calc.Calculate("any-path");
+
+        Assert.Equal((9, 2, 7, 0), (result.Today.FileCount, result.Today.MovieCount, result.Today.TvCount, result.Today.UnknownCount));
+        Assert.Equal((16, 2, 7, 7), (result.Last30Days.FileCount, result.Last30Days.MovieCount, result.Last30Days.TvCount, result.Last30Days.UnknownCount));
+        Assert.Equal((22, 2, 7, 13), (result.AllTime.FileCount, result.AllTime.MovieCount, result.AllTime.TvCount, result.AllTime.UnknownCount));
+    }
+
+    [Fact]
     public void Calculate_RunsInWhichEveryFileFailed_AreSkipped_ButMixedRunsAreKept()
     {
         var now = new DateTime(2026, 1, 2);

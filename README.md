@@ -407,6 +407,7 @@ literal text rather than breaking the message:
 |---|---|
 | `{run_number}` | The sequential run number |
 | `{files}` | Files processed this run |
+| `{movie_count}` / `{tv_count}` | How many of those files were movies / TV episodes (they add up to `{files}`) |
 | `{saved_gb}` / `{saved_pct}` | Space saved, in GB / as a percent |
 | `{before_gb}` / `{after_gb}` | Total size before/after, in GB |
 | `{duration}` | How long the run took |

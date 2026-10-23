@@ -34,6 +34,39 @@ public static class HistoryEndpoints
             });
         });
 
+        // Every run that produced results, oldest first, for the Overview's stat cards and charts - one compact array per run so a long
+        // history stays small: [year, month, day, beforeGb, afterGb, files, seconds, runNumber, errors, warnings, redirected, movies|null,
+        // tv|null, reportFile|null]. A null movies/tv means the run's split is unknown. reportFile is only filled for the most recent runs
+        // (the ones the page can link to) and only when the report still exists. The same "every file failed, nothing produced" rows the
+        // period totals skip are left out here too, so the cards and the table always agree. today is the server's date, which the
+        // period windows (Today, Last 7 days...) are measured from - the same windows /api/history uses.
+        app.MapGet("/api/history/runs", (
+            IConfigStore configStore,
+            IPathExpander pathExpander,
+            IRunHistoryStore historyStore) =>
+        {
+            var config = configStore.Load(AppPaths.GetConfigFilePath());
+            var logFilePath = pathExpander.Expand(config.Logging.LogFilePath);
+            var reportPath = pathExpander.Expand(config.Report.ReportPath);
+
+            var runs = historyStore.GetHistory(logFilePath).Where(r => !r.IsAllFailed).ToList();
+            const int linkable = 60;
+            var firstLinkable = Math.Max(0, runs.Count - linkable);
+
+            var rows = runs.Select((r, i) => new object?[]
+            {
+                r.Year, r.Month, r.Day,
+                Math.Round(r.BeginSizeGb, 3), Math.Round(r.EndSizeGb, 3),
+                r.FileCount,
+                r.ProcessHours * 3600 + r.ProcessMinutes * 60 + r.ProcessSeconds,
+                r.RunNumber, r.ErrorCount, r.WarningCount, r.RedirectCount,
+                r.MovieCount, r.TvCount,
+                i >= firstLinkable && !string.IsNullOrEmpty(r.ReportFileName) && File.Exists(Path.Combine(reportPath, r.ReportFileName)) ? r.ReportFileName : null
+            }).ToList();
+
+            return Results.Json(new { today = DateTime.Now.ToString("yyyy-MM-dd"), runs = rows });
+        });
+
         app.MapGet("/api/history/reports", (
             IConfigStore configStore,
             IPathExpander pathExpander,

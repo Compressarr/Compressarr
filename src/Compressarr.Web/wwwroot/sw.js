@@ -3,7 +3,7 @@
 // shows live state (the queue, run status, logs), and a cached API response would show stale data
 // indefinitely, which is worse than no offline support at all. Bump CACHE_NAME on any real static
 // asset change so old clients pick up the new shell instead of serving a stale cached copy forever.
-const CACHE_NAME = 'compressarr-shell-v21';
+const CACHE_NAME = 'compressarr-shell-v23';
 
 const SHELL_ASSETS = [
   '/monitor.html',
@@ -30,6 +30,7 @@ const SHELL_ASSETS = [
   '/scheduler.js',
   '/notifications.js',
   '/history.js',
+  '/history-overview.js',
   '/settings.js',
   '/browse.js',
   '/qrcode.js',

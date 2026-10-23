@@ -272,6 +272,32 @@ public class NotificationMessageRendererTests
         }
     }
 
+    private static ConversionResult OfKind(string contentType, bool success = true) => new()
+    {
+        LaneId = "lane1", FileName = "f.mkv", FullName = @"C:\f.mkv", ContentType = contentType, BeginSizeGb = 1, EndSizeGb = 0.5, Success = success
+    };
+
+    [Fact]
+    public void MovieAndTvCountTokens_CountTheRunsFilesByKind_AndAddUpToTheFilesToken()
+    {
+        var report = ReportWith(new[] { OfKind("Movie"), OfKind("TV Show"), OfKind("TV Show"), OfKind("TV Show", success: false), OfKind("Movie") });
+
+        Assert.Equal("2 movies, 3 TV, 5 files", Body("{movie_count} movies, {tv_count} TV, {files} files", report));
+    }
+
+    [Fact]
+    public void MovieAndTvCountTokens_AreZeroForARunWithOnlyOneKind_AndNoBuiltInStyleUsesThem()
+    {
+        var report = ReportWith(new[] { OfKind("Movie") });
+
+        Assert.Equal("1/0", Body("{movie_count}/{tv_count}", report));
+        foreach (var (title, body) in NotificationMessagePresets.Templates.Values)
+        {
+            Assert.DoesNotContain("{movie_count}", title + body);
+            Assert.DoesNotContain("{tv_count}", title + body);
+        }
+    }
+
     [Fact]
     public void ErrorToken_IsNotTheErrorCountToken()
     {

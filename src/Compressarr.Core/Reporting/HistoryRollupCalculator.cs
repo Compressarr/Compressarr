@@ -29,7 +29,10 @@ public sealed class HistoryRollupCalculator : IHistoryRollupCalculator
                 FileCount: rowList.Sum(r => r.FileCount),
                 BeforeGb: Math.Round(rowList.Sum(r => r.BeginSizeGb), 3),
                 AfterGb: Math.Round(rowList.Sum(r => r.EndSizeGb), 3),
-                TotalTimeSeconds: rowList.Sum(r => r.ProcessHours * 3600 + r.ProcessMinutes * 60 + r.ProcessSeconds));
+                TotalTimeSeconds: rowList.Sum(r => r.ProcessHours * 3600 + r.ProcessMinutes * 60 + r.ProcessSeconds),
+                MovieCount: rowList.Sum(r => r.MovieCount ?? 0),
+                TvCount: rowList.Sum(r => r.TvCount ?? 0),
+                UnknownCount: rowList.Where(r => r.MovieCount is null).Sum(r => r.FileCount));
         }
 
         var today = Rollup(history.Where(r => r.Year == now.Year && r.Month == now.Month && r.Day == now.Day));
