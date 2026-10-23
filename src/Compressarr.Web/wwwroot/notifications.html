@@ -103,13 +103,15 @@
             <code>{warning_count}</code> <code>{retries_succeeded}</code> <code>{report_path}</code>
             <code>{today_files}</code> <code>{today_saved_gb}</code> <code>{month_files}</code>
             <code>{month_saved_gb}</code> <code>{year_files}</code> <code>{year_saved_gb}</code>
-            <code>{file_list}</code> <code>{machine}</code> <code>{error}</code>
+            <code>{file_list}</code> <code>{machine}</code> <code>{error}</code> <code>{warning}</code>
           </p>
           <p style="color: var(--text-dim); font-size: 12.5px; margin: 0 0 10px;">
             <code>{error}</code> is a few words about what went wrong this run, such as
             <code>Error 102: File move failure</code> (with a count when it happened more than once, and
-            "+N more" when there are several kinds). When the run had no errors it is nothing at all: in a
-            template of several lines the whole line it is on is left out.
+            "+N more" when there are several kinds). <code>{warning}</code> works the same way for warnings (a
+            file that was converted and filed, but with something to note), such as
+            <code>Warn 201: Move skipped (already exists)</code>. When the run had no errors (or no warnings) the
+            token is nothing at all: in a template of several lines the whole line it is on is left out.
           </p>
           <p style="color: var(--text-dim); font-size: 12.5px; margin: 0 0 10px;">
             <code>{file_list}</code> is the filename(s) processed this run, one per line - the

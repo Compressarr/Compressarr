@@ -97,6 +97,7 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
   tr.redir {{ background: #f3effd; }}
   .redir-text {{ color: #4a3fa8; }}
   .warn-text {{ color: #8a6414; }}
+  .warn-code {{ border-bottom: 1px dotted #8a6414; cursor: help; font-weight: 600; }}
   .err-code {{ border-bottom: 1px dotted #a1231e; cursor: help; }}
   .enc-tag {{ font-size: 0.7rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: #fdf3e0; color: #8a6414; white-space: nowrap; }}
   .pt-tag {{ font-size: 0.7rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: #d6f3ef; color: #0b6b63; white-space: nowrap; }}
@@ -251,7 +252,10 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
                 // problem even though the conversion itself succeeded - flagged distinctly from a
                 // real failure (no red row, doesn't count toward the error total) so it doesn't
                 // get missed, without overstating what actually went wrong.
-                statusHtml += $"<br><span class=\"warn-text\">&#9888; {WebUtility.HtmlEncode(r.PostProcessWarning)}</span>";
+                // Each numbered kind is a compact "WARN <code>" badge with its explanation in a help bubble (the same way an error's code is
+                // shown); the specifics - a path, the reason - follow as text.
+                var warnBadges = string.Concat(r.WarningCodes.Select(c => $"<span class=\"warn-code\" title=\"{WebUtility.HtmlEncode(c.Describe())}\">WARN {(int)c}</span> "));
+                statusHtml += $"<br><span class=\"warn-text\">&#9888; {warnBadges}{WebUtility.HtmlEncode(r.PostProcessWarning)}</span>";
             }
             if (wasRedirected)
             {

@@ -1929,6 +1929,7 @@ public class ConversionOrchestratorTests : IDisposable
         Assert.True(result.Success);
         Assert.False(result.DiskFull);
         Assert.Contains("already exists", result.PostProcessWarning);
+        Assert.Contains(ReportWarningCode.MoveSkippedAlreadyExists, result.WarningCodes);
         // The just-converted file stays in Output, untouched - the pre-existing destination file
         // is also untouched.
         Assert.True(File.Exists(Path.Combine(outputDir, "Caddyshack (1980).mkv")));
@@ -2286,6 +2287,7 @@ public class ConversionOrchestratorTests : IDisposable
         // subtitles/nfo/artwork) failed, so this must not be reported as a failed conversion.
         Assert.True(result.Success);
         Assert.Contains("Companion files not moved", result.PostProcessWarning);
+        Assert.Contains(ReportWarningCode.CompanionFilesNotMoved, result.WarningCodes);
     }
 
     // Code-review finding (v2.1.4 review, #2 MED-HIGH): a companion move exception was logged and
@@ -2352,6 +2354,7 @@ public class ConversionOrchestratorTests : IDisposable
         var result = Assert.Single(results);
         Assert.True(result.Success);
         Assert.Contains("Companion files not moved", result.PostProcessWarning);
+        Assert.Contains(ReportWarningCode.CompanionFilesNotMoved, result.WarningCodes);
         Assert.False(companionService.CleanUpCalled, "a companion left stranded by a failed move must not have its folder swept as if genuinely empty");
     }
 
@@ -2417,6 +2420,7 @@ public class ConversionOrchestratorTests : IDisposable
         // deferred, not the file's own disposition.
         Assert.True(result.Success);
         Assert.Contains("cleanup deferred", result.PostProcessWarning);
+        Assert.Contains(ReportWarningCode.CleanupDeferredRescan, result.WarningCodes);
         Assert.True(File.Exists(Path.Combine(movieBaseDir, "Caddyshack (1980)", "Caddyshack (1980).mkv")));
 
         // The real assertion: an unconfirmed rescan must leave the source folder alone.
@@ -2672,6 +2676,7 @@ public class ConversionOrchestratorTests : IDisposable
         // filesystem cleanup exception used to leave PostProcessWarning null - the report could
         // show a plain, unqualified "OK" for a file whose cleanup actually failed and is pending.
         Assert.Contains("Source folder cleanup deferred", result.PostProcessWarning);
+        Assert.Contains(ReportWarningCode.CleanupDeferredFailed, result.WarningCodes);
 
         var entry = Assert.Single(resumeState);
         Assert.Equal(ResumeStatus.CleanupPending, entry.Status);
@@ -3034,6 +3039,7 @@ public class ConversionOrchestratorTests : IDisposable
         Assert.True(result.Success);
         Assert.StartsWith("Failed:", result.ArrStatus);
         Assert.Contains("Sonarr/Radarr unmonitor failed", result.PostProcessWarning);
+        Assert.Contains(ReportWarningCode.ArrUnmonitorFailed, result.WarningCodes);
     }
 
     [Fact]

@@ -641,6 +641,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         string? failureReason = null;
         ReportErrorCode? errorCode = null;
         string? postProcessWarning = null;
+        IReadOnlyList<ReportWarningCode> warningCodes = Array.Empty<ReportWarningCode>();
 
         if (success)
         {
@@ -655,6 +656,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             failureReason = finish.FailureReason;
             errorCode = finish.ErrorCode;
             postProcessWarning = finish.PostProcessWarning;
+            warningCodes = finish.WarningCodes;
             redirectedTo = finish.RedirectedTo;
         }
         else
@@ -739,6 +741,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             EndTime = endTime,
             ArrStatus = arrStatus,
             PostProcessWarning = postProcessWarning,
+            WarningCodes = warningCodes,
             HomeLaneName = lane.DisplayName,
             RedirectedToLaneId = redirectedTo?.Id,
             RedirectedToLaneName = redirectedTo?.DisplayName

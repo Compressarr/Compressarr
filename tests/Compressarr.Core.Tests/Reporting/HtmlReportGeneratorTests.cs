@@ -6,7 +6,7 @@ namespace Compressarr.Core.Tests.Reporting;
 
 public class HtmlReportGeneratorTests
 {
-    private static ConversionResult Result(string fileName, bool success = true, double beginGb = 1, double endGb = 0.5, string? arrStatus = null, string? failureReason = null, ReportErrorCode? errorCode = null, string? postProcessWarning = null, DateTime? startTime = null, DateTime? endTime = null) => new()
+    private static ConversionResult Result(string fileName, bool success = true, double beginGb = 1, double endGb = 0.5, string? arrStatus = null, string? failureReason = null, ReportErrorCode? errorCode = null, string? postProcessWarning = null, DateTime? startTime = null, DateTime? endTime = null, IReadOnlyList<ReportWarningCode>? warningCodes = null) => new()
     {
         LaneId = "lane1",
         FileName = fileName,
@@ -20,6 +20,7 @@ public class HtmlReportGeneratorTests
         FailureReason = failureReason,
         ErrorCode = errorCode,
         PostProcessWarning = postProcessWarning,
+        WarningCodes = warningCodes ?? Array.Empty<ReportWarningCode>(),
         StartTime = startTime ?? DateTime.Now,
         EndTime = endTime ?? DateTime.Now
     };
@@ -318,6 +319,22 @@ public class HtmlReportGeneratorTests
         // read as a full failure: no error-row styling, and the row still says "OK".
         Assert.DoesNotContain("class=\"err\"", html);
         Assert.Contains("<td>OK<br>", html);
+    }
+
+    [Fact]
+    public void Generate_ANumberedWarning_ShowsItsCodeWithAHelpBubble_BesideTheDetail()
+    {
+        var withCodes = Result("a.mkv", success: true, postProcessWarning: "Companion files not moved: Access denied", warningCodes: new[] { ReportWarningCode.CompanionFilesNotMoved, ReportWarningCode.CleanupDeferredRescan });
+        var model = BaseModel(new List<LaneReportSection> { new() { LaneDisplayName = "HD/SD", Results = new[] { withCodes } } });
+
+        var html = new HtmlReportGenerator().Generate(model);
+
+        Assert.Contains("WARN 202</span>", html);
+        Assert.Contains("WARN 204</span>", html);
+        Assert.Contains("class=\"warn-code\" title=\"", html);
+        Assert.Contains(System.Net.WebUtility.HtmlEncode(ReportWarningCode.CompanionFilesNotMoved.Describe()), html);
+        Assert.Contains("Companion files not moved: Access denied", html);      // the specifics stay
+        Assert.DoesNotContain("class=\"err\"", html);
     }
 
     [Fact]

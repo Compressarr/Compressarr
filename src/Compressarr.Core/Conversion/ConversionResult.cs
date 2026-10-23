@@ -64,6 +64,9 @@ public sealed class ConversionResult
     /// "ERROR". Null when nothing went wrong.</summary>
     public string? PostProcessWarning { get; init; }
 
+    /// <summary>The numbered kinds of warning behind PostProcessWarning (see ReportWarningCode), one entry per kind. Empty when there is no warning.</summary>
+    public IReadOnlyList<ReportWarningCode> WarningCodes { get; init; } = Array.Empty<ReportWarningCode>();
+
     /// <summary>The lane the user assigned this file to land in instead (see ResumeEntry.
     /// DestinationLaneId), set only when the file really was routed into that lane's library -
     /// null for every ordinary file. HomeLaneName is the lane it came from (always set), so the

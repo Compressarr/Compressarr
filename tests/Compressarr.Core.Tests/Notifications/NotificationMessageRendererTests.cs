@@ -29,7 +29,7 @@ public class NotificationMessageRendererTests
         }
     };
 
-    private static ConversionResult Result(double beforeGb, double afterGb, bool success, string? warning = null, string fileName = "file.mkv") => new()
+    private static ConversionResult Result(double beforeGb, double afterGb, bool success, string? warning = null, string fileName = "file.mkv", IReadOnlyList<ReportWarningCode>? warningCodes = null) => new()
     {
         LaneId = "lane1",
         FileName = fileName,
@@ -38,7 +38,8 @@ public class NotificationMessageRendererTests
         BeginSizeGb = beforeGb,
         EndSizeGb = afterGb,
         Success = success,
-        PostProcessWarning = warning
+        PostProcessWarning = warning,
+        WarningCodes = warningCodes ?? Array.Empty<ReportWarningCode>()
     };
 
     [Fact]
@@ -206,6 +207,69 @@ public class NotificationMessageRendererTests
         var report = ReportWith(new[] { Result(10, 5, success: true, warning: "companion move failed") });
 
         Assert.Equal("", Body("{error}", report));
+    }
+
+    private static ConversionResult WithWarning(string fileName, params ReportWarningCode[] codes) => Result(10, 5, success: true, warning: "something to note", fileName: fileName, warningCodes: codes);
+
+    [Fact]
+    public void WarningToken_ARunWithNoWarnings_IsNothing_AndItsLineIsLeftOut()
+    {
+        var clean = ReportWith(new[] { Result(10, 5, success: true) });
+
+        Assert.Equal("1 file(s)\nDone", Body("{files} file(s)\nNote: {warning}\nDone", clean));
+        Assert.Equal("Run done", Body("Run done {warning}", clean));
+    }
+
+    [Fact]
+    public void WarningToken_OneWarning_ReadsLikeTheReport_AndSeveralKindsAreCounted()
+    {
+        var one = ReportWith(new[] { WithWarning("a.mkv", ReportWarningCode.MoveSkippedAlreadyExists) });
+        Assert.Equal("Warn 201: Move skipped (already exists)", Body("{warning}", one));
+
+        var several = ReportWith(new[]
+        {
+            WithWarning("a.mkv", ReportWarningCode.CompanionFilesNotMoved),
+            WithWarning("b.mkv", ReportWarningCode.CompanionFilesNotMoved, ReportWarningCode.CleanupDeferredRescan),
+            WithWarning("c.mkv", ReportWarningCode.ArrUnmonitorFailed),
+        });
+        Assert.Equal("Warn 202: Companion files not moved (x2); Warn 203: Arr unmonitor failed (+1 more)", Body("{warning}", several));
+    }
+
+    [Fact]
+    public void WarningToken_AWarningWithNoCode_ReadsSeeTheReport()
+    {
+        var report = ReportWith(new[] { Result(10, 5, success: true, warning: "old style text") });
+
+        Assert.Equal("Warn: see the report", Body("{warning}", report));
+    }
+
+    [Fact]
+    public void WarningToken_AndErrorToken_AreIndependent()
+    {
+        var report = ReportWith(new[] { Failed(ReportErrorCode.EncodeFailed), WithWarning("w.mkv", ReportWarningCode.CleanupDeferredFailed) });
+
+        Assert.Equal("Error 101: Encode failed | Warn 205: Cleanup deferred (cleanup failed)", Body("{error} | {warning}", report));
+        Assert.Equal("Error 101: Encode failed", Body("{error}\nNote: {warning}", ReportWith(new[] { Failed(ReportErrorCode.EncodeFailed) })));
+    }
+
+    [Fact]
+    public void WarningCodes_EachHasALabelAndADescription_InTheirOwnSeries_AndNoBuiltInStyleUsesTheToken()
+    {
+        foreach (var code in Enum.GetValues<ReportWarningCode>())
+        {
+            Assert.InRange((int)code, 201, 299);
+            Assert.NotEqual("Warning", code.ShortLabel());
+            Assert.True(code.ShortLabel().Length <= 40, code.ShortLabel());
+            Assert.NotEqual("An unspecified warning.", code.Describe());
+        }
+
+        Assert.DoesNotContain(Enum.GetValues<ReportWarningCode>(), w => Enum.IsDefined(typeof(ReportErrorCode), (int)w));   // no number is both an error and a warning
+
+        foreach (var (title, body) in NotificationMessagePresets.Templates.Values)
+        {
+            Assert.DoesNotContain("{warning}", title);
+            Assert.DoesNotContain("{warning}", body);
+        }
     }
 
     [Fact]

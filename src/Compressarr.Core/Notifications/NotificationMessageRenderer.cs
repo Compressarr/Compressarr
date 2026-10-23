@@ -19,7 +19,7 @@ public static class NotificationMessageRenderer
         var savedGb = report.TotalBeforeGb - report.TotalAfterGb;
         var savedPct = report.TotalBeforeGb > 0 ? 100 - (report.TotalAfterGb / report.TotalBeforeGb * 100) : 0;
 
-        var result = WithErrorToken(template, ErrorSummary(report));
+        var result = WithOptionalToken(WithOptionalToken(template, ErrorToken, ErrorSummary(report)), WarningToken, WarningSummary(report));
         foreach (var (token, value) in Tokens(outcome, report, reportFilePath, savedGb, savedPct, machineName))
         {
             result = result.Replace(token, value);
@@ -28,48 +28,65 @@ public static class NotificationMessageRenderer
     }
 
     private const string ErrorToken = "{error}";
-    private const int ErrorKindsShown = 2;
+    private const string WarningToken = "{warning}";
+    private const int KindsShown = 2;
+    private const int NoCode = int.MaxValue;
 
     /// <summary>The short text for {error}: every error this run, one entry per kind ("Error 102: File move failure", with " (x3)" when
     /// it happened more than once), in code order, the first two kinds and then "(+N more)". Both a failed file and a lane that could not
     /// run count. A failure that has no numbered code reads "Error: see the report". Empty when the run had no errors.</summary>
     public static string ErrorSummary(ReportModel report)
     {
-        var counts = new SortedDictionary<int, int>();   // code, or int.MaxValue for "no code"
-        void Count(ReportErrorCode? code)
-        {
-            var key = code is { } c ? (int)c : int.MaxValue;
-            counts[key] = counts.GetValueOrDefault(key) + 1;
-        }
-
+        var counts = new SortedDictionary<int, int>();
         foreach (var lane in report.Lanes)
         {
-            foreach (var problem in lane.LaneProblems) Count(problem);
-            foreach (var result in lane.Results.Where(r => !r.Success)) Count(result.ErrorCode);
+            foreach (var problem in lane.LaneProblems) Count(counts, (int)problem);
+            foreach (var result in lane.Results.Where(r => !r.Success)) Count(counts, result.ErrorCode is { } code ? (int)code : NoCode);
         }
 
+        return Summarize(counts, "Error", n => ((ReportErrorCode)n).ShortLabel());
+    }
+
+    /// <summary>The short text for {warning}, built the same way as ErrorSummary from the warnings of the files that succeeded
+    /// ("Warn 201: Move skipped (already exists)"); a warning with no numbered code reads "Warn: see the report". Empty when there are none.</summary>
+    public static string WarningSummary(ReportModel report)
+    {
+        var counts = new SortedDictionary<int, int>();
+        foreach (var result in report.Lanes.SelectMany(l => l.Results).Where(r => r.Success && !string.IsNullOrEmpty(r.PostProcessWarning)))
+        {
+            if (result.WarningCodes.Count == 0) Count(counts, NoCode);
+            foreach (var code in result.WarningCodes) Count(counts, (int)code);
+        }
+
+        return Summarize(counts, "Warn", n => ((ReportWarningCode)n).ShortLabel());
+    }
+
+    private static void Count(SortedDictionary<int, int> counts, int key) => counts[key] = counts.GetValueOrDefault(key) + 1;
+
+    private static string Summarize(SortedDictionary<int, int> counts, string word, Func<int, string> label)
+    {
         if (counts.Count == 0) return "";
 
-        var parts = counts.Take(ErrorKindsShown).Select(kv =>
+        var parts = counts.Take(KindsShown).Select(kv =>
         {
-            var text = kv.Key == int.MaxValue ? "Error: see the report" : $"Error {kv.Key}: {((ReportErrorCode)kv.Key).ShortLabel()}";
+            var text = kv.Key == NoCode ? $"{word}: see the report" : $"{word} {kv.Key}: {label(kv.Key)}";
             return kv.Value > 1 ? $"{text} (x{kv.Value})" : text;
         });
         var summary = string.Join("; ", parts);
-        return counts.Count > ErrorKindsShown ? $"{summary} (+{counts.Count - ErrorKindsShown} more)" : summary;
+        return counts.Count > KindsShown ? $"{summary} (+{counts.Count - KindsShown} more)" : summary;
     }
 
-    /// <summary>Puts the error text into {error}. With no errors the token is nothing: in a template of several lines the whole line it is on
-    /// is left out (so "Problem: {error}" leaves no dangling "Problem:"), and in a one-line template (a title, a short body) the token is
-    /// simply removed, so the message is never emptied entirely.</summary>
-    private static string WithErrorToken(string template, string errorText)
+    /// <summary>Puts the text into a token such as {error}. With nothing to say the token is nothing: in a template of several lines the whole
+    /// line it is on is left out (so "Problem: {error}" leaves no dangling "Problem:"), and in a one-line template (a title, a short body) the
+    /// token is simply removed, so the message is never emptied entirely.</summary>
+    private static string WithOptionalToken(string template, string token, string text)
     {
-        if (!template.Contains(ErrorToken, StringComparison.Ordinal)) return template;
-        if (errorText.Length > 0) return template.Replace(ErrorToken, errorText);
+        if (!template.Contains(token, StringComparison.Ordinal)) return template;
+        if (text.Length > 0) return template.Replace(token, text);
 
-        if (!template.Contains('\n')) return template.Replace(ErrorToken, "").Trim();
+        if (!template.Contains('\n')) return template.Replace(token, "").Trim();
 
-        return string.Join('\n', template.Split('\n').Where(line => !line.Contains(ErrorToken, StringComparison.Ordinal)));
+        return string.Join('\n', template.Split('\n').Where(line => !line.Contains(token, StringComparison.Ordinal)));
     }
 
     private static IEnumerable<(string Token, string Value)> Tokens(

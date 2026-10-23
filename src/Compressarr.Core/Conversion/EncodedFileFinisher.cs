@@ -37,6 +37,7 @@ internal sealed record FinishOutcome(
     string? FailureReason,
     ReportErrorCode? ErrorCode,
     string? PostProcessWarning,
+    IReadOnlyList<ReportWarningCode> WarningCodes,
     LaneConfig? RedirectedTo);
 
 /// <summary>
@@ -99,6 +100,12 @@ internal sealed class EncodedFileFinisher
         string? failureReason = null;
         ReportErrorCode? errorCode = null;
         string? postProcessWarning = null;
+        var warningCodes = new List<ReportWarningCode>();
+        void AddWarning(ReportWarningCode code, string text)
+        {
+            postProcessWarning = AppendWarning(postProcessWarning, text);
+            if (!warningCodes.Contains(code)) warningCodes.Add(code);
+        }
 
         _metadata.ClearTitle(tempFileName);
         endSizeGb = Math.Round(new FileInfo(tempFileName).Length / (double)BytesPerGb, 3);
@@ -129,7 +136,7 @@ internal sealed class EncodedFileFinisher
             }
             catch (DestinationCollisionSkippedException ex)
             {
-                postProcessWarning = AppendWarning(postProcessWarning, ex.Message);
+                AddWarning(ReportWarningCode.MoveSkippedAlreadyExists, ex.Message);
                 _logger.Log($"  {ex.Message}");
                 return null;
             }
@@ -163,7 +170,7 @@ internal sealed class EncodedFileFinisher
             // this entry again, so it needs its clean resting name now too (or, if Output ALSO
             // has a real collision on that name, RestInPlace falls back to leaving it under
             // tempFileName rather than clobbering whatever's already there).
-            postProcessWarning = AppendWarning(postProcessWarning, ex.Message);
+            AddWarning(ReportWarningCode.MoveSkippedAlreadyExists, ex.Message);
             _logger.Log($"  {ex.Message}");
             currentPath = RestInPlace(tempFileName, destFolder) ?? tempFileName;
         }
@@ -264,7 +271,7 @@ internal sealed class EncodedFileFinisher
                 // deleted/recycled. A real data-loss edge case found via code review, not live.
                 companionMoveFailed = true;
                 _logger.Log($"  Companion file handling skipped: {ex.Message}", LogSeverity.Error);
-                postProcessWarning = AppendWarning(postProcessWarning, $"Companion files not moved: {ex.Message}");
+                AddWarning(ReportWarningCode.CompanionFilesNotMoved, $"Companion files not moved: {ex.Message}");
             }
         }
 
@@ -285,12 +292,12 @@ internal sealed class EncodedFileFinisher
             if (rescan.FailureMessage is not null)
             {
                 arrStatus = $"Failed: {rescan.FailureMessage}";
-                postProcessWarning = AppendWarning(postProcessWarning, $"Sonarr/Radarr unmonitor failed: {rescan.FailureMessage}");
+                AddWarning(ReportWarningCode.ArrUnmonitorFailed, $"Sonarr/Radarr unmonitor failed: {rescan.FailureMessage}");
             }
             else
             {
                 if (rescan.Message is not null) arrStatus = rescan.Message;
-                if (!rescan.Safe) postProcessWarning = AppendWarning(postProcessWarning, "Source folder cleanup deferred until the next pass (rescan not confirmed complete)");
+                if (!rescan.Safe) AddWarning(ReportWarningCode.CleanupDeferredRescan, "Source folder cleanup deferred until the next pass (rescan not confirmed complete)");
             }
         }
 
@@ -319,7 +326,7 @@ internal sealed class EncodedFileFinisher
                 // the sibling !arrCleanupSafe branch above, this didn't append a
                 // PostProcessWarning - the report could show a plain, unqualified "OK" for a
                 // file whose folder cleanup actually failed and is still pending retry.
-                postProcessWarning = AppendWarning(postProcessWarning, $"Source folder cleanup deferred: {cleanupError}");
+                AddWarning(ReportWarningCode.CleanupDeferredFailed, $"Source folder cleanup deferred: {cleanupError}");
                 cleanupFailed = true;
             }
         }
@@ -361,6 +368,6 @@ internal sealed class EncodedFileFinisher
             ResumeKeeping.MarkCompleted(resumeEntry, config.Processing.DeleteAfterConvert);
         }
 
-        return new FinishOutcome(endSizeGb, arrStatus, finalFileName ?? newFileName, moveFailed, diskFull, failureReason, errorCode, postProcessWarning, redirectedTo);
+        return new FinishOutcome(endSizeGb, arrStatus, finalFileName ?? newFileName, moveFailed, diskFull, failureReason, errorCode, postProcessWarning, warningCodes, redirectedTo);
     }
 }
