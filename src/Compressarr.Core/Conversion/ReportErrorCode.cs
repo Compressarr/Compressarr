@@ -82,6 +82,26 @@ public enum ReportErrorCode
 
 public static class ReportErrorCodeExtensions
 {
+    /// <summary>A few words for a notification's {error} token ("File move failure"), unlike Describe's full sentence for the report's help-bubble.</summary>
+    public static string ShortLabel(this ReportErrorCode code) => code switch
+    {
+        ReportErrorCode.EncodeFailed => "Encode failed",
+        ReportErrorCode.MoveDestinationUnavailable => "File move failure",
+        ReportErrorCode.MoveDiskFull => "Destination disk full",
+        ReportErrorCode.MoveFailedOther => "File move failure (other)",
+        ReportErrorCode.NoPresetConfigured => "No preset set",
+        ReportErrorCode.LaneNoPresetConfigured => "Lane skipped (no preset)",
+        ReportErrorCode.LaneNoOutputConfigured => "Lane skipped (no output folder)",
+        ReportErrorCode.LaneTvPresetNotFound => "TV preset not found",
+        ReportErrorCode.LaneMoviePresetNotFound => "Movie preset not found",
+        ReportErrorCode.FileBotPathNotFound => "FileBot not found",
+        ReportErrorCode.EncodedLengthMismatch => "Encoded length mismatch",
+        ReportErrorCode.DynamicHdrNeedsHandBrake => "Dolby Vision needs HandBrake",
+        ReportErrorCode.LaneEncoderNotAvailable => "Encoder not found",
+        ReportErrorCode.ProfileCannotKeepHdr => "HDR would be lost",
+        _ => "Error",
+    };
+
     /// <summary>The full sentence shown in the report's help-bubble for this code - HTML-encoded by
     /// the caller along with everything else, not here.</summary>
     public static string Describe(this ReportErrorCode code) => code switch

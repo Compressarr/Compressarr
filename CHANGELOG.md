@@ -9,6 +9,11 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
+## [Unreleased]
+
+### Added
+- **An `{error}` token for Custom notification messages.** A Custom message template (Notifications > Message Format) can now include `{error}`: a few words about what went wrong in the run, such as `Error 102: File move failure`. The same error on several files adds a count (`Error 102: File move failure (x3)`), and several kinds show the first two and then "(+N more)". A lane that could not run counts too, and a failure with no numbered code reads `Error: see the report`. When the run had no errors the token is nothing at all, and in a template of several lines the whole line it is on is left out, so `Problem: {error}` leaves no dangling "Problem:". The built-in styles are unchanged.
+
 ## [2.2.0-rc.2] - 2026-10-22
 
 > [!NOTE]

@@ -135,6 +135,104 @@ public class NotificationMessageRendererTests
         Assert.Equal("a.mkv\nb.mkv", rendered);
     }
 
+    private static ReportModel ReportWith(IEnumerable<ConversionResult> results, params ReportErrorCode[] laneProblems) => new()
+    {
+        GeneratedAt = new DateTime(2026, 9, 11),
+        RunTime = TimeSpan.Zero,
+        Lanes = new[] { new LaneReportSection { LaneDisplayName = "Movies", Results = results.ToList(), LaneProblems = laneProblems } }
+    };
+
+    private static ConversionResult Failed(ReportErrorCode? code, string fileName = "f.mkv") => new()
+    {
+        LaneId = "lane1", FileName = fileName, FullName = @"C:\" + fileName, ContentType = "movie", BeginSizeGb = 1, EndSizeGb = 0, Success = false, ErrorCode = code
+    };
+
+    private static string Body(string template, ReportModel report) => NotificationMessageRenderer.Render(template, NotificationOutcome.Error, report, "");
+
+    [Fact]
+    public void ErrorToken_ARunWithNoErrors_IsNothing_AndItsLineIsLeftOut()
+    {
+        var clean = ReportWith(new[] { Result(10, 5, success: true) });
+
+        Assert.Equal("1 file(s)\nDone", Body("{files} file(s)\nProblem: {error}\nDone", clean));
+        Assert.Equal("1 file(s)", Body("{files} file(s)\n{error}", clean));
+    }
+
+    [Fact]
+    public void ErrorToken_AOneLineTemplate_JustLosesTheToken_SoTheMessageIsNeverEmptied()
+    {
+        var clean = ReportWith(new[] { Result(10, 5, success: true) });
+
+        Assert.Equal("Run done", Body("Run done {error}", clean));
+        Assert.Equal("", Body("{error}", clean));
+    }
+
+    [Fact]
+    public void ErrorToken_OneError_ReadsLikeTheReport()
+    {
+        var report = ReportWith(new[] { Failed(ReportErrorCode.MoveDestinationUnavailable) });
+
+        Assert.Equal("Error 102: File move failure", Body("{error}", report));
+        Assert.Equal("Problem: Error 102: File move failure", Body("Problem: {error}", report));
+    }
+
+    [Fact]
+    public void ErrorToken_TheSameErrorOnSeveralFiles_AddsACount()
+    {
+        var report = ReportWith(new[] { Failed(ReportErrorCode.MoveDestinationUnavailable, "a.mkv"), Failed(ReportErrorCode.MoveDestinationUnavailable, "b.mkv"), Failed(ReportErrorCode.MoveDestinationUnavailable, "c.mkv") });
+
+        Assert.Equal("Error 102: File move failure (x3)", Body("{error}", report));
+    }
+
+    [Fact]
+    public void ErrorToken_SeveralKinds_ShowTheFirstTwoInCodeOrder_ThenHowManyMore()
+    {
+        var report = ReportWith(new[] { Failed(ReportErrorCode.MoveDestinationUnavailable), Failed(ReportErrorCode.EncodeFailed), Failed(ReportErrorCode.ProfileCannotKeepHdr), Failed(null) });
+
+        Assert.Equal("Error 101: Encode failed; Error 102: File move failure (+2 more)", Body("{error}", report));
+        Assert.Equal("Error 101: Encode failed; Error 102: File move failure", Body("{error}", ReportWith(new[] { Failed(ReportErrorCode.MoveDestinationUnavailable), Failed(ReportErrorCode.EncodeFailed) })));
+    }
+
+    [Fact]
+    public void ErrorToken_AFailureWithNoCode_AndALaneThatCouldNotRun_AreBothCounted()
+    {
+        Assert.Equal("Error: see the report", Body("{error}", ReportWith(new[] { Failed(null) })));
+        Assert.Equal("Error 113: Encoder not found", Body("{error}", ReportWith(Array.Empty<ConversionResult>(), ReportErrorCode.LaneEncoderNotAvailable)));
+    }
+
+    [Fact]
+    public void ErrorToken_ASuccessfulFileWithAWarning_IsNotAnError()
+    {
+        var report = ReportWith(new[] { Result(10, 5, success: true, warning: "companion move failed") });
+
+        Assert.Equal("", Body("{error}", report));
+    }
+
+    [Fact]
+    public void ErrorToken_IsNotTheErrorCountToken()
+    {
+        var report = ReportWith(new[] { Failed(ReportErrorCode.EncodeFailed) });
+
+        Assert.Equal("1 / Error 101: Encode failed", Body("{error_count} / {error}", report));
+    }
+
+    [Fact]
+    public void ErrorToken_EveryCodeHasAShortLabel_AndNoBuiltInStyleUsesTheToken()
+    {
+        foreach (var code in Enum.GetValues<ReportErrorCode>())
+        {
+            var label = code.ShortLabel();
+            Assert.NotEqual("Error", label);
+            Assert.True(label.Length <= 32, label);
+        }
+
+        foreach (var (title, body) in NotificationMessagePresets.Templates.Values)
+        {
+            Assert.DoesNotContain("{error}", title);
+            Assert.DoesNotContain("{error}", body);
+        }
+    }
+
     [Fact]
     public void Render_FileListToken_NotReferencedByAnyBuiltInPreset()
     {

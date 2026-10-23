@@ -71,7 +71,8 @@ const PREVIEW_SAMPLE = {
   error_count: '0', warning_count: '1', retries_succeeded: '2',
   report_path: 'C:\\Compressarr\\Reports\\Compressarr_2026-09-11_Report.html',
   today_files: '15', today_saved_gb: '10.1', month_files: '212', month_saved_gb: '143.8',
-  year_files: '1904', year_saved_gb: '1207.5'
+  year_files: '1904', year_saved_gb: '1207.5',
+  error: 'Error 102: File move failure'   // on a clean run the real token is empty and its line is left out
 };
 
 // The computer's own name, fetched once, used only to pre-fill an empty Machine name field when the

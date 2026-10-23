@@ -1,3 +1,4 @@
+using Compressarr.Core.Conversion;
 using Compressarr.Core.Reporting;
 
 namespace Compressarr.Core.Notifications;
@@ -18,12 +19,57 @@ public static class NotificationMessageRenderer
         var savedGb = report.TotalBeforeGb - report.TotalAfterGb;
         var savedPct = report.TotalBeforeGb > 0 ? 100 - (report.TotalAfterGb / report.TotalBeforeGb * 100) : 0;
 
-        var result = template;
+        var result = WithErrorToken(template, ErrorSummary(report));
         foreach (var (token, value) in Tokens(outcome, report, reportFilePath, savedGb, savedPct, machineName))
         {
             result = result.Replace(token, value);
         }
         return result;
+    }
+
+    private const string ErrorToken = "{error}";
+    private const int ErrorKindsShown = 2;
+
+    /// <summary>The short text for {error}: every error this run, one entry per kind ("Error 102: File move failure", with " (x3)" when
+    /// it happened more than once), in code order, the first two kinds and then "(+N more)". Both a failed file and a lane that could not
+    /// run count. A failure that has no numbered code reads "Error: see the report". Empty when the run had no errors.</summary>
+    public static string ErrorSummary(ReportModel report)
+    {
+        var counts = new SortedDictionary<int, int>();   // code, or int.MaxValue for "no code"
+        void Count(ReportErrorCode? code)
+        {
+            var key = code is { } c ? (int)c : int.MaxValue;
+            counts[key] = counts.GetValueOrDefault(key) + 1;
+        }
+
+        foreach (var lane in report.Lanes)
+        {
+            foreach (var problem in lane.LaneProblems) Count(problem);
+            foreach (var result in lane.Results.Where(r => !r.Success)) Count(result.ErrorCode);
+        }
+
+        if (counts.Count == 0) return "";
+
+        var parts = counts.Take(ErrorKindsShown).Select(kv =>
+        {
+            var text = kv.Key == int.MaxValue ? "Error: see the report" : $"Error {kv.Key}: {((ReportErrorCode)kv.Key).ShortLabel()}";
+            return kv.Value > 1 ? $"{text} (x{kv.Value})" : text;
+        });
+        var summary = string.Join("; ", parts);
+        return counts.Count > ErrorKindsShown ? $"{summary} (+{counts.Count - ErrorKindsShown} more)" : summary;
+    }
+
+    /// <summary>Puts the error text into {error}. With no errors the token is nothing: in a template of several lines the whole line it is on
+    /// is left out (so "Problem: {error}" leaves no dangling "Problem:"), and in a one-line template (a title, a short body) the token is
+    /// simply removed, so the message is never emptied entirely.</summary>
+    private static string WithErrorToken(string template, string errorText)
+    {
+        if (!template.Contains(ErrorToken, StringComparison.Ordinal)) return template;
+        if (errorText.Length > 0) return template.Replace(ErrorToken, errorText);
+
+        if (!template.Contains('\n')) return template.Replace(ErrorToken, "").Trim();
+
+        return string.Join('\n', template.Split('\n').Where(line => !line.Contains(ErrorToken, StringComparison.Ordinal)));
     }
 
     private static IEnumerable<(string Token, string Value)> Tokens(
