@@ -14,6 +14,10 @@
 ;     ISCC.exe /DFULL installer\Compressarr.iss
 ;     -> publish\Compressarr-Setup-{version}-Full.exe
 ;
+; Release builds also pass /DSIGNED and /Sazsign="..." so the uninstaller is signed, and sign EVERY .exe/.dll of
+; the publish folder (ours and the bundled third-party ones) before this runs: Smart App Control refuses any
+; unsigned binary a process loads, the app's own Compressarr.*.dll included.
+;
 ; The Full variant was dropped entirely as of 2.1.1 (2026-09-05) after Windows Defender's live
 ; cloud/SmartScreen reputation classifier (Program:Win32/Contebrew.A!ml) flagged a real download -
 ; a live heuristic VirusTotal's static engine never reproduced (it scanned the identical file 0/68
@@ -62,6 +66,13 @@ OutputDir=..\publish
 OutputBaseFilename=Compressarr-Setup-{#MyAppVersion}{#VariantSuffix}
 SetupIconFile=..\src\Compressarr.Desktop\Assets\CompressarrIcon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
+#ifdef SIGNED
+; The uninstaller (unins000.exe) is generated from the setup program while it compiles, so signing the finished
+; setup afterwards never reaches it - and Smart App Control blocks an unsigned unins000.exe. With /DSIGNED and
+; ISCC's /Sazsign="<sign command> $f" (see the release build script), ISCC signs it, and the setup, itself.
+SignedUninstaller=yes
+SignTool=azsign
+#endif
 ; Uncompressed: LZMA2's compressed/embedded-payload structure is what triggered a Microsoft
 ; Defender false positive (Trojan:Win32/Wacatac.B!ml) on the notification feature's otherwise
 ; completely benign HttpClient code - confirmed via a controlled A/B (identical payload, only the

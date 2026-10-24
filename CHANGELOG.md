@@ -26,6 +26,9 @@ for that full history.
 ### Changed
 - **Purge Logs & Reports no longer deletes the run history.** It is disk cleanup: it permanently deletes every log and every HTML report, and leaves `Compressarr_History.csv` alone (the History page keeps all its numbers; only the report links stop working). It used to remove the history as well. **Clear History** and **Clear All** still delete it. The button's confirmation and help text say so.
 
+### Fixed
+- **Smart App Control (Windows 11) no longer blocks Compressarr.** Only the main program and the installer were signed, so Smart App Control refused to load the unsigned files next to it (`Compressarr.Desktop.dll` and the other Compressarr and Avalonia libraries) and Compressarr would not start; it also refused the unsigned uninstaller the installer generates. Every program file in the installer (ours and the bundled third-party ones) and the uninstaller are now signed. The ffmpeg that the Encoder page downloads is a third-party build that is not signed, so Smart App Control can still block ffmpeg lanes (HandBrake lanes are fine).
+
 ## [2.2.0-rc.2] - 2026-10-22
 
 > [!NOTE]
