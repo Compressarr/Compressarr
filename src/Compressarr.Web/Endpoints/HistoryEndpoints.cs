@@ -36,8 +36,9 @@ public static class HistoryEndpoints
 
         // Every run that produced results, oldest first, for the Overview's stat cards and charts - one compact array per run so a long
         // history stays small: [year, month, day, beforeGb, afterGb, files, seconds, runNumber, errors, warnings, redirected, movies|null,
-        // tv|null, reportFile|null]. A null movies/tv means the run's split is unknown. reportFile is only filled for the most recent runs
-        // (the ones the page can link to) and only when the report still exists. The same "every file failed, nothing produced" rows the
+        // tv|null, reportFile|null, endMinute|null]. A null movies/tv means the run's split is unknown. reportFile is only filled for the
+        // most recent runs (the ones the page can link to) and only when the report still exists. endMinute is the minute of the day the
+        // run ended (see EndMinuteOfDay), for the Today chart's three-hour blocks. The same "every file failed, nothing produced" rows the
         // period totals skip are left out here too, so the cards and the table always agree. today is the server's date, which the
         // period windows (Today, Last 7 days...) are measured from - the same windows /api/history uses.
         app.MapGet("/api/history/runs", (
@@ -61,10 +62,12 @@ public static class HistoryEndpoints
                 r.ProcessHours * 3600 + r.ProcessMinutes * 60 + r.ProcessSeconds,
                 r.RunNumber, r.ErrorCount, r.WarningCount, r.RedirectCount,
                 r.MovieCount, r.TvCount,
-                i >= firstLinkable && !string.IsNullOrEmpty(r.ReportFileName) && File.Exists(Path.Combine(reportPath, r.ReportFileName)) ? r.ReportFileName : null
+                i >= firstLinkable && !string.IsNullOrEmpty(r.ReportFileName) && File.Exists(Path.Combine(reportPath, r.ReportFileName)) ? r.ReportFileName : null,
+                EndMinuteOfDay(r)
             }).ToList();
 
-            return Results.Json(new { today = DateTime.Now.ToString("yyyy-MM-dd"), runs = rows });
+            var now = DateTime.Now;
+            return Results.Json(new { today = now.ToString("yyyy-MM-dd"), now = now.ToString("yyyy-MM-dd'T'HH:mm"), runs = rows });
         });
 
         app.MapGet("/api/history/reports", (
@@ -138,5 +141,18 @@ public static class HistoryEndpoints
 
             return File.Exists(fullPath) ? Results.File(fullPath, "text/html") : Results.NotFound();
         });
+    }
+
+    // The history file keeps only the day a run ENDED, but a run's report is named for the moment it STARTED
+    // ("Compressarr_2026-10-24_07-09-21_Report.html"), so its end is that moment plus its encoding time. Minutes after midnight, in the
+    // server's clock; null for a run with no report name (older rows), which the hourly chart then leaves out rather than guess.
+    private static int? EndMinuteOfDay(RunHistoryRecord run)
+    {
+        var name = run.ReportFileName;
+        if (string.IsNullOrEmpty(name) || !name.StartsWith("Compressarr_", StringComparison.Ordinal) || name.Length < 12 + 19) return null;
+        if (!DateTime.TryParseExact(name.AsSpan(12, 19), "yyyy-MM-dd_HH-mm-ss", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var start)) return null;
+        var end = start.AddSeconds(run.ProcessHours * 3600 + run.ProcessMinutes * 60 + run.ProcessSeconds);
+        return (int)end.TimeOfDay.TotalMinutes;
     }
 }

@@ -85,6 +85,27 @@ public class HistoryRunsEndpointTests
     }
 
     [Fact]
+    public async Task ARunsEndMinute_IsItsReportsStartPlusItsEncodingTime_AndNullWhenThereIsNoTimestampToReadItFrom()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        File.WriteAllLines(AppPaths.GetHistoryFilePath(), new[]
+        {
+            Header,
+            "2026,10,24,3,1,2,0,23,0,1,Compressarr_2026-10-24_07-09-21_Report.html,0,0,0,0,2",   // starts 07:09:21, 23 minutes -> ends 07:32
+            "2026,10,24,3,1,1,1,30,0,2,Compressarr_2026-10-23_23-00-00_Report.html,0,0,0,0,1",   // starts before midnight, ends 00:30 the next day
+            "2026,10,24,3,1,1,0,5,0,3,r3.html,0,0,0,,"                                           // not a timestamped name: unknown
+        });
+
+        var body = await Runs(host);
+        var runs = body["runs"]!.AsArray();
+
+        Assert.Equal(7 * 60 + 32, runs[0]![14]!.GetValue<int>());
+        Assert.Equal(30, runs[1]![14]!.GetValue<int>());
+        Assert.Null(runs[2]![14]);
+        Assert.Matches(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$", body["now"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task TheRollupsCarryTheSplitToo_SoTheTableAndTheCardsAgree()
     {
         await using var host = await QueueHost.StartAsync(Lane1);

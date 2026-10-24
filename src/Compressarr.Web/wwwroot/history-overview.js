@@ -17,6 +17,7 @@ const OV_TEAL = '#1aa6a6';     // TV, on the Movies vs TV card only
 
 let ovRuns = [];          // oldest first
 let ovToday = 0;          // the server's date, as UTC milliseconds
+let ovNow = 0;            // the server's date and time, the same way
 let ovRollups = null;
 let ovChosen = null;
 let ovPeriod = 'all';
@@ -78,6 +79,27 @@ function ovContext(period) {
   return { p: period, rs, tot: ovSum(rs), buckets };
 }
 
+// Today's run count is drawn as the last 24 hours in eight three-hour blocks (12-3 AM, 3-6 AM ...), the last one being the block that
+// is running now. A run belongs to the block its END falls in, the same end that decides which day it counts for. The blocks reach back
+// into yesterday, so they can add up to more than the Today total. A run with no known time (older rows) is left out of the blocks.
+const OV_HOUR = 3600000;
+const ovClock = h => (h % 12 || 12);
+const ovAmPm = h => (h % 24 < 12 ? 'AM' : 'PM');
+function ovBlockName(start) {
+  const h0 = new Date(start).getUTCHours(), h1 = h0 + 3;
+  const span = ovAmPm(h0) === ovAmPm(h1) ? `${ovClock(h0)}-${ovClock(h1)} ${ovAmPm(h0)}` : `${ovClock(h0)} ${ovAmPm(h0)}-${ovClock(h1)} ${ovAmPm(h1)}`;
+  return start >= ovToday ? span : ovDayName(start) + ', ' + span;
+}
+function ovHourBlocks() {
+  const nowStart = Math.floor(ovNow / (3 * OV_HOUR)) * 3 * OV_HOUR;
+  const blocks = [];
+  for (let i = 7; i >= 0; i--) {
+    const start = nowStart - i * 3 * OV_HOUR;
+    blocks.push({ name: ovBlockName(start) + (i === 0 ? ' (so far)' : ''), runs: ovRuns.filter(r => r.end !== null && r.end >= start && r.end < start + 3 * OV_HOUR).length });
+  }
+  return blocks;
+}
+
 // ---- little graphics -------------------------------------------------------------------------------------------------------------------
 const ovIcon = p => `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const OV_ICONS = {
@@ -93,10 +115,11 @@ const OV_ICONS = {
   split: '<rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect><polyline points="17 2 12 7 7 2"></polyline>',
   redir: '<polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>'
 };
-function ovBars(vals, hi, color, names) {
+function ovBars(vals, hi, color, names, show = v => +v.toFixed(2)) {
   const m = Math.max(...vals, 0.0001);
-  return `<div class="ov-mb" style="--c:${color}">${vals.map((v, i) => `<i class="${i === hi ? 'hi' : ''}" style="height:${Math.max(6, Math.round(v / m * 100))}%" title="${names ? names[i] + ': ' : ''}${+v.toFixed(2)}"></i>`).join('')}</div>`;
+  return `<div class="ov-mb" style="--c:${color}">${vals.map((v, i) => `<i class="${i === hi ? 'hi' : ''}" style="height:${Math.max(6, Math.round(v / m * 100))}%" title="${names ? names[i] + ': ' : ''}${show(v)}"></i>`).join('')}</div>`;
 }
+const ovRunBars = blocks => ovBars(blocks.map(b => b.runs), blocks.length - 1, 'var(--accent)', blocks.map(b => b.name), n => n + (n === 1 ? ' run' : ' runs'));
 const ovBucketBars = (c, key, color) => ovBars(c.buckets.map(b => b[key]), c.buckets.length - 1, color, c.buckets.map(b => b.name));
 function ovSeg(parts) {
   return `<div class="ov-seg">${parts.map(p => `<i style="flex:${Math.max(p.v, 0.0001)};background:${p.c}" title="${p.t || ''}"></i>`).join('')}</div>`;
@@ -106,7 +129,9 @@ const ovDots = arr => `<div class="ov-dots">${arr.map(a => `<i class="${a ? 'on'
 // ---- the stats: the five defaults first, then the ones the Stats button adds ----------------------------------------------------------------
 const OV_CARDS = [
   { id: 'runs', def: true, icon: 'runs', label: 'Total Runs', make: c => ({
-      value: ovN(c.rs.length), sub: c.p === 'all' && ovRuns.length ? 'latest is run #' + ovRuns[ovRuns.length - 1].n : 'runs in this period', viz: ovBucketBars(c, 'runs', 'var(--accent)') }) },
+      value: ovN(c.rs.length),
+      sub: c.p === 'all' && ovRuns.length ? 'latest is run #' + ovRuns[ovRuns.length - 1].n : c.p === 'today' ? 'runs today &middot; chart: last 24 hours' : 'runs in this period',
+      viz: c.p === 'today' ? ovRunBars(ovHourBlocks()) : ovBucketBars(c, 'runs', 'var(--accent)') }) },
   { id: 'files', def: true, icon: 'files', label: 'Files Compressed', make: c => ({
       value: ovN(c.tot.f),
       sub: c.tot.mv + c.tot.tv === 0 && c.tot.f ? 'movies and TV are counted separately from now on'
@@ -306,7 +331,10 @@ async function loadOverview() {
     ovRollups = history;
     const [ty, tm, td] = runs.today.split('-').map(Number);
     ovToday = Date.UTC(ty, tm - 1, td);
-    ovRuns = runs.runs.map(([y, m, d, b, a, f, s, n, e, w, r, mv, tv, report]) => ({ y, m, d, b, a, f, s, n, e, w, r, mv, tv, report, t: Date.UTC(y, m - 1, d), v: b - a }));
+    const [nowDate, nowTime = '23:59'] = (runs.now || runs.today).split('T'), [ny, nm, nd] = nowDate.split('-').map(Number), [nh, nmin] = nowTime.split(':').map(Number);
+    ovNow = Date.UTC(ny, nm - 1, nd, nh, nmin);   // the server's wall clock, as milliseconds, like every other date here
+    ovRuns = runs.runs.map(([y, m, d, b, a, f, s, n, e, w, r, mv, tv, report, endMinute]) => ({ y, m, d, b, a, f, s, n, e, w, r, mv, tv, report, t: Date.UTC(y, m - 1, d), v: b - a,
+      end: endMinute === null || endMinute === undefined ? null : Date.UTC(y, m - 1, d) + endMinute * 60000 }));
   } catch {
     ovRuns = [];   // the page still shows what it can; the next load tries again
   }
