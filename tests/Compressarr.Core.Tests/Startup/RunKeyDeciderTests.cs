@@ -18,9 +18,24 @@ public class RunKeyDeciderTests
     [Fact]
     public void SettingOn_AnEntryThatStillWorks_IsLeftAlone_EvenWhenRunFromAnotherCopy()
     {
-        // A build run from source must not repoint the installed copy's login entry.
+        // A build run from source must not repoint the installed copy's login entry (nor add the flag to it).
         Assert.Equal(RunKeyAction.None, RunKeyDecider.Decide(true, $"\"{Installed}\"", DevBuild, Exists));
-        Assert.Equal(RunKeyAction.None, RunKeyDecider.Decide(true, $"\"{Installed}\"", Installed, Exists));
+        Assert.Equal(RunKeyAction.None, RunKeyDecider.Decide(true, RunKeyDecider.EntryFor(Installed), DevBuild, Exists));
+        Assert.Equal(RunKeyAction.None, RunKeyDecider.Decide(true, RunKeyDecider.EntryFor(Installed), Installed, Exists));
+    }
+
+    [Fact]
+    public void TheEntryPassesTheAutostartFlag_SoALoginStartCanBeToldFromTheUserOpeningTheApp()
+    {
+        Assert.Equal($"\"{Installed}\" --autostart", RunKeyDecider.EntryFor(Installed));
+    }
+
+    [Fact]
+    public void AnEntryFromBeforeTheFlag_ForThisExe_IsBroughtUpToDate_OncePerInstall()
+    {
+        Assert.Equal(RunKeyAction.Set, RunKeyDecider.Decide(true, $"\"{Installed}\"", Installed, Exists));
+        Assert.Equal(RunKeyAction.Set, RunKeyDecider.Decide(true, Installed, Installed, Exists));                     // an older, unquoted entry
+        Assert.Equal(RunKeyAction.None, RunKeyDecider.Decide(true, $"\"{Installed}\" --AUTOSTART", Installed, Exists)); // already has it
     }
 
     [Fact]

@@ -1,0 +1,32 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Compressarr.Desktop.Views.SplashWindow"
+        Title="Compressarr"
+        Width="440" Height="280"
+        CanResize="False"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowDecorations="None"
+        WindowStartupLocation="CenterScreen"
+        Background="Transparent"
+        TransparencyLevelHint="Transparent"
+        Icon="/Assets/CompressarrIcon.ico">
+    <!-- The start-up splash: shown first thing when the user opens Compressarr, closed just before the Monitor opens. Margin leaves
+         room for the soft shadow around the card; the window itself is transparent. -->
+    <Border Margin="12" CornerRadius="18" BorderThickness="1" BorderBrush="#3B4478" BoxShadow="0 8 28 0 #70000000">
+        <Border.Background>
+            <LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+                <GradientStop Offset="0" Color="#1B2140" />
+                <GradientStop Offset="1" Color="#2C3563" />
+            </LinearGradientBrush>
+        </Border.Background>
+        <StackPanel Orientation="Vertical" Spacing="6" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Image Source="/Assets/CompressarrLogo.png" Width="84" Height="84" HorizontalAlignment="Center" />
+            <TextBlock Text="Compressarr" FontSize="28" FontWeight="SemiBold" Foreground="White" HorizontalAlignment="Center" Margin="0,6,0,0" />
+            <TextBlock x:Name="VersionText" Text="" FontSize="12" Foreground="#A9B3DD" HorizontalAlignment="Center" />
+            <ProgressBar IsIndeterminate="True" Width="230" Height="4" MinHeight="4" Margin="0,18,0,0"
+                         Foreground="#7C9BFF" Background="#2F3868" CornerRadius="2" HorizontalAlignment="Center" />
+            <TextBlock x:Name="StatusText" Text="Starting..." FontSize="12" Foreground="#C9D1F3" HorizontalAlignment="Center" Margin="0,4,0,0" />
+        </StackPanel>
+    </Border>
+</Window>
