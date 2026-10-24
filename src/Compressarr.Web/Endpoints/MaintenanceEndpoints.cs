@@ -115,12 +115,13 @@ public static class MaintenanceEndpoints
             return Results.Ok();
         });
 
-        // Same footprint as Clear Logs + Clear History combined (every log, every HTML report,
-        // and the run-history CSV), but a real permanent delete instead of Recycle Bin - for a
-        // library with years of accumulated logs/reports where recycling thousands of files one
-        // at a time (see ITrashService.DeleteFile - there's no bulk Recycle Bin API, only a
+        // Disk cleanup: every log and every HTML report, as a real permanent delete instead of Recycle
+        // Bin - for a library with years of accumulated logs/reports where recycling thousands of
+        // files one at a time (see ITrashService.DeleteFile - there's no bulk Recycle Bin API, only a
         // per-file one) is itself slow enough to matter. Deliberately doesn't go through
-        // ITrashService at all, unlike every other maintenance action.
+        // ITrashService at all, unlike every other maintenance action. It never touches the run
+        // history (the CSV in the app data folder, nor a 2.1.x copy still in the Logs folder): that
+        // is the record behind the History page, and only Clear History / Clear All remove it.
         app.MapPost("/api/maintenance/purge-logs-reports", (IConfigStore configStore, IPathExpander pathExpander, IRunLogger logger) =>
         {
             var config = configStore.Load(AppPaths.GetConfigFilePath());
@@ -128,7 +129,8 @@ public static class MaintenanceEndpoints
             var logPath = pathExpander.Expand(config.Logging.LogFilePath);
             if (Directory.Exists(logPath))
             {
-                var logExtensions = new HashSet<string>(new[] { ".log", ".txt", ".csv" }, StringComparer.OrdinalIgnoreCase);
+                // No ".csv": a 2.1.x run history can still sit in this folder until 2.2 first starts.
+                var logExtensions = new HashSet<string>(new[] { ".log", ".txt" }, StringComparer.OrdinalIgnoreCase);
                 foreach (var file in Directory.EnumerateFiles(logPath).Where(f => logExtensions.Contains(Path.GetExtension(f))))
                 {
                     try { File.Delete(file); }
@@ -144,12 +146,6 @@ public static class MaintenanceEndpoints
                     try { File.Delete(file); }
                     catch (Exception ex) { logger.Log($"Purge Logs & Reports: unable to remove '{file}': {ex.Message}", LogSeverity.Error); }
                 }
-            }
-
-            foreach (var historyFile in HistoryFiles(logPath).Where(File.Exists))
-            {
-                try { File.Delete(historyFile); }
-                catch (Exception ex) { logger.Log($"Purge Logs & Reports: unable to remove '{historyFile}': {ex.Message}", LogSeverity.Error); }
             }
 
             return Results.Ok();

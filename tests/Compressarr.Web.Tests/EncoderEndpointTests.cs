@@ -325,7 +325,34 @@ public class EncoderEndpointTests
     }
 
     [Fact]
-    public async Task PurgeLogsAndReports_AlsoRemovesTheRunHistory_WhereverItIs_ButClearLogsDoesNot()
+    public async Task PurgeLogsAndReports_RemovesLogsAndReports_ButNeverTheRunHistory_WhereverItIs()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var logs = Path.Combine(Compressarr.Core.Config.AppPaths.GetAppDataDirectory(), "Logs");
+        Directory.CreateDirectory(logs);
+        var reports = Path.Combine(Compressarr.Core.Config.AppPaths.GetAppDataDirectory(), "Reports");
+        Directory.CreateDirectory(reports);
+        var live = Compressarr.Core.Config.AppPaths.GetHistoryFilePath();
+        var leftover = Path.Combine(logs, "Compressarr_History.csv");   // a 2.1.x history not yet carried across
+        var log = Path.Combine(logs, "run.log");
+        var report = Path.Combine(reports, "r.html");
+        await File.WriteAllTextAsync(live, "x");
+        await File.WriteAllTextAsync(leftover, "x");
+        await File.WriteAllTextAsync(log, "x");
+        await File.WriteAllTextAsync(report, "x");
+
+        (await host.Client.PostAsync("/api/maintenance/clear-logs", null)).EnsureSuccessStatusCode();
+        Assert.True(File.Exists(live)); // clearing logs never reaches the history
+
+        (await host.Client.PostAsync("/api/maintenance/purge-logs-reports", null)).EnsureSuccessStatusCode();
+        Assert.False(File.Exists(log));
+        Assert.False(File.Exists(report));
+        Assert.True(File.Exists(live));        // purging is disk cleanup, not a history reset
+        Assert.True(File.Exists(leftover));
+    }
+
+    [Fact]
+    public async Task ClearHistory_RemovesTheRunHistory_WhereverItIs()
     {
         await using var host = await QueueHost.StartAsync(Lane1);
         var logs = Path.Combine(Compressarr.Core.Config.AppPaths.GetAppDataDirectory(), "Logs");
@@ -334,12 +361,9 @@ public class EncoderEndpointTests
         var leftover = Path.Combine(logs, "Compressarr_History.csv");
         await File.WriteAllTextAsync(live, "x");
         await File.WriteAllTextAsync(leftover, "x");
-        await File.WriteAllTextAsync(Path.Combine(logs, "run.log"), "x");
 
-        (await host.Client.PostAsync("/api/maintenance/clear-logs", null)).EnsureSuccessStatusCode();
-        Assert.True(File.Exists(live)); // clearing logs no longer reaches the history
+        (await host.Client.PostAsync("/api/maintenance/clear-history", null)).EnsureSuccessStatusCode();
 
-        (await host.Client.PostAsync("/api/maintenance/purge-logs-reports", null)).EnsureSuccessStatusCode();
         Assert.False(File.Exists(live));
         Assert.False(File.Exists(leftover));
     }

@@ -448,7 +448,7 @@ document.getElementById('clearHistoryBtn').addEventListener('click', () => runMa
 
 document.getElementById('purgeLogsReportsBtn').addEventListener('click', () => runMaintenanceAction(
   '/api/maintenance/purge-logs-reports',
-  'Permanently delete every log file, every HTML report, and the run-history CSV?\n\nThis does NOT go to the Recycle Bin - it cannot be undone.',
+  'Permanently delete every log file and every HTML report?\n\nThe run history is kept, but its report links stop working.\nThis does NOT go to the Recycle Bin - it cannot be undone.',
   'Logs and reports purged.'
 ));
 
