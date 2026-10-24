@@ -435,6 +435,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
             // History totals count only files that actually produced an encode (see CountsTowardTotals); a run
             // in which every file failed is still recorded (it has a report and a run number) with 0 files.
             var counted = allResults.Where(r => r.CountsTowardTotals).ToList();
+            var breakdown = RunBreakdown.From(counted);
             // The file count includes a passed-through file; the bytes do not (nothing was saved - see ConversionResult.IsPassthrough).
             var totalBeg = counted.Sum(r => r.CountedBeginGb);
             var totalEnd = counted.Sum(r => r.CountedEndGb);
@@ -452,7 +453,10 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 ErrorCount: errorCount, WarningCount: warningCount,
                 RedirectCount: allResults.Count(r => r.RedirectedToLaneId is not null),
                 MovieCount: counted.Count(r => r.ContentType == "Movie"),
-                TvCount: counted.Count(r => r.ContentType == "TV Show")));
+                TvCount: counted.Count(r => r.ContentType == "TV Show"),
+                AvgFps: breakdown.AvgFps,
+                HandBrakeCount: breakdown.HandBrake, FfmpegCount: breakdown.FFmpeg, PassthroughCount: breakdown.Passthrough,
+                LaneCounts: breakdown.Lanes, PresetCounts: breakdown.Presets));
 
             // Only a pass that actually processed files counts as a "run" - an empty scan
             // (including every quiet monitor-mode poll) never moves this counter.

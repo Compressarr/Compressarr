@@ -408,6 +408,7 @@ literal text rather than breaking the message:
 | `{run_number}` | The sequential run number |
 | `{files}` | Files processed this run |
 | `{movie_count}` / `{tv_count}` | How many of those files were movies / TV episodes (they add up to `{files}`) |
+| `{avg_fps}` | A rough average encoding speed for the run, in frames per second (HandBrake's and ffmpeg's own running averages, combined). Left out when no file gave a reading, such as a run of passed-through files |
 | `{saved_gb}` / `{saved_pct}` | Space saved, in GB / as a percent |
 | `{before_gb}` / `{after_gb}` | Total size before/after, in GB |
 | `{duration}` | How long the run took |

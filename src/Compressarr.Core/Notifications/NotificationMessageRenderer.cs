@@ -19,7 +19,8 @@ public static class NotificationMessageRenderer
         var savedGb = report.TotalBeforeGb - report.TotalAfterGb;
         var savedPct = report.TotalBeforeGb > 0 ? 100 - (report.TotalAfterGb / report.TotalBeforeGb * 100) : 0;
 
-        var result = WithOptionalToken(WithOptionalToken(template, ErrorToken, ErrorSummary(report)), WarningToken, WarningSummary(report));
+        var result = WithOptionalToken(WithOptionalToken(WithOptionalToken(template, ErrorToken, ErrorSummary(report)), WarningToken, WarningSummary(report)),
+            AvgFpsToken, report.AvgFps is { } fps ? fps.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) : "");
         foreach (var (token, value) in Tokens(outcome, report, reportFilePath, savedGb, savedPct, machineName))
         {
             result = result.Replace(token, value);
@@ -29,6 +30,9 @@ public static class NotificationMessageRenderer
 
     private const string ErrorToken = "{error}";
     private const string WarningToken = "{warning}";
+    /// <summary>The run's rough average speed. Optional like {error}: a run with no reading (copies only, say) gives nothing, so a line such as "Speed: {avg_fps} fps"
+    /// is left out rather than saying 0.</summary>
+    private const string AvgFpsToken = "{avg_fps}";
     private const int KindsShown = 2;
     private const int NoCode = int.MaxValue;
 

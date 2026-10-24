@@ -730,6 +730,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             PresetName = presetName,
             EncoderLabel = encoderLabel,
             IsPassthrough = isPassthrough,
+            AvgFps = success && !isPassthrough ? runResult.AvgFps : null,
             BeginSizeGb = beginSizeGb,
             EndSizeGb = endSizeGb,
             Success = overallSuccess,

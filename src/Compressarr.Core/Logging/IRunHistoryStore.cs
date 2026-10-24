@@ -35,7 +35,19 @@ public sealed record RunHistoryRecord(
     /// was written before these existed (or repaired without its report). A run's two counts add up to FileCount when known. Written as
     /// the last two columns, so older builds ignore them.</summary>
     int? MovieCount = null,
-    int? TvCount = null)
+    int? TvCount = null,
+    /// <summary>A rough average frames per second for the run (each file's own average weighted by how long it took; see RunBreakdown.AverageFps). Null =
+    /// unknown: an older row, or a run with no file that gave a reading (all copies, say). Never 0.</summary>
+    double? AvgFps = null,
+    /// <summary>How many of the counted files each tool produced (they add up to FileCount when known; null = unknown, an older row). HandBrake includes a file an
+    /// ffmpeg lane handed to it; PassthroughCount are the copies.</summary>
+    int? HandBrakeCount = null,
+    int? FfmpegCount = null,
+    int? PassthroughCount = null,
+    /// <summary>How many counted files each lane and each profile handled, by the names they had at the time (null = unknown; an empty list is a known "none",
+    /// as for a run of only copies, which have no profile). Written as the last two columns.</summary>
+    IReadOnlyDictionary<string, int>? LaneCounts = null,
+    IReadOnlyDictionary<string, int>? PresetCounts = null)
 {
     /// <summary>A row written before failed encodes were left out of the totals, for a run in which every file
     /// failed and nothing was produced (it recorded the files and their size as "before" with 0 "after", i.e.

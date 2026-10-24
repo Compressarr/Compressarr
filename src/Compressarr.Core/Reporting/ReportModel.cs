@@ -1,4 +1,5 @@
 using Compressarr.Core.Conversion;
+using Compressarr.Core.Logging;
 
 namespace Compressarr.Core.Reporting;
 
@@ -57,6 +58,9 @@ public sealed class ReportModel
     public int MovieCount => Lanes.Sum(l => l.Results.Count(r => r.ContentType == "Movie"));
     public int TvCount => Lanes.Sum(l => l.Results.Count(r => r.ContentType == "TV Show"));
     public int ErrorCount => Lanes.Sum(l => l.Results.Count(r => !r.Success));
+
+    /// <summary>A rough average speed for the run (see RunBreakdown.AverageFps); null when no file gave a reading.</summary>
+    public double? AvgFps => RunBreakdown.AverageFps(Lanes.SelectMany(l => l.Results));
 
     /// <summary>Count of otherwise-successful files that still had a secondary post-process
     /// problem (companion-file move or Sonarr/Radarr unmonitor) - see

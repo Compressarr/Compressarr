@@ -38,7 +38,8 @@ public static class HistoryEndpoints
         // history stays small: [year, month, day, beforeGb, afterGb, files, seconds, runNumber, errors, warnings, redirected, movies|null,
         // tv|null, reportFile|null, endMinute|null]. A null movies/tv means the run's split is unknown. reportFile is only filled for the
         // most recent runs (the ones the page can link to) and only when the report still exists. endMinute is the minute of the day the
-        // run ended (see EndMinuteOfDay), for the Today chart's three-hour blocks. The same "every file failed, nothing produced" rows the
+        // run ended (see EndMinuteOfDay), for the Today chart's three-hour blocks. Then avgFps|null, handBrakeFiles|null, ffmpegFiles|null,
+        // passedThroughFiles|null, lanes|null and profiles|null (each [[name, files], ...]); null means the run predates them. The same "every file failed, nothing produced" rows the
         // period totals skip are left out here too, so the cards and the table always agree. today is the server's date, which the
         // period windows (Today, Last 7 days...) are measured from - the same windows /api/history uses.
         app.MapGet("/api/history/runs", (
@@ -63,7 +64,8 @@ public static class HistoryEndpoints
                 r.RunNumber, r.ErrorCount, r.WarningCount, r.RedirectCount,
                 r.MovieCount, r.TvCount,
                 i >= firstLinkable && !string.IsNullOrEmpty(r.ReportFileName) && File.Exists(Path.Combine(reportPath, r.ReportFileName)) ? r.ReportFileName : null,
-                EndMinuteOfDay(r)
+                EndMinuteOfDay(r),
+                r.AvgFps, r.HandBrakeCount, r.FfmpegCount, r.PassthroughCount, Pairs(r.LaneCounts), Pairs(r.PresetCounts)
             }).ToList();
 
             var now = DateTime.Now;
@@ -142,6 +144,10 @@ public static class HistoryEndpoints
             return File.Exists(fullPath) ? Results.File(fullPath, "text/html") : Results.NotFound();
         });
     }
+
+    // [[name, count], ...] biggest first, or null when the run has no such breakdown (an older row).
+    private static object? Pairs(IReadOnlyDictionary<string, int>? counts) =>
+        counts?.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => new object[] { kv.Key, kv.Value }).ToList();
 
     // The history file keeps only the day a run ENDED, but a run's report is named for the moment it STARTED
     // ("Compressarr_2026-10-24_07-09-21_Report.html"), so its end is that moment plus its encoding time. Minutes after midnight, in the

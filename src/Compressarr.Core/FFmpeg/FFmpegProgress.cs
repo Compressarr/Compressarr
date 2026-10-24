@@ -18,6 +18,10 @@ public sealed class FFmpegProgressParser
     private double? _fps;
     private double? _speed;
 
+    /// <summary>The last positive "fps" ffmpeg reported. ffmpeg works it out as frames written over the time since it started, so it is already
+    /// a running average of the whole encode; null until it has reported one.</summary>
+    public double? AverageFps { get; private set; }
+
     public FFmpegProgressParser(double? durationSeconds) => _durationSeconds = durationSeconds is > 0 ? durationSeconds : null;
 
     /// <summary>Feeds one stdout line; returns a reading when it completes a block, else null.</summary>
@@ -40,6 +44,7 @@ public sealed class FFmpegProgressParser
                 break;
             case "fps":
                 _fps = double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var fps) && fps > 0 ? fps : null;
+                if (_fps is { } positive) AverageFps = positive;
                 break;
             case "speed":
                 _speed = double.TryParse(value.TrimEnd('x', 'X', ' '), NumberStyles.Float, CultureInfo.InvariantCulture, out var speed) && speed > 0 ? speed : null;

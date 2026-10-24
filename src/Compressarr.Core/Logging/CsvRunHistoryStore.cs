@@ -41,7 +41,8 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
     private static readonly string[] Header =
     {
         "yyyy", "mm", "dd", "BegSize", "EndSize", "FileCount", "ProcessHours", "ProcessMinutes", "ProcessSeconds",
-        "RunNumber", "ReportFileName", "ErrorCount", "WarningCount", "RedirectCount", "MovieCount", "TvCount"
+        "RunNumber", "ReportFileName", "ErrorCount", "WarningCount", "RedirectCount", "MovieCount", "TvCount",
+        "AvgFps", "HandBrakeCount", "FfmpegCount", "PassthroughCount", "LaneCounts", "PresetCounts"
     };
 
     public void AppendRun(string legacyLogFolder, RunHistoryRecord record)
@@ -74,7 +75,13 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
             record.RedirectCount.ToString(CultureInfo.InvariantCulture),
             // Blank = unknown (see RunHistoryRecord.MovieCount).
             record.MovieCount?.ToString(CultureInfo.InvariantCulture) ?? "",
-            record.TvCount?.ToString(CultureInfo.InvariantCulture) ?? ""
+            record.TvCount?.ToString(CultureInfo.InvariantCulture) ?? "",
+            record.AvgFps?.ToString(CultureInfo.InvariantCulture) ?? "",
+            record.HandBrakeCount?.ToString(CultureInfo.InvariantCulture) ?? "",
+            record.FfmpegCount?.ToString(CultureInfo.InvariantCulture) ?? "",
+            record.PassthroughCount?.ToString(CultureInfo.InvariantCulture) ?? "",
+            RunBreakdown.Encode(record.LaneCounts),
+            RunBreakdown.Encode(record.PresetCounts)
         };
         writer.WriteLine(string.Join(",", fields));
     }
@@ -105,6 +112,8 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
             // Movie / TV counts: blank or missing = unknown, not zero.
             int? movieCount = parts.Length > 14 && int.TryParse(parts[14], NumberStyles.Integer, CultureInfo.InvariantCulture, out var mc) ? mc : null;
             int? tvCount = parts.Length > 15 && int.TryParse(parts[15], NumberStyles.Integer, CultureInfo.InvariantCulture, out var tc) ? tc : null;
+            // Speed, engines, lanes and profiles: appended after the split, blank or missing = unknown.
+            double? avgFps = parts.Length > 16 && double.TryParse(parts[16], NumberStyles.Float, CultureInfo.InvariantCulture, out var af) && af > 0 ? af : null;
 
             results.Add(new RunHistoryRecord(
                 Year: int.Parse(parts[0], CultureInfo.InvariantCulture),
@@ -122,11 +131,20 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
                 WarningCount: warningCount,
                 RedirectCount: redirectCount,
                 MovieCount: movieCount,
-                TvCount: tvCount));
+                TvCount: tvCount,
+                AvgFps: avgFps,
+                HandBrakeCount: OptionalCount(parts, 17),
+                FfmpegCount: OptionalCount(parts, 18),
+                PassthroughCount: OptionalCount(parts, 19),
+                LaneCounts: parts.Length > 20 ? RunBreakdown.Decode(parts[20]) : null,
+                PresetCounts: parts.Length > 21 ? RunBreakdown.Decode(parts[21]) : null));
         }
 
         return results;
     }
+
+    private static int? OptionalCount(string[] parts, int index) =>
+        parts.Length > index && int.TryParse(parts[index], NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) && n >= 0 ? n : null;
 
     public int GetRunCount(string runCountPath)
     {

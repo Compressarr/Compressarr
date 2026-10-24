@@ -52,11 +52,68 @@ public class CsvRunHistoryStoreTests : AppDataTestBase
 
         Assert.Equal("WarningCount", header[12]);
         Assert.Equal("RedirectCount", header[13]);
-        Assert.Equal(16, row.Length);                // ...then the movie and TV counts, blank here: unknown
+        Assert.Equal(22, row.Length);                // ...then the movie / TV counts and the speed, engine, lane and profile columns, blank here: unknown
         Assert.Equal("report.html", row[10]);
         Assert.Equal("2", row[11]);
         Assert.Equal("3", row[12]);
         Assert.Equal("4", row[13]);
+    }
+
+    [Fact]
+    public void AppendRun_ThenGetHistory_RoundTripsTheSpeedEnginesLanesAndProfiles()
+    {
+        var store = new CsvRunHistoryStore();
+        var lanes = new Dictionary<string, int> { ["Movies, HD"] = 4, ["TV"] = 1 };
+        var profiles = new Dictionary<string, int> { ["HB 1080"] = 3, ["FF 720"] = 1 };
+
+        store.AppendRun(_tempDir, new RunHistoryRecord(2026, 9, 3, 10, 4, 5, 0, 5, 0, RunNumber: 42, ReportFileName: "report.html", MovieCount: 4, TvCount: 1,
+            AvgFps: 23.45, HandBrakeCount: 3, FfmpegCount: 1, PassthroughCount: 1, LaneCounts: lanes, PresetCounts: profiles));
+
+        var result = Assert.Single(store.GetHistory(_tempDir));
+        Assert.Equal((23.45, 3, 1, 1), (result.AvgFps, result.HandBrakeCount, result.FfmpegCount, result.PassthroughCount));
+        Assert.Equal(lanes, result.LaneCounts);
+        Assert.Equal(profiles, result.PresetCounts);
+        var row = File.ReadAllLines(AppPaths.GetHistoryFilePath())[1].Split(',');
+        Assert.Equal(22, row.Length);                // a comma in a lane name must not add a column
+        Assert.Equal("23.45", row[16]);
+        Assert.Equal("3", row[17]);
+        Assert.Equal("1", row[18]);
+        Assert.Equal("1", row[19]);
+    }
+
+    [Fact]
+    public void ARowWrittenBeforeTheSpeedAndBreakdownColumns_ReadsThemAsUnknown_NotZero()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(AppPaths.GetHistoryFilePath())!);
+        File.WriteAllLines(AppPaths.GetHistoryFilePath(), new[]
+        {
+            "yyyy,mm,dd,BegSize,EndSize,FileCount,ProcessHours,ProcessMinutes,ProcessSeconds,RunNumber,ReportFileName,ErrorCount,WarningCount,RedirectCount,MovieCount,TvCount",
+            "2026,10,23,10,4,5,0,5,0,7,old.html,0,0,0,2,3"
+        });
+
+        var result = Assert.Single(new CsvRunHistoryStore().GetHistory(_tempDir));
+
+        Assert.Equal((2, 3), (result.MovieCount, result.TvCount));
+        Assert.Null(result.AvgFps);
+        Assert.Null(result.HandBrakeCount);
+        Assert.Null(result.FfmpegCount);
+        Assert.Null(result.PassthroughCount);
+        Assert.Null(result.LaneCounts);
+        Assert.Null(result.PresetCounts);
+    }
+
+    [Fact]
+    public void ARunOfOnlyCopies_KeepsAKnownEmptyProfileList_AndNoSpeed()
+    {
+        var store = new CsvRunHistoryStore();
+
+        store.AppendRun(_tempDir, new RunHistoryRecord(2026, 9, 3, 0, 0, 2, 0, 1, 0, RunNumber: 9, ReportFileName: "r.html",
+            HandBrakeCount: 0, FfmpegCount: 0, PassthroughCount: 2, LaneCounts: new Dictionary<string, int> { ["TV"] = 2 }, PresetCounts: new Dictionary<string, int>()));
+
+        var result = Assert.Single(store.GetHistory(_tempDir));
+        Assert.Null(result.AvgFps);
+        Assert.Empty(result.PresetCounts!);          // known to be none, which is not the same as unknown
+        Assert.Equal(2, result.PassthroughCount);
     }
 
     [Fact]

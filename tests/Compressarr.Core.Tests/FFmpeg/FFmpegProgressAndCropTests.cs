@@ -28,6 +28,22 @@ public class FFmpegProgressAndCropTests
     }
 
     [Fact]
+    public void AverageFps_IsTheLastPositiveFpsFfmpegReported_AndSurvivesAZeroReadingAtTheEnd()
+    {
+        var parser = new FFmpegProgressParser(100);
+        Assert.Null(parser.AverageFps);
+
+        FeedBlock(parser, "fps=0.00", "out_time_us=1000000", "progress=continue");
+        Assert.Null(parser.AverageFps);                 // 0 is "not measured yet", not a speed
+
+        FeedBlock(parser, "fps=18.5", "out_time_us=20000000", "progress=continue");
+        FeedBlock(parser, "fps=24.25", "out_time_us=90000000", "progress=continue");
+        FeedBlock(parser, "fps=0.00", "progress=end");
+
+        Assert.Equal(24.25, parser.AverageFps);
+    }
+
+    [Fact]
     public void Progress_OnlyAnswersAtTheEndOfABlock()
     {
         var parser = new FFmpegProgressParser(100);

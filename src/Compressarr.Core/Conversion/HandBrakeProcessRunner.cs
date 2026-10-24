@@ -79,6 +79,7 @@ public sealed class HandBrakeProcessRunner : IEncoderRunner
         var stderr = new StringBuilder();
         var cancelled = false;
         var exitCode = -1;
+        double? averageFps = null;   // the last "avg" reading: it covers the whole encode (the last pass of a multi-pass one)
 
         using (var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true })
         {
@@ -88,7 +89,9 @@ public sealed class HandBrakeProcessRunner : IEncoderRunner
             // progress possible at all.
             process.OutputDataReceived += (_, e) =>
             {
-                if (e.Data is null || onProgress is null) return;
+                if (e.Data is null) return;
+                if (HandBrakeProgressParser.TryParseAverageFps(e.Data) is { } average) averageFps = average;
+                if (onProgress is null) return;
                 var progress = HandBrakeProgressParser.TryParse(e.Data);
                 if (progress is not null) onProgress(progress);
             };
@@ -148,7 +151,8 @@ public sealed class HandBrakeProcessRunner : IEncoderRunner
             return new EncodeResult(Success: false, DetailLogFile: detailLogFile, Cancelled: true);
         }
 
-        return new EncodeResult(DetermineSuccess(tempOutputPath, detailLogFile, exitCode), detailLogFile);
+        var success = DetermineSuccess(tempOutputPath, detailLogFile, exitCode);
+        return new EncodeResult(success, detailLogFile, AvgFps: success ? averageFps : null);
     }
 
     /// <summary>Success requires ALL of: the temp output file exists, is non-empty, the detail
@@ -236,7 +240,7 @@ public sealed class HandBrakeProcessRunner : IEncoderRunner
 public static class HandBrakeProgressParser
 {
     private static readonly Regex ProgressLine = new(
-        @"^Encoding:\s*task\s*\d+\s*of\s*\d+,\s*(?<percent>[\d.]+)\s*%(?:\s*\((?:(?<fps>[\d.]+)\s*fps[^,)]*,\s*)?avg\s*[\d.]+\s*fps(?:,\s*ETA\s*(?<eta>[\dhms]+))?\))?",
+        @"^Encoding:\s*task\s*\d+\s*of\s*\d+,\s*(?<percent>[\d.]+)\s*%(?:\s*\((?:(?<fps>[\d.]+)\s*fps[^,)]*,\s*)?avg\s*(?<avg>[\d.]+)\s*fps(?:,\s*ETA\s*(?<eta>[\dhms]+))?\))?",
         RegexOptions.Compiled);
 
     public static EncodeProgress? TryParse(string line)
@@ -257,5 +261,14 @@ public static class HandBrakeProgressParser
         string? eta = match.Groups["eta"].Success ? match.Groups["eta"].Value : null;
 
         return new EncodeProgress(percent, fps, eta);
+    }
+
+    /// <summary>The running average ("avg 20.12 fps") of a progress line, or null for any other line or a zero reading (HandBrake prints avg 0.00
+    /// before it has measured anything). Kept apart from <see cref="TryParse"/> so the live progress reading stays as it was.</summary>
+    public static double? TryParseAverageFps(string line)
+    {
+        var match = ProgressLine.Match(line);
+        if (!match.Success || !match.Groups["avg"].Success) return null;
+        return double.TryParse(match.Groups["avg"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var avg) && avg > 0 ? avg : null;
     }
 }

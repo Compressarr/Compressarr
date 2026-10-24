@@ -106,6 +106,31 @@ public class HistoryRunsEndpointTests
     }
 
     [Fact]
+    public async Task EachRunCarriesItsSpeedEnginesLanesAndProfiles_AfterTheEarlierValues_AndNullWhenARunPredatesThem()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        File.WriteAllLines(AppPaths.GetHistoryFilePath(), new[]
+        {
+            Header,
+            "2026,10,23,3,1,2,0,5,0,1,Compressarr_2026-10-23_08-00-00_Report.html,0,0,0,1,1",                                                    // an older row: no new columns
+            "2026,10,24,3,1,5,0,5,0,2,Compressarr_2026-10-24_08-00-00_Report.html,0,0,0,4,1,23.45,3,1,1,TV:3|Movies%2C HD:2,HB 1080:3|FF 720:1"
+        });
+
+        var runs = (await Runs(host))["runs"]!.AsArray();
+
+        var old = runs[0]!.AsArray();
+        Assert.Equal(21, old.Count);
+        Assert.All(old.Skip(15), v => Assert.Null(v));
+        var row = runs[1]!.AsArray();
+        Assert.Equal(23.45, row[15]!.GetValue<double>());
+        Assert.Equal((3, 1, 1), (row[16]!.GetValue<int>(), row[17]!.GetValue<int>(), row[18]!.GetValue<int>()));
+        Assert.Equal("TV", row[19]![0]![0]!.GetValue<string>());                          // biggest first, as [name, files]
+        Assert.Equal(3, row[19]![0]![1]!.GetValue<int>());
+        Assert.Equal("Movies, HD", row[19]![1]![0]!.GetValue<string>());                  // the escaped comma comes back as a comma
+        Assert.Equal("HB 1080", row[20]![0]![0]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task TheRollupsCarryTheSplitToo_SoTheTableAndTheCardsAgree()
     {
         await using var host = await QueueHost.StartAsync(Lane1);

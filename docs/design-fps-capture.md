@@ -1,6 +1,23 @@
 # Design note: capturing average fps per encoded file
 
-Status: plan only, nothing built (2026-10-24). Target: 2.2.1 (not 2.2.0 final).
+Status: BUILT 2026-10-24 on 2.2-dev (not committed when this line was written), together with the History cards for engines, lanes, passthrough
+and profiles. What differs from the plan below:
+
+- The average is not on `EncodeProgress` (that record stays as it was); `HandBrakeProgressParser.TryParseAverageFps` and
+  `FFmpegProgressParser.AverageFps` hand the last reading to the runner, which puts it on `EncodeResult.AvgFps` for a successful encode only.
+- ffmpeg's `fps` is frames written over the time since ffmpeg started (from its own progress code, not re-checked against a run), so it is already
+  a running average and is used as it is.
+- A result carries `AvgFps` and a derived `Engine` (HandBrake / FFmpeg / Passthrough; a Dolby Vision file handed to HandBrake counts as HandBrake).
+  `RunBreakdown` (Core/Logging) works out the run's engine counts, lane counts, profile counts (passthrough excluded) and weighted `AvgFps`.
+- History CSV: six trailing columns after TvCount (0-based 16-21): `AvgFps`, `HandBrakeCount`, `FfmpegCount`, `PassthroughCount`, `LaneCounts`,
+  `PresetCounts`. The two lists are `name:count|name:count` with `% , | : "` escaped as %XX; `-` is a known empty list, blank is unknown.
+- `/api/history/runs` appends `avgFps, handBrakeFiles, ffmpegFiles, passedThroughFiles, lanes, profiles` after `endMinute`.
+- Report: an "Average speed" tile and a tooltip on each file's duration (no new table column). Token `{avg_fps}` is optional like `{error}`:
+  a run with no reading leaves its line out. History cards (off by default): Average Speed, Busiest Lane, HandBrake vs ffmpeg, Passed Through,
+  Most Used Profile.
+- No restart concern after all: results are built in memory per run, like the sizes.
+
+Original plan follows. Target was 2.2.1; it went into the 2.2.0 work instead.
 
 ## Goal
 

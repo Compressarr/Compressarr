@@ -40,7 +40,9 @@ public enum EncodeFailureKind
     NotStarted
 }
 
-public sealed record EncodeResult(bool Success, string DetailLogFile, bool Cancelled = false, EncodeFailureKind Failure = EncodeFailureKind.None, string? FailureMessage = null);
+/// <param name="AvgFps">The encoder's own running average frames per second at the end of a successful encode (HandBrake's "avg" reading, ffmpeg's
+/// last "fps"), or null when it never gave one or the encode did not succeed. A rough figure by design; null is never read as 0.</param>
+public sealed record EncodeResult(bool Success, string DetailLogFile, bool Cancelled = false, EncodeFailureKind Failure = EncodeFailureKind.None, string? FailureMessage = null, double? AvgFps = null);
 
 public interface IEncoderRunner
 {

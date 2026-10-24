@@ -37,11 +37,12 @@ public sealed class FFmpegRunner : IEncoderRunner
     public async Task<EncodeResult> RunAsync(EncodeRequest request, Action<EncodeProgress>? onProgress, CancellationToken cancellationToken)
     {
         var log = new StringBuilder();
+        double? averageFps = null;   // set once the encode has run; only a successful result carries it
         EncodeResult Finish(bool success, EncodeFailureKind failure = EncodeFailureKind.None, string? message = null, bool cancelled = false)
         {
             if (message is not null) log.AppendLine(message);
             File.WriteAllText(request.DetailLogFile, log.ToString());
-            return new EncodeResult(success, request.DetailLogFile, cancelled, failure, message);
+            return new EncodeResult(success, request.DetailLogFile, cancelled, failure, message, success ? averageFps : null);
         }
 
         if (File.Exists(request.DetailLogFile)) File.Delete(request.DetailLogFile);
@@ -154,6 +155,7 @@ public sealed class FFmpegRunner : IEncoderRunner
         }
 
         lock (stderr) log.Append(stderr);
+        averageFps = progressParser.AverageFps;
 
         if (cancelled) return Finish(false, cancelled: true);
 

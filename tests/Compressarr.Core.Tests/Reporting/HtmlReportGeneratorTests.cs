@@ -85,6 +85,26 @@ public class HtmlReportGeneratorTests
     }
 
     [Fact]
+    public void Generate_ShowsTheRunsAverageSpeed_AndEachFilesOnItsDurationTooltip_OnlyWhenThereIsOne()
+    {
+        var withSpeed = new ConversionResult
+        {
+            LaneId = "lane1", FileName = "fast.mkv", FullName = @"C:\videos\fast.mkv", ContentType = "Movie", PresetName = "Compressarr SD-HD",
+            BeginSizeGb = 1, EndSizeGb = 0.5, Success = true, AvgFps = 23.456, StartTime = DateTime.Now, EndTime = DateTime.Now
+        };
+        var copy = Result("copy.mkv");
+
+        var html = new HtmlReportGenerator().Generate(BaseModel(new List<LaneReportSection> { new() { LaneDisplayName = "HD/SD", Results = new[] { withSpeed, copy } } }));
+        var noSpeedHtml = new HtmlReportGenerator().Generate(BaseModel(new List<LaneReportSection> { new() { LaneDisplayName = "HD/SD", Results = new[] { copy } } }));
+
+        Assert.Contains("<div class=\"label\">Average speed</div><div class=\"value\">23.5 fps</div>", html);
+        Assert.Contains("title=\"average speed 23.5 fps\"", html);
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(html, "title=\"average speed"));        // the file with no reading has no tooltip
+        Assert.DoesNotContain("Average speed", noSpeedHtml);
+        Assert.DoesNotContain("title=\"average speed", noSpeedHtml);
+    }
+
+    [Fact]
     public void Generate_RedirectedFile_IsTaggedWithWhereItLandedAndWhereItCameFrom()
     {
         var model = BaseModel(new List<LaneReportSection>

@@ -20,6 +20,8 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
     private const string LogoResourceName = "Compressarr.Core.Assets.CompressarrLogo.png";
     private const string FaviconResourceName = "Compressarr.Core.Assets.CompressarrFavicon.ico";
 
+    private static string FormatFps(double fps) => fps.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
     public string Generate(ReportModel model)
     {
         var totalFiles = model.Lanes.Sum(l => l.Results.Count);
@@ -37,6 +39,10 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
             ? $"<link rel=\"icon\" type=\"image/x-icon\" href=\"data:image/x-icon;base64,{faviconB64}\">"
             : "";
         var runLabel = model.RunNumber > 0 ? $"Run #{model.RunNumber}:" : "Run:";
+        // A rough average speed, only when some file gave one (a run of copies or failures has none, and the tile is simply left out).
+        var speedTile = model.AvgFps is { } avgFps
+            ? $"  <div class=\"stat\"><div class=\"label\">Average speed</div><div class=\"value\">{FormatFps(avgFps)} fps</div></div>\n"
+            : "";
         var timestamp = model.GeneratedAt.ToString("yyyy-MM-dd HH:mm:ss");
 
         string statusBanner;
@@ -135,7 +141,7 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
   <div class=""stat""><div class=""label"">Before</div><div class=""value"">{totalBeg} GB</div></div>
   <div class=""stat""><div class=""label"">After</div><div class=""value"">{totalEnd} GB</div></div>
   <div class=""stat""><div class=""label"">Saved</div><div class=""value"">{totalSavings} GB ({savingsPct}%)</div></div>
-  <div class=""stat""><div class=""label"">Errors</div><div class=""value"">{errorCount}</div></div>
+{speedTile}  <div class=""stat""><div class=""label"">Errors</div><div class=""value"">{errorCount}</div></div>
 </div>
 <h2>By lane</h2>
 ");
@@ -280,7 +286,9 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
             sb.Append($"<td>{r.BeginSizeGb} GB</td>");
             sb.Append($"<td>{r.EndSizeGb} GB</td>");
             sb.Append($"<td>{savings} GB</td>");
-            sb.Append($"<td>{duration.Hours}h {duration.Minutes}m {duration.Seconds}s</td>");
+            // The file's own average speed rides along as a tooltip on its duration, so the row itself stays as uncrowded as before.
+            var speedTip = r.AvgFps is { } fileFps ? $" title=\"average speed {FormatFps(fileFps)} fps\"" : "";
+            sb.Append($"<td{speedTip}>{duration.Hours}h {duration.Minutes}m {duration.Seconds}s</td>");
             sb.Append($"<td>{statusHtml}</td>");
             sb.Append($"<td>{WebUtility.HtmlEncode(arrStatus)}</td>");
             sb.Append("</tr>\n");

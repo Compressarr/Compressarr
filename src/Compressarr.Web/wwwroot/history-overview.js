@@ -14,6 +14,9 @@ const OV_PURPLE = 'var(--notice-text)';
 const OV_GREY = 'color-mix(in srgb, var(--text-dim) 35%, var(--bg-alt))';
 const OV_ORCHID = '#b957d6';   // movies, on the Movies vs TV card only
 const OV_TEAL = '#1aa6a6';     // TV, on the Movies vs TV card only
+const OV_HB = '#4a7fd1';       // HandBrake, on the HandBrake vs ffmpeg card only
+const OV_FF = '#d99a2b';       // ffmpeg, the same
+const OV_SERIES = ['var(--accent)', OV_ORCHID, OV_TEAL, 'var(--warn)'];   // the biggest few lanes / profiles; everything else is grey
 
 let ovRuns = [];          // oldest first
 let ovToday = 0;          // the server's date, as UTC milliseconds
@@ -38,6 +41,7 @@ const ovMovies = n => n + (n === 1 ? ' movie' : ' movies');
 const ovDayName = t => OV_MONTHS[new Date(t).getUTCMonth()] + ' ' + new Date(t).getUTCDate();
 const ovWeekStart = t => t - ((new Date(t).getUTCDay() + 6) % 7) * OV_DAY;
 const ovDot = c => `<i class="ov-dot" style="background:${c}"></i>`;
+const ovEsc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');   // lane and profile names are the user's own text
 
 // ---- the periods: the same windows /api/history uses, measured from the server's date ----------------------------------------------------
 function ovYearAgo() {
@@ -113,6 +117,11 @@ const OV_ICONS = {
   bestmo: '<rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line>',
   streak: '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>',
   split: '<rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect><polyline points="17 2 12 7 7 2"></polyline>',
+  lane: '<polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline>',
+  engine: '<rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line>',
+  pass: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>',
+  profile: '<line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line>',
+  speed: '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>',
   redir: '<polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>'
 };
 function ovBars(vals, hi, color, names, show = v => +v.toFixed(2)) {
@@ -125,6 +134,33 @@ function ovSeg(parts) {
   return `<div class="ov-seg">${parts.map(p => `<i style="flex:${Math.max(p.v, 0.0001)};background:${p.c}" title="${p.t || ''}"></i>`).join('')}</div>`;
 }
 const ovDots = arr => `<div class="ov-dots">${arr.map(a => `<i class="${a ? 'on' : ''}"></i>`).join('')}</div>`;
+
+// What the runs of a period handled, from the per-run [[name, files], ...] lists: the names biggest first, the files they cover, and the files of
+// runs recorded before the lists existed (left out, never guessed).
+function ovTally(rs, key) {
+  const m = new Map(); let total = 0, unk = 0;
+  for (const r of rs) {
+    const list = r[key];
+    if (!list) { unk += r.f; continue; }
+    for (const [name, n] of list) { m.set(name, (m.get(name) || 0) + n); total += n; }
+  }
+  return { list: [...m.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)), total, unk };
+}
+// A segmented bar of the biggest four names, the rest together in grey.
+function ovSeries(t, noun) {
+  const top = t.list.slice(0, 4), rest = t.list.slice(4).reduce((x, e) => x + e[1], 0);
+  const parts = top.map((e, i) => ({ v: e[1], c: OV_SERIES[i], t: ovEsc(e[0]) + ": " + e[1] + " " + noun }));
+  if (rest) parts.push({ v: rest, c: OV_GREY, t: "all others: " + rest + " " + noun });
+  return ovSeg(parts);
+}
+const ovShare = x => (x < 10 || x > 90) && x > 0 && x < 100 ? x.toFixed(1) : String(Math.round(x));
+const ovKnownNote = unk => unk ? '<span class="ov-note">' + ovN(unk) + ' older files not recorded</span>' : '';
+// One rough speed for some runs: each run's average weighted by how long it took (total frames over total time); runs with no reading are left out.
+function ovFps(rows) {
+  let w = 0, s = 0;
+  for (const r of rows) if (r.fps) { w += r.fps * Math.max(r.s, 1); s += Math.max(r.s, 1); }
+  return s ? w / s : null;
+}
 
 // ---- the stats: the five defaults first, then the ones the Stats button adds ----------------------------------------------------------------
 const OV_CARDS = [
@@ -188,7 +224,35 @@ const OV_CARDS = [
       return { value: Math.round(days.size / span * 100) + '%', sub: days.size + ' of ' + span + ' days &middot; longest streak ' + best,
                viz: ovDots(Array.from({ length: 7 }, (_, i) => days.has(ovToday - (6 - i) * OV_DAY) ? 1 : 0)) }; } },
   { id: 'redir', def: false, icon: 'redir', label: 'Redirected Files', make: c => ({
-      value: String(c.rs.reduce((x, r) => x + r.r, 0)), sub: 'filed in another lane\'s library', viz: '' }) }
+      value: String(c.rs.reduce((x, r) => x + r.r, 0)), sub: 'filed in another lane\'s library', viz: '' }) },
+  { id: 'lane', def: false, icon: 'lane', label: 'Busiest Lane', make: c => {
+      const t = ovTally(c.rs, 'lanes');
+      if (!t.total) return { value: '-', sub: 'no lane recorded yet', viz: '' };
+      const [name, n] = t.list[0];
+      return { value: ovEsc(name), sub: n + ' of ' + ovN(t.total) + ' files (' + ovShare(n / t.total * 100) + '%)' + ovKnownNote(t.unk, t.total), viz: ovSeries(t, 'files') }; } },
+  { id: 'engine', def: false, icon: 'engine', label: 'HandBrake vs ffmpeg', make: c => {
+      const rs = c.rs.filter(r => r.hb !== null && r.ff !== null), hb = rs.reduce((x, r) => x + r.hb, 0), ff = rs.reduce((x, r) => x + r.ff, 0), n = hb + ff;
+      const unk = c.rs.filter(r => r.hb === null || r.ff === null).reduce((x, r) => x + r.f, 0);
+      if (!n) return { value: '-', sub: 'no encodes recorded yet', viz: '' };
+      const ph = hb / n * 100, pf = 100 - ph;
+      return { value: ovShare(ph) + '% / ' + ovShare(pf) + '%', sub: ovDot(OV_HB) + 'HandBrake &middot; ' + ovDot(OV_FF) + 'ffmpeg' + ovKnownNote(unk, n),
+               viz: ovSeg([{ v: hb, c: OV_HB, t: hb + ' files by HandBrake (' + ovShare(ph) + '%)' }, { v: ff, c: OV_FF, t: ff + ' files by ffmpeg (' + ovShare(pf) + '%)' }]) }; } },
+  { id: 'pass', def: false, icon: 'pass', label: 'Passed Through', make: c => {
+      const rs = c.rs.filter(r => r.pass !== null), pass = rs.reduce((x, r) => x + r.pass, 0), files = rs.reduce((x, r) => x + r.f, 0);
+      const unk = c.rs.filter(r => r.pass === null).reduce((x, r) => x + r.f, 0);
+      if (!files) return { value: '-', sub: 'nothing recorded yet', viz: '' };
+      return { value: ovN(pass), sub: (pass ? ovShare(pass / files * 100) + '% of ' + ovN(files) + ' files, copied not re-encoded' : 'none of ' + ovN(files) + ' files was copied unchanged') + ovKnownNote(unk, files),
+               viz: ovSeg([{ v: pass, c: OV_TEAL, t: pass + ' files passed through' }, { v: files - pass, c: OV_GREY, t: (files - pass) + ' files re-encoded' }]) }; } },
+  { id: 'profile', def: false, icon: 'profile', label: 'Most Used Profile', make: c => {
+      const t = ovTally(c.rs, 'profiles');
+      if (!t.total) return { value: '-', sub: 'no profile recorded yet', viz: '' };
+      const [name, n] = t.list[0];
+      return { value: ovEsc(name), sub: n + ' of ' + ovN(t.total) + ' encoded files (' + ovShare(n / t.total * 100) + '%)' + ovKnownNote(t.unk, t.total), viz: ovSeries(t, 'files') }; } },
+  { id: 'fps', def: false, icon: 'speed', label: 'Average Speed', make: c => {
+      const rate = ovFps(c.rs), n = c.rs.filter(r => r.fps).length;
+      if (rate === null) return { value: '-', sub: 'no speed recorded yet', viz: '' };
+      const per = c.buckets.map(b => ovFps(b.rows) || 0);
+      return { value: rate.toFixed(1) + ' fps', sub: 'frames per second, across ' + n + (n === 1 ? ' run' : ' runs'), viz: ovBars(per, per.length - 1, 'var(--accent)', c.buckets.map(b => b.name), v => v ? v.toFixed(1) + ' fps' : 'no reading') }; } }
 ];
 
 function ovTile(card, d) {
@@ -333,8 +397,10 @@ async function loadOverview() {
     ovToday = Date.UTC(ty, tm - 1, td);
     const [nowDate, nowTime = '23:59'] = (runs.now || runs.today).split('T'), [ny, nm, nd] = nowDate.split('-').map(Number), [nh, nmin] = nowTime.split(':').map(Number);
     ovNow = Date.UTC(ny, nm - 1, nd, nh, nmin);   // the server's wall clock, as milliseconds, like every other date here
-    ovRuns = runs.runs.map(([y, m, d, b, a, f, s, n, e, w, r, mv, tv, report, endMinute]) => ({ y, m, d, b, a, f, s, n, e, w, r, mv, tv, report, t: Date.UTC(y, m - 1, d), v: b - a,
-      end: endMinute === null || endMinute === undefined ? null : Date.UTC(y, m - 1, d) + endMinute * 60000 }));
+    // fps, hb, ff, pass, lanes and profiles are null for a run recorded before they existed; those files are left out of the cards that use them.
+    ovRuns = runs.runs.map(([y, m, d, b, a, f, s, n, e, w, r, mv, tv, report, endMinute, fps, hb, ff, pass, lanes, profiles]) => ({ y, m, d, b, a, f, s, n, e, w, r, mv, tv, report, t: Date.UTC(y, m - 1, d), v: b - a,
+      end: endMinute === null || endMinute === undefined ? null : Date.UTC(y, m - 1, d) + endMinute * 60000,
+      fps: fps ?? null, hb: hb ?? null, ff: ff ?? null, pass: pass ?? null, lanes: lanes ?? null, profiles: profiles ?? null }));
   } catch {
     ovRuns = [];   // the page still shows what it can; the next load tries again
   }

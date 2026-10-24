@@ -84,6 +84,44 @@ public class NotificationMessageRendererTests
         Assert.Equal("15/10.1 212/143.8 1904/1207.5", rendered);
     }
 
+    private static ReportModel ReportWithSpeeds(params double?[] fps) => new()
+    {
+        GeneratedAt = new DateTime(2026, 10, 24),
+        RunTime = TimeSpan.FromMinutes(10),
+        Lanes = new[]
+        {
+            new LaneReportSection
+            {
+                LaneDisplayName = "Movies",
+                Results = fps.Select(f => new ConversionResult
+                {
+                    LaneId = "lane1", FileName = "f.mkv", FullName = @"C:\f.mkv", ContentType = "Movie", BeginSizeGb = 2, EndSizeGb = 1, Success = true,
+                    AvgFps = f, StartTime = new DateTime(2026, 10, 24, 8, 0, 0), EndTime = new DateTime(2026, 10, 24, 8, 1, 0)
+                }).ToList()
+            }
+        }
+    };
+
+    [Fact]
+    public void Render_AvgFps_IsTheRunsRoughSpeed_WithAtMostOneDecimal()
+    {
+        var rendered = NotificationMessageRenderer.Render("Speed: {avg_fps} fps", NotificationOutcome.Success, ReportWithSpeeds(20, 27.46), "");
+
+        Assert.Equal("Speed: 23.7 fps", rendered);      // equal minutes on each file: the plain mean, 23.73
+    }
+
+    [Fact]
+    public void Render_AvgFps_WithNoReading_LeavesItsLineOut_RatherThanSayingZero()
+    {
+        var report = ReportWithSpeeds(null, null);
+
+        var multiLine = NotificationMessageRenderer.Render("{files} files\nSpeed: {avg_fps} fps\nDone", NotificationOutcome.Success, report, "");
+        var oneLine = NotificationMessageRenderer.Render("Encoded at {avg_fps}", NotificationOutcome.Success, report, "");
+
+        Assert.Equal("2 files\nDone", multiLine);
+        Assert.Equal("Encoded at", oneLine);
+    }
+
     [Fact]
     public void Render_MissingRollup_TreatsAsZeroRatherThanThrowing()
     {

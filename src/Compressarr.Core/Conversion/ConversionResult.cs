@@ -1,5 +1,8 @@
 namespace Compressarr.Core.Conversion;
 
+/// <summary>Which tool produced a converted file (see ConversionResult.Engine).</summary>
+public enum ResultEngine { HandBrake, FFmpeg, Passthrough }
+
 public sealed class ConversionResult
 {
     public required string LaneId { get; init; }
@@ -18,6 +21,15 @@ public sealed class ConversionResult
     /// It still counts as a file in History and the report, but its bytes do not - nothing was saved, and counting them would only dilute
     /// the real savings.</summary>
     public bool IsPassthrough { get; init; }
+
+    /// <summary>The encoder's own average frames per second for this file, a rough figure (see EncodeResult.AvgFps). Null for a passed-through file, a
+    /// failed or cancelled encode, and any encode that gave no reading - unknown, never 0.</summary>
+    public double? AvgFps { get; init; }
+
+    /// <summary>What produced this file: the Passthrough preset, ffmpeg, or HandBrake (which also covers a file an ffmpeg lane handed to HandBrake).</summary>
+    public ResultEngine Engine => IsPassthrough ? ResultEngine.Passthrough
+        : EncoderLabel is not null && EncoderLabel.StartsWith("ffmpeg", StringComparison.Ordinal) ? ResultEngine.FFmpeg
+        : ResultEngine.HandBrake;
 
     /// <summary>The sizes that go into totals (History, the report, the toast): zero for a passed-through file, so no total can forget the rule.</summary>
     public double CountedBeginGb => IsPassthrough ? 0 : BeginSizeGb;

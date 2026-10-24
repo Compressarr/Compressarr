@@ -22,6 +22,27 @@ public class HandBrakeProcessRunnerTests : IDisposable
         return path;
     }
 
+    // ---- The average speed ---------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("Encoding: task 1 of 1, 42.10 % (23.45 fps, avg 20.12 fps, ETA 00h05m32s)", 20.12)]
+    [InlineData("Encoding: task 1 of 2, 99.99 % (30.00 fps, avg 28.5 fps, ETA 00h00m01s)", 28.5)]
+    [InlineData("Encoding: task 1 of 1, 0.00 % (0.00 fps, avg 0.00 fps, ETA 99h59m59s)", null)]      // nothing measured yet is not a speed
+    [InlineData("Encoding: task 1 of 1, 12.00 %", null)]                                              // a line with no speed in it
+    [InlineData("Finished work at Sat Jan  1 00:00:00 2026", null)]
+    public void TryParseAverageFps_ReadsTheAvgFigure_AndNothingElse(string line, double? expected)
+    {
+        Assert.Equal(expected, HandBrakeProgressParser.TryParseAverageFps(line));
+    }
+
+    [Fact]
+    public void TheLiveProgressReading_IsUnchangedByTheAverage()
+    {
+        var reading = HandBrakeProgressParser.TryParse("Encoding: task 1 of 1, 42.10 % (23.45 fps, avg 20.12 fps, ETA 00h05m32s)");
+
+        Assert.Equal(new EncodeProgress(42.10, 23.45, "00h05m32s"), reading);
+    }
+
     // ---- The HandBrakeCLI command line (golden) ------------------------------------------------
     // The command line is the one thing the encoder abstraction must never change by accident: every
     // user's existing presets and Extra CLI options depend on it being exactly this.
@@ -99,6 +120,7 @@ public class HandBrakeProcessRunnerTests : IDisposable
         Assert.False(result.Cancelled);
         Assert.Equal(detail, result.DetailLogFile);
         Assert.Equal(new EncodeProgress(42.10, 23.45, "00h05m32s"), Assert.Single(readings));
+        Assert.Equal(20.12, result.AvgFps);               // HandBrake's own running average, kept for the file's record
         var recorded = File.ReadAllText(argsFile).Trim();
         Assert.Equal(
             $"-i \"{request.SourcePath}\" -t 1 -o \"{output}\" --preset-import-file {request.PresetSource} --preset \"My Preset\" --optimize",

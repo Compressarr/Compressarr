@@ -98,6 +98,7 @@ internal sealed class EngRunner : IEncoderRunner
     public string Name { get; }
     public List<EncodeRequest> Requests { get; } = new();
     public EncodeResult? FailWith { get; set; }
+    public double? AvgFps { get; set; }
 
     public EngRunner(string name) => Name = name;
 
@@ -111,7 +112,7 @@ internal sealed class EngRunner : IEncoderRunner
             return Task.FromResult(failure with { DetailLogFile = request.DetailLogFile });
         }
         File.WriteAllText(request.OutputPath, "fake encoded output");
-        return Task.FromResult(new EncodeResult(true, request.DetailLogFile));
+        return Task.FromResult(new EncodeResult(true, request.DetailLogFile, AvgFps: AvgFps));
     }
 }
 
@@ -245,6 +246,45 @@ public class EncoderEngineTests : IDisposable
         Assert.EndsWith("_FFdetails.txt", request.DetailLogFile);
         Assert.Equal("ffmpeg", result.EncoderLabel);
         Assert.Empty(rig.Resolver.HandBrake.Requests);
+    }
+
+    [Fact]
+    public async Task TheEncodersAverageSpeed_LandsOnTheResult_AndTheEngineIsRecorded()
+    {
+        var hb = BuildRig(EncoderEngine.HandBrake, "HB Preset");
+        hb.Resolver.HandBrake.AvgFps = 21.5;
+        var hbResult = await RunAsync(hb);
+
+        var ff = BuildRig(EncoderEngine.FFmpeg, "FF Preset");
+        ff.Resolver.Probe = Probe(FFmpegFixtures.UhdHdr10Rip);
+        ff.Resolver.FFmpeg.AvgFps = 48.25;
+        var ffResult = await RunAsync(ff);
+
+        Assert.Equal((21.5, ResultEngine.HandBrake), (hbResult.AvgFps, hbResult.Engine));
+        Assert.Equal((48.25, ResultEngine.FFmpeg), (ffResult.AvgFps, ffResult.Engine));
+    }
+
+    [Fact]
+    public async Task ANoReadingFromTheEncoder_IsUnknownOnTheResult_NotZero()
+    {
+        var rig = BuildRig(EncoderEngine.HandBrake, "HB Preset");
+
+        var result = await RunAsync(rig);
+
+        Assert.True(result.Success);
+        Assert.Null(result.AvgFps);
+    }
+
+    [Fact]
+    public async Task AFailedEncode_HasNoSpeed_EvenIfTheEncoderHadReportedOne()
+    {
+        var rig = BuildRig(EncoderEngine.HandBrake, "HB Preset");
+        rig.Resolver.HandBrake.FailWith = new EncodeResult(false, "", AvgFps: 30);
+
+        var result = await RunAsync(rig);
+
+        Assert.False(result.Success);
+        Assert.Null(result.AvgFps);
     }
 
     [Fact]
