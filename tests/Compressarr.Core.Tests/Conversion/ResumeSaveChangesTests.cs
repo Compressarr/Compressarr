@@ -4,11 +4,18 @@ namespace Compressarr.Core.Tests.Conversion;
 
 /// <summary>A pass that reworks the whole in-memory list (adds tracked files, remaps renames, prunes) saves only what it changed, merged into the
 /// file as it is now - so a queue edit committed after the pass's refresh survives, which a save of the whole older list would have wiped.</summary>
-public class ResumeSaveChangesTests : IDisposable
+public abstract class ResumeSaveChangesTestsBase : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("compressarr-savechanges-").FullName;
-    private readonly JsonResumeStateStore _store = new();
+    private readonly IResumeStateStore _store;
     private string Path_ => Path.Combine(_dir, "resume.json");
+
+    protected ResumeSaveChangesTestsBase() => _store = CreateStore();
+
+    protected abstract IResumeStateStore CreateStore();
+
+    /// <summary>The file the store keeps the queue in, for the checks that nothing was written.</summary>
+    protected abstract string StoreFile(string resumeFilePath);
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 
@@ -174,22 +181,51 @@ public class ResumeSaveChangesTests : IDisposable
     public void NothingChanged_MeansNothingIsWritten()
     {
         var (memory, baseline) = Start(Entry("a.mkv", 0));
-        var stamp = File.GetLastWriteTimeUtc(Path_);
+        var stamp = File.GetLastWriteTimeUtc(StoreFile(Path_));
         Thread.Sleep(30);
 
         ResumeResults.SaveChanges(_store, baseline, memory, Path_);
 
-        Assert.Equal(stamp, File.GetLastWriteTimeUtc(Path_));
+        Assert.Equal(stamp, File.GetLastWriteTimeUtc(StoreFile(Path_)));
     }
 
     [Fact]
-    public void AnEmptiedQueue_IsAMissingFile_WhichReadsTheSame()
+    public void AnEmptiedQueue_ReadsAsEmpty()
     {
         _store.Save(new List<ResumeEntry> { Entry("a.mkv", 0, ResumeStatus.Completed) }, Path_);
 
         _store.Update(Path_, state => { state.Clear(); return true; });
 
-        Assert.False(File.Exists(Path_));
         Assert.Empty(_store.Load(Path_));
     }
+}
+
+/// <summary>The queue as the JSON file (the store through 3.0.0-rc.1, still used when the database cannot be opened).</summary>
+public class JsonResumeSaveChangesTests : ResumeSaveChangesTestsBase
+{
+    protected override IResumeStateStore CreateStore() => new JsonResumeStateStore();
+
+    protected override string StoreFile(string resumeFilePath) => resumeFilePath;
+
+    [Fact]
+    public void AnEmptiedQueue_IsAMissingFile()
+    {
+        var store = CreateStore();
+        var path = Path.Combine(Path.GetTempPath(), "compressarr-json-empty-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            store.Save(new List<ResumeEntry> { new() { LaneId = "lane1", FullName = @"C:\In\a.mkv", Status = ResumeStatus.Completed } }, path);
+            store.Update(path, state => { state.Clear(); return true; });
+            Assert.False(File.Exists(path));
+        }
+        finally { File.Delete(path); }
+    }
+}
+
+/// <summary>The queue as the SQLite database: every behaviour of the JSON store, with the same expectations.</summary>
+public class SqliteResumeSaveChangesTests : ResumeSaveChangesTestsBase
+{
+    protected override IResumeStateStore CreateStore() => new SqliteResumeStateStore();
+
+    protected override string StoreFile(string resumeFilePath) => StateDatabase.PathFor(resumeFilePath);
 }

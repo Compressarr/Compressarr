@@ -55,7 +55,12 @@ public static class AppPaths
 
     public static string GetRunCountFilePath() => Path.Combine(GetAppDataDirectory(), "compressarr.runcount.json");
 
+    /// <summary>Where the queue used to be kept (through 3.0.0-rc.1). Still the path callers hand to the resume store: the store derives its database from it, and
+    /// imports this file once if it finds one.</summary>
     public static string GetResumeFilePath() => Path.Combine(GetAppDataDirectory(), "compressarr.resume.json");
+
+    /// <summary>The queue and resume state, in one SQLite file next to the history database (kept apart from it so a damaged one cannot take the other down).</summary>
+    public static string GetStateDbPath() => Path.Combine(GetAppDataDirectory(), "compressarr.state.db");
 
     /// <summary>The run-history file behind the History page's totals. It lives with the other permanent data, not in
     /// the Logs folder (a place people clear out, and one that moves when the log path is changed). The file keeps its

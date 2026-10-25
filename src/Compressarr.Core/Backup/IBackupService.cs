@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using Compressarr.Core.Config;
+using Compressarr.Core.Conversion;
 using Compressarr.Core.Logging;
 using Compressarr.Core.Orchestration;
 using Compressarr.Core.Routing;
@@ -76,12 +77,15 @@ public sealed class BackupService : IBackupService
             // already retention-pruned).
             // A 2.1.x install's history is still in the Logs folder until 2.2 first starts; pick it up from there too so a
             // backup taken before that point doesn't silently leave it out.
+            // The queue and resume state (3.x) are a SQLite file too, copied the same way; until the first start has imported compressarr.resume.json, that file is what there is.
             // From 3.0 the history (runs, files, totals, run counter) is one SQLite file, copied with SQLite's own backup call so the copy is
             // consistent while the app runs. Until the first 3.0 start has imported it, the old CSV is what there is.
             var snapshotFolder = Path.Combine(Path.GetTempPath(), $"compressarr-backup-{Guid.NewGuid():N}");
             Directory.CreateDirectory(snapshotFolder);
             try
             {
+                var stateSnapshot = Path.Combine(snapshotFolder, StateDatabase.FileName);
+                var queueFile = StateDatabase.Snapshot(AppPaths.GetStateDbPath(), stateSnapshot) ? stateSnapshot : AppPaths.GetResumeFilePath();
                 string? historyFile = null;
                 var snapshot = Path.Combine(snapshotFolder, Path.GetFileName(AppPaths.GetHistoryDbPath()));
                 if (HistoryDatabase.Snapshot(AppPaths.GetHistoryDbPath(), snapshot)) historyFile = snapshot;
@@ -96,7 +100,7 @@ public sealed class BackupService : IBackupService
                 {
                     AppPaths.GetConfigFilePath(),
                     AppPaths.GetRunCountFilePath(),
-                    AppPaths.GetResumeFilePath(),
+                    queueFile,
                     AppPaths.GetHandBrakeProfilesFilePath(),
                     AppPaths.GetFFmpegProfilesFilePath(),
                     AppPaths.GetCatalogHandBrakeFilePath(),
@@ -187,6 +191,14 @@ public sealed class BackupService : IBackupService
                     catch (InvalidOperationException e) { return new BackupResult(false, null, $"The history inside that backup cannot be used by this version ({e.Message}), so nothing was restored."); }
                 }
 
+                var extractedState = Path.Combine(tempDir, StateDatabase.FileName);
+                if (File.Exists(extractedState))
+                {
+                    try { StateDatabase.ValidateAndMigrate(extractedState); }
+                    catch (InvalidDataException) { return new BackupResult(false, null, "The queue inside that backup is damaged, so nothing was restored."); }
+                    catch (InvalidOperationException e) { return new BackupResult(false, null, $"The queue inside that backup cannot be used by this version ({e.Message}), so nothing was restored."); }
+                }
+
                 // Settings/lanes go through the same validate + merge-over-defaults path
                 // /api/settings/import already uses (load the extracted file through IConfigStore,
                 // then Save it as the real config), rather than a raw file copy - an
@@ -207,7 +219,17 @@ public sealed class BackupService : IBackupService
                     _configStore.Save(restoredConfig, AppPaths.GetConfigFilePath());
                 }
 
-                RestoreEntry(tempDir, "compressarr.resume.json", AppPaths.GetResumeFilePath());
+                // The queue: a backup that carries the database replaces the current one. An older backup carries compressarr.resume.json instead: the
+                // current database is removed so the next use imports that file, which makes the queue what the backup had.
+                if (File.Exists(extractedState))
+                {
+                    RestoreEntry(tempDir, StateDatabase.FileName, AppPaths.GetStateDbPath());
+                }
+                else if (File.Exists(Path.Combine(tempDir, "compressarr.resume.json")))
+                {
+                    try { File.Delete(AppPaths.GetStateDbPath()); } catch { /* in use: the restored file is then picked up on the next start */ }
+                    RestoreEntry(tempDir, "compressarr.resume.json", AppPaths.GetResumeFilePath());
+                }
                 RestoreEntry(tempDir, "handbrake-profiles.json", AppPaths.GetHandBrakeProfilesFilePath());
                 RestoreEntry(tempDir, "ffmpeg-profiles.json", AppPaths.GetFFmpegProfilesFilePath());
                 // The profiles added from a catalog, with their records (an older backup has none, and then nothing is touched).

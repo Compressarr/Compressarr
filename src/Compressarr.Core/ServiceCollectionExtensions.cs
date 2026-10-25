@@ -54,7 +54,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<HandBrakeProcessRunner>();
         services.AddSingleton<IEncoderRunner>(sp => sp.GetRequiredService<HandBrakeProcessRunner>());
         services.AddSingleton<IMetadataService, MetadataService>();
-        services.AddSingleton<IResumeStateStore, JsonResumeStateStore>();
+        services.AddSingleton<SqliteResumeStateStore>();
+        services.AddSingleton<IResumeStateStore>(sp => sp.GetRequiredService<SqliteResumeStateStore>());
         services.AddSingleton<IFileRouter, FileRouter>();
         services.AddSingleton<ICompanionFileService, CompanionFileService>();
         services.AddSingleton<ITrashService>(sp => TrashServiceFactory.CreateForCurrentPlatform(new RunLoggerTrashWarningSink(sp.GetRequiredService<IRunLogger>())));

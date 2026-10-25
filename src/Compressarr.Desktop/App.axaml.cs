@@ -256,5 +256,17 @@ public partial class App : Application
             }
         }
         catch { }
+
+        // The queue lives in its own database too: the first start moves compressarr.resume.json into it. A damaged database or file is set aside by the
+        // store, which says so here (the log is where a user looks) and starts with an empty queue.
+        try
+        {
+            var queueNotice = Services.GetRequiredService<Compressarr.Core.Conversion.SqliteResumeStateStore>().Prepare(Compressarr.Core.Config.AppPaths.GetResumeFilePath());
+            if (queueNotice is not null)
+            {
+                Services.GetRequiredService<Compressarr.Core.Logging.IRunLogger>().Log(queueNotice, Compressarr.Core.Logging.LogSeverity.Error);
+            }
+        }
+        catch { }
     }
 }

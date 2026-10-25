@@ -9,12 +9,20 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
+## [3.0.0-rc.2] - Unreleased
+
+> Built after 3.0.0-rc.1; ships once rc.1 has been tested.
+
+### Changed
+- **The queue is now a database too.** What Compressarr remembers between passes - the queue order, skips, per-file profiles, "land in another lane" choices, failed files that are held, an encoded file waiting for a move to be retried, and converted sources that were kept - moves from `compressarr.resume.json` into `compressarr.state.db` (SQLite, next to the history database, kept in a separate file so one cannot take the other down). Each change is a single transaction that writes only the rows it changed, so a crash or power cut leaves the queue as it was, two edits at once cannot overwrite each other, and a damaged file no longer stops every Monitor refresh and pass. The first start imports the old file (and renames it to `compressarr.resume.json.imported`, never deleting it); if that file or a later database cannot be read it is set aside as `.damaged`, the log says so, and the queue starts empty (your folders are scanned again). Backup and restore carry the database; restoring an older backup imports its queue file.
+
 ## [3.0.0-rc.1] - Unreleased
 
 > [!NOTE]
 > **This is 3.0, not 2.2.** The work done as 2.2 grew into a new generation: a second encoder, Passthrough, per-lane profiles, posters, Plex editions, a
 > redesigned History page, and now a new storage format - the run history moves into a database that 2.x cannot read. Nothing of 2.2 was released as a
-> final version; 2.2.0-rc.1 and 2.2.0-rc.2 stay as the pre-releases they were.
+> final version; 2.2.0-rc.1 and 2.2.0-rc.2 stay as the pre-releases they were. **2.1.10 is the last 2.x release:** the 2.x line is retired once 3.0 is
+> released, and 3.0 takes over a 2.1 install's history by itself (it finds the old history file in the Logs folder and imports it).
 >
 > Changes since [2.2.0-rc.2](https://github.com/Compressarr/Compressarr/releases/tag/v2.2.0-rc.2)
 > only - everything else is in the entries below.
