@@ -1,5 +1,6 @@
 using Compressarr.Core.Config;
 using Compressarr.Core.Posters;
+using Compressarr.Web.Secrets;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -26,10 +27,13 @@ public static class PosterEndpoints
         });
 
         // Checks the key typed into the card (saved or not), like the other Test buttons.
-        app.MapPost("/api/posters/test", async (TestRequest request, IPosterService posters, CancellationToken cancellationToken) =>
+        app.MapPost("/api/posters/test", async (TestRequest request, IPosterService posters, IConfigStore configStore, CancellationToken cancellationToken) =>
         {
             var source = Enum.TryParse<PosterSource>(request.Source, ignoreCase: true, out var parsed) ? parsed : PosterSource.Tmdb;
-            var result = await posters.TestKeyAsync(source, request.ApiKey ?? "", cancellationToken);
+            // A box that still shows the mask tests the saved key of that source.
+            var saved = configStore.Load(AppPaths.GetConfigFilePath()).Posters;
+            var key = SecretFields.PosterTestKey(request.ApiKey, source == PosterSource.Omdb ? saved.OmdbApiKey : saved.TmdbApiKey);
+            var result = await posters.TestKeyAsync(source, key ?? "", cancellationToken);
             return Results.Json(new { success = result.Success, message = result.Message });
         });
 

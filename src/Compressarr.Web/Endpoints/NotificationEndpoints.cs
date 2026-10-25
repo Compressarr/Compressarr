@@ -3,6 +3,7 @@ using Compressarr.Core.Config;
 using Compressarr.Core.Logging;
 using Compressarr.Core.Notifications;
 using Compressarr.Web.Dtos;
+using Compressarr.Web.Secrets;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 
@@ -77,10 +78,12 @@ public static class NotificationEndpoints
             return Results.Json(types);
         });
 
-        app.MapGet("/api/notifications/channels", (IConfigStore configStore) =>
+        // The secret fields (webhook addresses, tokens) come back as the mask when saved, never as the value.
+        app.MapGet("/api/notifications/channels", (IConfigStore configStore, IEnumerable<INotifier> notifiers) =>
         {
             var config = configStore.Load(AppPaths.GetConfigFilePath());
-            return Results.Json(config.Notifications.Channels.Select(ConfigMapping.ToChannelDto).ToList());
+            var keys = SecretFields.ChannelKeys(notifiers);
+            return Results.Json(config.Notifications.Channels.Select(c => ConfigMapping.ToChannelDto(c, SecretFields.KeysFor(keys, c.Type))).ToList());
         });
 
         app.MapPost("/api/notifications/channels", (CreateChannelRequest request, IConfigStore configStore, IEnumerable<INotifier> notifiers) =>
@@ -103,21 +106,23 @@ public static class NotificationEndpoints
                     if (field.DefaultValue is not null) channel.Settings[field.Key] = field.DefaultValue;
                 }
                 config.Notifications.Channels.Add(channel);
-                return ConfigMapping.ToChannelDto(channel);
+                return ConfigMapping.ToChannelDto(channel, SecretFields.KeysFor(SecretFields.ChannelKeys(notifiers), channel.Type));
             });
 
             return Results.Json(dto);
         });
 
-        app.MapPut("/api/notifications/channels/{id}", (string id, NotificationChannelDto dto, IConfigStore configStore) =>
+        app.MapPut("/api/notifications/channels/{id}", (string id, NotificationChannelDto dto, IConfigStore configStore, IEnumerable<INotifier> notifiers) =>
         {
+            var keys = SecretFields.ChannelKeys(notifiers);
             var result = configStore.Update(AppPaths.GetConfigFilePath(), config =>
             {
                 var channel = config.Notifications.Channels.FirstOrDefault(c => c.Id == id);
                 if (channel is null) return null;
 
-                ConfigMapping.ApplyChannelDto(channel, dto);
-                return ConfigMapping.ToChannelDto(channel);
+                var secretKeys = SecretFields.KeysFor(keys, channel.Type);
+                ConfigMapping.ApplyChannelDto(channel, dto, secretKeys);
+                return ConfigMapping.ToChannelDto(channel, secretKeys);
             });
 
             return result is null ? Results.NotFound() : Results.Json(result);
@@ -136,9 +141,13 @@ public static class NotificationEndpoints
             var notifier = notifiers.FirstOrDefault(n => string.Equals(n.Type, request.Type, StringComparison.OrdinalIgnoreCase));
             if (notifier is null) return Results.Json(new { success = false, message = $"Unknown notification type '{request.Type}'." });
 
+            // A secret box that still shows the mask uses the saved value of this channel, so a changed address can be tested without retyping the token.
+            var saved = configStore.Load(AppPaths.GetConfigFilePath());
+            var settings = SecretFields.ChannelTestSettings(notifier.Type, request.Settings, request.ChannelId, saved, SecretFields.ChannelKeys(notifiers));
+
             // The saved machine-name choice, so the test message previews what a real one will look like.
-            var machineName = MachineLabel.For(configStore.Load(AppPaths.GetConfigFilePath()).Notifications);
-            var result = await notifier.TestAsync(request.Settings, CancellationToken.None, machineName);
+            var machineName = MachineLabel.For(saved.Notifications);
+            var result = await notifier.TestAsync(settings, CancellationToken.None, machineName);
             return Results.Json(new { success = result.Success, message = result.Message });
         });
 
@@ -154,10 +163,13 @@ public static class NotificationEndpoints
             var notifier = notifiers.FirstOrDefault(n => string.Equals(n.Type, request.Type, StringComparison.OrdinalIgnoreCase));
             if (notifier is null) return Results.Json(new { success = false, message = $"Unknown notification type '{request.Type}'." });
 
+            var savedConfig = configStore.Load(AppPaths.GetConfigFilePath());
+            var settings = SecretFields.ChannelTestSettings(notifier.Type, request.Settings, request.ChannelId, savedConfig, SecretFields.ChannelKeys(notifiers));
+
             var periodLabel = request.Weekly ? "Weekly Digest" : "Daily Digest";
             var summary = DigestTestSummary(configStore, historyStore, pathExpander, request.Weekly);
-            var evt = summary.ToNotificationEvent(periodLabel, MachineLabel.For(configStore.Load(AppPaths.GetConfigFilePath()).Notifications));
-            var result = await notifier.SendAsync(request.Settings, evt, CancellationToken.None);
+            var evt = summary.ToNotificationEvent(periodLabel, MachineLabel.For(savedConfig.Notifications));
+            var result = await notifier.SendAsync(settings, evt, CancellationToken.None);
             return Results.Json(new { success = result.Success, message = $"{periodLabel}: {result.Message}" });
         });
 

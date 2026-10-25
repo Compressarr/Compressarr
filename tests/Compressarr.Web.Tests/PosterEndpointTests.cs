@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Compressarr.Core.Config;
 using Compressarr.Core.Posters;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Compressarr.Web.Tests;
 
@@ -34,6 +35,10 @@ public class PosterEndpointTests
         settings["posters"] = posters;
         await Save(host, settings);
     }
+
+    /// <summary>What is really on disk: the settings endpoints never return a saved key.</summary>
+    private static CompressarrConfig Saved(QueueHost host) =>
+        host.Services.GetRequiredService<IConfigStore>().Load(AppPaths.GetConfigFilePath());
 
     private static int OmdbRequests(QueueHost host) => host.Http.Requests.Count(u => u.Host == "www.omdbapi.com");
 
@@ -69,7 +74,8 @@ public class PosterEndpointTests
         await Turn(host, true, key: "  my-key  ", size: "Large", smaller: true);
         posters = (await Settings(host))["posters"]!;
         Assert.True(posters["enabled"]!.GetValue<bool>());
-        Assert.Equal("my-key", posters["tmdbApiKey"]!.GetValue<string>());     // trimmed
+        Assert.Equal("********", posters["tmdbApiKey"]!.GetValue<string>());   // a saved key is never sent back, only the mask
+        Assert.Equal("my-key", Saved(host).Posters.TmdbApiKey);                // trimmed
         Assert.Equal("Large", posters["size"]!.GetValue<string>());
         Assert.True(posters["smallerImages"]!.GetValue<bool>());
 
@@ -95,13 +101,14 @@ public class PosterEndpointTests
         await Turn(host, true, source: "Omdb", omdbKey: "  omdbkey1  ", fallback: true);
         posters = (await Settings(host))["posters"]!;
         Assert.Equal("Omdb", posters["source"]!.GetValue<string>());
-        Assert.Equal("omdbkey1", posters["omdbApiKey"]!.GetValue<string>());   // trimmed
+        Assert.Equal("********", posters["omdbApiKey"]!.GetValue<string>());    // never sent back, only the mask
+        Assert.Equal("omdbkey1", Saved(host).Posters.OmdbApiKey);              // trimmed
         Assert.True(posters["fallbackToOther"]!.GetValue<bool>());
 
         await Turn(host, true, size: "Large");                                 // a cached page from before rc.2 sends only the old fields
         posters = (await Settings(host))["posters"]!;
         Assert.Equal("Omdb", posters["source"]!.GetValue<string>());
-        Assert.Equal("omdbkey1", posters["omdbApiKey"]!.GetValue<string>());
+        Assert.Equal("omdbkey1", Saved(host).Posters.OmdbApiKey);
         Assert.True(posters["fallbackToOther"]!.GetValue<bool>());
         Assert.Equal("Large", posters["size"]!.GetValue<string>());
 
@@ -119,7 +126,7 @@ public class PosterEndpointTests
         Assert.Contains(issues, i => i!["field"]!.GetValue<string>() == "omdbApiKey");
         Assert.DoesNotContain(issues, i => i!["field"]!.GetValue<string>() == "tmdbApiKey");
 
-        await Turn(host, true, key: "", source: "Tmdb", omdbKey: "omdbkey1");     // TMDb chosen, only an OMDb key entered
+        await Turn(host, true, key: "", source: "Tmdb", omdbKey: "omdbkey1");     // TMDb chosen, only an OMDb key entered (an empty box removes the saved TMDb key)
         issues = (await Settings(host))["validationIssues"]!.AsArray();
         Assert.Contains(issues, i => i!["field"]!.GetValue<string>() == "tmdbApiKey");
         Assert.DoesNotContain(issues, i => i!["field"]!.GetValue<string>() == "omdbApiKey");

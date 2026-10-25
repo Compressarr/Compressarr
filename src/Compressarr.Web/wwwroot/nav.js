@@ -1,3 +1,17 @@
+// A saved secret (API key, token, webhook address) is shown as dots: the server sends this mask instead of the value, and the mask sent back on a save means "unchanged".
+// Clicking into the box selects the dots so typing replaces them; deleting them all removes the secret on Save.
+const SECRET_MASK = '********';
+function wireSecretBox(input) {
+  input.addEventListener('focus', () => { if (input.value === SECRET_MASK) input.select(); });
+  input.addEventListener('mouseup', e => { if (input.value === SECRET_MASK) e.preventDefault(); });   // keeps the dots selected after a click
+  input.addEventListener('input', () => {
+    const value = input.value;
+    if (value === SECRET_MASK) return;
+    if (value.includes(SECRET_MASK)) input.value = value.replace(SECRET_MASK, '');   // typed beside the dots: only what was typed
+    else if (/^\*+$/.test(value)) input.value = '';                                  // some of the dots deleted: the rest means nothing
+  });
+}
+
 // Sign-in: when the server answers any API call with 401 login_required (a session ended, or the page was opened from outside the local network), every page goes to the login
 // page and comes back to where it was. Wrapped once here so no page needs its own handling. The page's own call never resolves, so its code does not run on an error body.
 (function () {

@@ -23,7 +23,7 @@ public sealed class DiscordNotifier : INotifier
 
     public IReadOnlyList<NotifierField> Fields { get; } = new[]
     {
-        new NotifierField("url", "Webhook URL", "text", Required: true,
+        new NotifierField("url", "Webhook URL", "text", Required: true, Secret: true,
             HelpText: "In Discord, go to a channel's Edit Channel > Integrations > Webhooks, create one, and paste its URL here.",
             Placeholder: "https://discord.com/api/webhooks/...")
     };

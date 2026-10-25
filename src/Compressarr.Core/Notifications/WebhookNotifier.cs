@@ -24,12 +24,12 @@ public sealed class WebhookNotifier : INotifier
 
     public IReadOnlyList<NotifierField> Fields { get; } = new[]
     {
-        new NotifierField("url", "URL", "text", Required: true,
+        new NotifierField("url", "URL", "text", Required: true, Secret: true,
             HelpText: "The full URL to send the request to. Also works for Zapier, Make, n8n, Node-RED, Home Assistant automation webhooks, and IFTTT (which reads value1/value2/value3 from the body this sends).",
             Placeholder: "https://example.com/webhook"),
         new NotifierField("method", "HTTP Method", "select", Required: false, Options: new[] { "POST", "PUT", "PATCH" },
             HelpText: "The HTTP method used for the request. Most services expect POST."),
-        new NotifierField("headers", "Custom Headers (one per line, Name: Value)", "textarea", Required: false,
+        new NotifierField("headers", "Custom Headers (one per line, Name: Value)", "textarea", Required: false, Secret: true,
             HelpText: "Extra HTTP headers to send with the request, one per line as Name: Value - e.g. an Authorization header some services require.",
             Placeholder: "Authorization: Bearer ...")
     };

@@ -249,7 +249,7 @@
             </div>
             <div class="field-block">
               <label for="sonarrApiKey">API Key<span class="help-tag" tabindex="0" title="Found in Sonarr under Settings &gt; General &gt; Security.">?<span class="help-tip">Found in Sonarr under Settings &gt; General &gt; Security.</span></span></label>
-              <div class="field-with-btn"><input type="password" id="sonarrApiKey" /><button id="sonarrTestBtn">Test Connection</button></div>
+              <div class="field-with-btn"><input type="password" id="sonarrApiKey" autocomplete="new-password" /><button id="sonarrTestBtn">Test Connection</button></div>
             </div>
           </div>
           <div class="routing-col">
@@ -264,7 +264,7 @@
             </div>
             <div class="field-block">
               <label for="radarrApiKey">API Key<span class="help-tag" tabindex="0" title="Found in Radarr under Settings &gt; General &gt; Security.">?<span class="help-tip">Found in Radarr under Settings &gt; General &gt; Security.</span></span></label>
-              <div class="field-with-btn"><input type="password" id="radarrApiKey" /><button id="radarrTestBtn">Test Connection</button></div>
+              <div class="field-with-btn"><input type="password" id="radarrApiKey" autocomplete="new-password" /><button id="radarrTestBtn">Test Connection</button></div>
             </div>
             <p class="enc-note" id="radarrFolderNote">To ensure Compressarr acts properly with Radarr, please uncheck "Delete empty folders" in Settings, Media Management, Folders.</p>
             <button type="button" id="radarrFolderBtn" title="Switches off that one setting in Radarr for you (Settings &gt; Media Management &gt; Folders &gt; Delete empty folders). Nothing else in Radarr is changed.">Turn it off in Radarr</button>
@@ -286,11 +286,11 @@
         </div>
         <div class="field-block">
           <label for="tmdbApiKey"><span id="tmdbKeyLabel">TMDB API Key</span><span class="help-tag" tabindex="0" title="Your free TMDB API key (the shorter &quot;API Key&quot;, not the Read Access Token). Found on your TMDB account under Settings > API.">?<span class="help-tip">Your free TMDB API key (the shorter &quot;API Key&quot;, not the Read Access Token). Found on your TMDB account under Settings > API.</span></span></label>
-          <div class="field-with-btn"><input type="password" id="tmdbApiKey" autocomplete="off" /><button id="tmdbTestBtn">Test Key</button></div>
+          <div class="field-with-btn"><input type="password" id="tmdbApiKey" autocomplete="new-password" /><button id="tmdbTestBtn">Test Key</button></div>
         </div>
         <div class="field-block">
           <label for="omdbApiKey"><span id="omdbKeyLabel">OMDb API Key</span><span class="help-tag" tabindex="0" title="The free key OMDb emails you (8 characters, letters and numbers). The free key allows 1,000 lookups a day, far more than Compressarr needs because each show or movie is looked up once and remembered.">?<span class="help-tip">The free key OMDb emails you (8 characters, letters and numbers). The free key allows 1,000 lookups a day, far more than Compressarr needs because each show or movie is looked up once and remembered.</span></span></label>
-          <div class="field-with-btn"><input type="password" id="omdbApiKey" autocomplete="off" /><button id="omdbTestBtn">Test Key</button></div>
+          <div class="field-with-btn"><input type="password" id="omdbApiKey" autocomplete="new-password" /><button id="omdbTestBtn">Test Key</button></div>
         </div>
         <div class="two-col">
           <div class="field-block">
@@ -331,6 +331,7 @@
           <div class="field-block">
             <label>Export config<span class="help-tag" tabindex="0" title="Download your full configuration - lanes, encoder settings, your own profiles, everything - as a JSON file.">?<span class="help-tip">Download your full configuration - lanes, encoder settings, your own profiles, everything - as a JSON file.</span></span></label>
             <button id="exportConfigBtn">Export</button>
+            <div class="check-row"><span class="lane-switch"><input type="checkbox" id="exportSecrets" /><span class="knob"></span></span><label for="exportSecrets">Include API keys and passwords<span class="help-tag" tabindex="0" title="Off by default, so the file is safe to send to someone for help. Tick it for a full copy to restore on another computer (keep that file private).">?<span class="help-tip">Off by default, so the file is safe to send to someone for help. Tick it for a full copy to restore on another computer (keep that file private).</span></span></label></div>
           </div>
           <div class="field-block">
             <label for="importConfigFile">Import config<span class="help-tag" tabindex="0" title="Replace your current configuration with one from a previously exported file. This overwrites all current settings and lanes.">?<span class="help-tip">Replace your current configuration with one from a previously exported file. This overwrites all current settings and lanes.</span></span></label>

@@ -160,6 +160,27 @@ the toolbar and keeps what was typed. **Tray:** "Turn off web login..." (`ResetW
 "Enabled" through the card's Save, a session ended on the server turning the next page call into a redirect to the login page, signing back in returning to the page, and restoring the setting
 from outside the local network with the current password.
 
+## Stage 4: BUILT 2026-10-25 (uncommitted)
+
+**The web endpoints no longer return a saved secret; they return a mask.** `GET /api/settings` sends `********` for a saved Sonarr, Radarr, TMDb or OMDb key (an empty string when none is
+saved), and a channel does the same for each of its secret fields. The page puts that in the box, which shows dots, so a saved key looks like a filled-in field. On a save: the **mask
+sent back keeps** the saved value (also when only the address changed), **anything typed replaces** it (trimmed), and **an empty box removes** it - there is no Clear button. A page that sends
+no value at all for a key (an older page, or no poster settings) leaves it alone. Clicking into a box that holds the mask selects the dots so typing replaces them, and deleting some of
+them leaves nothing (`wireSecretBox` in `nav.js`). What counts as a secret in a channel is the notifier's own `NotifierField.Secret` flag; Discord and Slack webhook addresses (the token is in
+the URL), the generic Webhook URL and its custom headers (often an Authorization value) are now flagged, next to the tokens that already were. The saved sign-in password shows as dots in
+the Security card too (an empty password box keeps the password: it cannot be removed while a login is required). The code is `Web/Secrets/SecretFields.cs`.
+
+**The Test buttons use the saved secret for whatever address is typed.** A box that still shows the mask tests with the saved key (the request carries `service` for Sonarr/Radarr and
+`channelId` for a channel), so a machine that got a new address from DHCP is tested without retyping its key; an emptied box has no key and says so. (Decided with the user: the address can
+change without the key. The cost is that anyone who can open Settings can point a Test at an address of their own - which is why a login is needed for anything outside the local network.)
+
+**Exports leave secrets out** unless asked: `GET /api/settings/export` redacts the four keys and every channel secret; `?includeSecrets=true` (the Backup & Restore tick-box "Include API
+keys and passwords") adds them. **Import keeps what the install has**: a secret that is blank in the file keeps the current value (a channel is matched by its id), so restoring a redacted
+file never wipes a key; a file that carries keys brings them. **The backups are unchanged and complete**: a backup zip holds the settings file (keys included) and the state database
+(`compressarr.state.db`: the Compressarr API keys, the sign-in account as a hash, the queue, holds), with the web sessions emptied; a restore brings all of it back, so integrations keep
+working with the keys they have (test: `TheCompressarrApiKeys_AreInTheBackup_AndComeBackOnARestore`). `sw.js` cache v35. The keys are still stored in `compressarr.json`; moving them to the
+state database (stage 3c) is separate and later.
+
 ## Storage, endpoints, stages
 
 - **State database v5:** `auth` (one row: method, required, trust_cgnat, username, password hash) and `web_sessions` (token hash, created, last used, expires, persistent flag, first-seen address); plus,

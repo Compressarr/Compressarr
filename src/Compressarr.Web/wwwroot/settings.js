@@ -30,6 +30,19 @@ const SETTINGS_FIELD_MAP = {
   vidTypes: '#vidTypes'
 };
 
+// ---- A saved key is never sent to the page: its box shows dots (the server's mask) and the dots sent back on Save mean "unchanged". Typing replaces the key; emptying the box removes it.
+const SECRET_BOXES = ['sonarrApiKey', 'radarrApiKey', 'tmdbApiKey', 'omdbApiKey'];
+for (const id of SECRET_BOXES) wireSecretBox(document.getElementById(id));
+
+// Shows what the server holds: dots where a key is saved, an empty box where there is none.
+function showSecrets(dto) {
+  const posters = dto.posters || {};
+  document.getElementById('sonarrApiKey').value = dto.sonarr.apiKey || '';
+  document.getElementById('radarrApiKey').value = dto.radarr.apiKey || '';
+  document.getElementById('tmdbApiKey').value = posters.tmdbApiKey || '';
+  document.getElementById('omdbApiKey').value = posters.omdbApiKey || '';
+}
+
 function applySettingsValidation(issues) {
   return applyValidationIssues(document, issues, SETTINGS_FIELD_MAP, 'Error in base configuration, check fields below.');
 }
@@ -110,9 +123,8 @@ function fillForm(dto) {
   document.getElementById('announcementsEnabled').checked = dto.announcementsEnabled;
   const posters = dto.posters || { enabled: false, tmdbApiKey: '', size: 'Medium', smallerImages: false };
   document.getElementById('postersEnabled').checked = posters.enabled;
-  document.getElementById('tmdbApiKey').value = posters.tmdbApiKey;
+  showSecrets(dto);
   document.getElementById('posterSource').value = posters.source || 'Tmdb';
-  document.getElementById('omdbApiKey').value = posters.omdbApiKey || '';
   document.getElementById('posterFallback').checked = !!posters.fallbackToOther;
   document.getElementById('posterSize').value = posters.size;
   document.getElementById('posterSmaller').checked = posters.smallerImages;
@@ -122,10 +134,8 @@ function fillForm(dto) {
   document.getElementById('postExecArgs').value = dto.postExecArgs;
   document.getElementById('sonarrEnabled').checked = dto.sonarr.enabled;
   document.getElementById('sonarrUrl').value = dto.sonarr.url;
-  document.getElementById('sonarrApiKey').value = dto.sonarr.apiKey;
   document.getElementById('radarrEnabled').checked = dto.radarr.enabled;
   document.getElementById('radarrUrl').value = dto.radarr.url;
-  document.getElementById('radarrApiKey').value = dto.radarr.apiKey;
   document.getElementById('webPort').value = dto.webPort;
   document.getElementById('allowedHosts').value = dto.allowedHosts || '';
   document.getElementById('backupFolderPath').value = dto.backupFolderPath;
@@ -175,12 +185,12 @@ function readForm() {
     sonarr: {
       enabled: document.getElementById('sonarrEnabled').checked,
       url: document.getElementById('sonarrUrl').value,
-      apiKey: document.getElementById('sonarrApiKey').value
+      apiKey: document.getElementById('sonarrApiKey').value.trim()
     },
     radarr: {
       enabled: document.getElementById('radarrEnabled').checked,
       url: document.getElementById('radarrUrl').value,
-      apiKey: document.getElementById('radarrApiKey').value
+      apiKey: document.getElementById('radarrApiKey').value.trim()
     },
     webPort: parseInt(document.getElementById('webPort').value, 10) || 1212,
     allowedHosts: document.getElementById('allowedHosts').value,
@@ -225,6 +235,8 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
   if (res.ok) {
     const dto = await res.json();
     settingsDirty = false;
+    showSecrets(dto);
+    updatePosterCard();
     // The sign-in settings are saved by their own call, right after the rest; a refusal (a short password, a wrong current password) is said, and the card keeps what was typed.
     if (!(await saveAuth())) return;
     // The toolbar (announcements bell, update arrow) follows what was just saved without a page change.
@@ -282,7 +294,8 @@ async function testArrConnection(service) {
     body: JSON.stringify({
       enabled: true,
       url: document.getElementById(`${service}Url`).value,
-      apiKey: document.getElementById(`${service}ApiKey`).value
+      apiKey: document.getElementById(`${service}ApiKey`).value.trim(),
+      service
     })
   });
   const body = await res.json();
@@ -295,7 +308,7 @@ async function testArrConnection(service) {
 const RADARR_FOLDER_NOTE = 'To ensure Compressarr acts properly with Radarr, please uncheck "Delete empty folders" in Settings, Media Management, Folders.';
 
 function radarrCredentials() {
-  return { enabled: true, url: document.getElementById('radarrUrl').value, apiKey: document.getElementById('radarrApiKey').value };
+  return { enabled: true, url: document.getElementById('radarrUrl').value, apiKey: document.getElementById('radarrApiKey').value.trim(), service: 'radarr' };
 }
 
 async function refreshRadarrFolderNote() {
@@ -346,15 +359,13 @@ document.getElementById('omdbTestBtn').addEventListener('click', () => testPoste
 // source shows its credit while it is in use.
 function updatePosterCard() {
   const omdbChosen = document.getElementById('posterSource').value === 'Omdb';
-  const tmdbKey = document.getElementById('tmdbApiKey').value.trim();
-  const omdbKey = document.getElementById('omdbApiKey').value.trim();
-  const otherKey = omdbChosen ? tmdbKey : omdbKey;
-  const fallbackOn = otherKey !== '' && document.getElementById('posterFallback').checked;
+  const otherHasKey = document.getElementById(omdbChosen ? 'tmdbApiKey' : 'omdbApiKey').value.trim() !== '';
+  const fallbackOn = otherHasKey && document.getElementById('posterFallback').checked;
 
   document.getElementById('tmdbKeyLabel').textContent = omdbChosen ? 'TMDB API Key (optional backup)' : 'TMDB API Key';
   document.getElementById('omdbKeyLabel').textContent = omdbChosen ? 'OMDb API Key' : 'OMDb API Key (optional backup)';
 
-  document.getElementById('posterFallbackRow').classList.toggle('hidden', otherKey === '');
+  document.getElementById('posterFallbackRow').classList.toggle('hidden', !otherHasKey);
   document.getElementById('posterFallbackFrom').textContent = omdbChosen ? 'OMDb' : 'TMDb';
   document.getElementById('posterFallbackTo').textContent = omdbChosen ? 'TMDb' : 'OMDb';
 
@@ -399,7 +410,7 @@ document.getElementById('exportConfigBtn').addEventListener('click', () => {
   // Content-Disposition: attachment (set by Results.File's fileDownloadName on the server) makes
   // the browser download this instead of navigating to it, so a plain location change is enough
   // - no anchor/blob juggling needed.
-  window.location.href = '/api/settings/export';
+  window.location.href = '/api/settings/export' + (document.getElementById('exportSecrets').checked ? '?includeSecrets=true' : '');
 });
 
 document.getElementById('importConfigBtn').addEventListener('click', () => {
@@ -674,6 +685,18 @@ function syncAuthVisibility() {
   document.getElementById('authNote').classList.toggle('hidden', method !== 'None' && authLoaded && authLoaded.hasPassword);
 }
 
+// The dots mean no new password: sent as empty, which keeps the saved one.
+function unmasked(id) {
+  const value = document.getElementById(id).value;
+  return value === SECRET_MASK ? '' : value;
+}
+
+for (const id of ['authPassword', 'authPasswordConfirm']) wireSecretBox(document.getElementById(id));
+document.getElementById('authPassword').addEventListener('input', () => {
+  const confirmation = document.getElementById('authPasswordConfirm');
+  if (confirmation.value === SECRET_MASK && document.getElementById('authPassword').value !== SECRET_MASK) confirmation.value = '';   // a new password is typed again below
+});
+
 async function loadAuth() {
   try {
     const res = await fetch('/api/auth/settings');
@@ -683,10 +706,10 @@ async function loadAuth() {
     document.getElementById('authMethod').value = a.method;
     document.getElementById('authRequired').value = a.required;
     document.getElementById('authUsername').value = a.username || '';
-    document.getElementById('authPassword').value = '';
-    document.getElementById('authPasswordConfirm').value = '';
+    // A saved password shows as dots in both boxes (the same mask as the keys); the dots sent back mean "keep the password".
+    document.getElementById('authPassword').value = a.hasPassword ? SECRET_MASK : '';
+    document.getElementById('authPasswordConfirm').value = a.hasPassword ? SECRET_MASK : '';
     document.getElementById('authCurrentPassword').value = '';
-    document.getElementById('authPassword').placeholder = a.hasPassword ? 'saved - type to replace' : '';
     document.getElementById('authTrustCgnat').checked = !!a.trustCgnat;
     // Signed in from outside the local network: the current password is needed to change anything here.
     document.getElementById('authCurrentPasswordBlock').classList.toggle('hidden', !!a.requestIsLocal);
@@ -706,8 +729,8 @@ async function saveAuth() {
       required: document.getElementById('authRequired').value,
       trustCgnat: document.getElementById('authTrustCgnat').checked,
       username: document.getElementById('authUsername').value,
-      password: document.getElementById('authPassword').value,
-      passwordConfirmation: document.getElementById('authPasswordConfirm').value,
+      password: unmasked('authPassword'),
+      passwordConfirmation: unmasked('authPasswordConfirm'),
       currentPassword: document.getElementById('authCurrentPassword').value
     })
   });

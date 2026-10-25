@@ -37,12 +37,12 @@ public sealed record NotificationChannelDto(
 
 public sealed record CreateChannelRequest(string Type);
 
-public sealed record TestNotifierRequest(string Type, Dictionary<string, string> Settings);
+public sealed record TestNotifierRequest(string Type, Dictionary<string, string> Settings, string? ChannelId = null);
 
 /// <summary>Weekly picks which of Daily/Weekly's own window+label the digest-test endpoints use -
 /// the client sends one call per digest type currently checked on that card/toast's own row, so
 /// testing with both Daily and Weekly enabled produces two distinctly-labeled test sends, not two
 /// identical ones.</summary>
-public sealed record DigestTestRequest(string Type, Dictionary<string, string> Settings, bool Weekly = false);
+public sealed record DigestTestRequest(string Type, Dictionary<string, string> Settings, bool Weekly = false, string? ChannelId = null);
 
 public sealed record DigestTestToastRequest(bool Weekly = false);

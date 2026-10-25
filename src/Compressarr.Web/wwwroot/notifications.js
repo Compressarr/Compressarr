@@ -202,14 +202,14 @@ function fieldInputHtml(field, value) {
   const val = value || '';
   const placeholder = field.placeholder ? ` placeholder="${escapeHtml(field.placeholder)}"` : '';
   if (field.inputType === 'textarea') {
-    return `<textarea class="f-setting" data-key="${field.key}" rows="3"${placeholder}>${escapeHtml(val)}</textarea>`;
+    return `<textarea class="f-setting" data-key="${field.key}"${field.secret ? ' data-secret="1"' : ''} rows="3"${placeholder}>${escapeHtml(val)}</textarea>`;
   }
   if (field.inputType === 'select') {
     const options = (field.options || []).map(o => `<option value="${escapeHtml(o)}" ${o === val ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('');
     return `<select class="f-setting" data-key="${field.key}">${options}</select>`;
   }
   const inputType = field.inputType === 'password' || field.secret ? 'password' : 'text';
-  return `<input type="${inputType}" class="f-setting" data-key="${field.key}" value="${escapeHtml(val)}"${placeholder} />`;
+  return `<input type="${inputType}" class="f-setting" data-key="${field.key}"${field.secret ? ' data-secret="1" autocomplete="new-password"' : ''} value="${escapeHtml(val)}"${placeholder} />`;
 }
 
 function channelCardFromDto(dto) {
@@ -288,6 +288,9 @@ function channelCardFromDto(dto) {
   node.querySelector('.f-digest-weekly-time').value = dto.digestWeeklyTime || '09:00';
   node.querySelector('.f-digest-weekly-day').value = dto.digestWeeklyDay || 'Monday';
 
+  // A saved secret (webhook address, token) is never sent to the page: the box shows dots, the dots sent back mean "unchanged", typing replaces, emptying the box removes it.
+  for (const box of node.querySelectorAll('.f-setting[data-secret="1"]')) wireSecretBox(box);
+
   node.querySelector('.save-channel-btn').addEventListener('click', () => saveChannel(node));
   node.querySelector('.remove-channel-btn').addEventListener('click', () => removeChannel(node));
   node.querySelector('.test-channel-btn').addEventListener('click', () => testChannel(node));
@@ -353,6 +356,12 @@ async function saveChannel(node) {
     body: JSON.stringify(dto)
   });
 
+  if (res.ok) {
+    // The boxes show what the server now holds: dots for a saved secret, empty for none.
+    const saved = await res.json().catch(() => ({}));
+    for (const input of node.querySelectorAll('.f-setting[data-secret="1"]')) input.value = (saved.settings && saved.settings[input.dataset.key]) || '';
+  }
+
   if (!res.ok) {
     setStatusMessage('Failed to save channel.', 'error');
   } else if (hasIssues) {
@@ -382,7 +391,7 @@ async function testChannel(node) {
   const res = await fetch('/api/notifications/test', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ type: dto.type, settings: dto.settings })
+    body: JSON.stringify({ type: dto.type, settings: dto.settings, channelId: dto.id })
   });
   const body = await res.json();
   setStatusMessage(body.message, body.success ? 'success' : 'error');
@@ -406,7 +415,7 @@ async function testChannelDigest(node) {
     const res = await fetch('/api/notifications/digest-test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: dto.type, settings: dto.settings, weekly })
+      body: JSON.stringify({ type: dto.type, settings: dto.settings, weekly, channelId: dto.id })
     });
     results.push(await res.json());
   }

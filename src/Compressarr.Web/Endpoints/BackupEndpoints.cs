@@ -35,10 +35,12 @@ public static class BackupEndpoints
         // Also carries the user's own HandBrake profiles (under "handBrakeUserProfiles") - the
         // lanes in this file name profiles, and an export that couldn't bring them along would
         // restore lanes pointing at nothing. A 2.1.x install importing it just ignores that key.
-        app.MapGet("/api/settings/export", (IConfigStore configStore, IHandBrakeProfileStore profiles, IFFmpegProfileStore ffmpegProfiles) =>
+        app.MapGet("/api/settings/export", (string? includeSecrets, IConfigStore configStore, IHandBrakeProfileStore profiles, IFFmpegProfileStore ffmpegProfiles, IEnumerable<Compressarr.Core.Notifications.INotifier> notifiers) =>
         {
             var config = configStore.Load(AppPaths.GetConfigFilePath());
-            var node = JsonSerializer.SerializeToNode(config, ExportOptions)!.AsObject();
+            // An export is something people send to others, so by default it carries no keys, tokens or webhook addresses; ?includeSecrets=true (the tick-box) adds them.
+            var shared = includeSecrets is "true" or "1" ? config : Secrets.SecretFields.Redacted(config, Secrets.SecretFields.ChannelKeys(notifiers));
+            var node = JsonSerializer.SerializeToNode(shared, ExportOptions)!.AsObject();
             node[ExportProfilesKey] = new JsonArray(profiles.GetAll().Where(p => !p.IsBuiltIn && !p.IsCatalog).Select(p => (JsonNode)p.Definition.DeepClone()).ToArray());
             node[ExportFFmpegProfilesKey] = new JsonArray(ffmpegProfiles.GetAll().Where(p => !p.IsBuiltIn && !p.IsCatalog)
                 .Select(p => JsonSerializer.SerializeToNode(p, FFmpegProfileJson)!).ToArray());
@@ -63,7 +65,7 @@ public static class BackupEndpoints
             return Results.File(bytes, "application/json", $"compressarr-config-{DateTime.Now:yyyy-MM-dd}.json");
         });
 
-        app.MapPost("/api/settings/import", async (HttpRequest request, IConfigStore configStore, IHandBrakeProfileStore profiles, IFFmpegProfileStore ffmpegProfiles, IHandBrakeProfileMigration migration, Compressarr.Core.Startup.IStartupRegistrationService startupRegistration) =>
+        app.MapPost("/api/settings/import", async (HttpRequest request, IConfigStore configStore, IHandBrakeProfileStore profiles, IFFmpegProfileStore ffmpegProfiles, IHandBrakeProfileMigration migration, Compressarr.Core.Startup.IStartupRegistrationService startupRegistration, IEnumerable<Compressarr.Core.Notifications.INotifier> notifiers) =>
         {
             using var reader = new StreamReader(request.Body);
             var raw = await reader.ReadToEndAsync();
@@ -99,6 +101,8 @@ public static class BackupEndpoints
 
                 // An export from an earlier version carries that machine's app-written values (last backup, digest-sent days, viewed-through marker): they are
                 // not settings, and another computer's "digest already sent today" must not silence this one, so they are dropped.
+                // A key, token or webhook address that is blank in the file (a redacted export) keeps what this install already has.
+                Secrets.SecretFields.KeepExisting(imported, configStore.Load(AppPaths.GetConfigFilePath()), Secrets.SecretFields.ChannelKeys(notifiers));
                 SqliteAppState.ClearLegacyValues(imported);
                 configStore.Save(imported, AppPaths.GetConfigFilePath());
 

@@ -1,5 +1,6 @@
 using Compressarr.Core.Config;
 using Compressarr.Web.Dtos;
+using Compressarr.Web.Secrets;
 
 namespace Compressarr.Web;
 
@@ -37,8 +38,8 @@ internal static class ConfigMapping
         LaunchMonitorAtStartup: config.Repeat.LaunchMonitorAtStartup,
         PollIntervalSeconds: config.Repeat.PollIntervalSeconds,
         QueueEtaFormat: config.Repeat.QueueEtaFormat.ToString(),
-        Sonarr: new ArrServiceDto(config.Arrs.Sonarr.Enabled, config.Arrs.Sonarr.Url, config.Arrs.Sonarr.ApiKey),
-        Radarr: new ArrServiceDto(config.Arrs.Radarr.Enabled, config.Arrs.Radarr.Url, config.Arrs.Radarr.ApiKey),
+        Sonarr: new ArrServiceDto(config.Arrs.Sonarr.Enabled, config.Arrs.Sonarr.Url, SecretFields.Show(config.Arrs.Sonarr.ApiKey)),   // a saved key is never sent, only the mask
+        Radarr: new ArrServiceDto(config.Arrs.Radarr.Enabled, config.Arrs.Radarr.Url, SecretFields.Show(config.Arrs.Radarr.ApiKey)),
         WebPort: config.Web.Port,
         RunAtLogin: config.Startup.RunAtLogin,
         AnnouncementsEnabled: config.Announcements.Enabled,
@@ -48,8 +49,8 @@ internal static class ConfigMapping
         BackupRetentionDays: config.Backup.RetentionDays,
         BackupLastRunUtc: backupLastRunUtc,
         ValidationIssues: validationIssues,
-        Posters: new PosterSettingsDto(config.Posters.Enabled, config.Posters.TmdbApiKey, config.Posters.Size.ToString(), config.Posters.SmallerImages,
-            config.Posters.Source.ToString(), config.Posters.OmdbApiKey, config.Posters.FallbackToOther),
+        Posters: new PosterSettingsDto(config.Posters.Enabled, SecretFields.Show(config.Posters.TmdbApiKey), config.Posters.Size.ToString(), config.Posters.SmallerImages,
+            config.Posters.Source.ToString(), SecretFields.Show(config.Posters.OmdbApiKey), config.Posters.FallbackToOther),
         SaveReportCopy: config.Report.SaveCopy,
         ReportCopyRetentionDays: config.Report.CopyRetentionDays,
         UnseenErrorDays: config.Report.UnseenErrorDays,
@@ -90,8 +91,11 @@ internal static class ConfigMapping
         config.Repeat.LaunchMonitorAtStartup = dto.LaunchMonitorAtStartup;
         config.Repeat.PollIntervalSeconds = dto.PollIntervalSeconds;
         config.Repeat.QueueEtaFormat = Enum.Parse<QueueEtaDisplayFormat>(dto.QueueEtaFormat);
-        config.Arrs.Sonarr = new ArrServiceSettings { Enabled = dto.Sonarr.Enabled, Url = dto.Sonarr.Url, ApiKey = dto.Sonarr.ApiKey };
-        config.Arrs.Radarr = new ArrServiceSettings { Enabled = dto.Radarr.Enabled, Url = dto.Radarr.Url, ApiKey = dto.Radarr.ApiKey };
+        // A key box that still shows the mask keeps the saved key; anything else is what was typed - an empty box removes the key.
+        var sonarrKey = SecretFields.Resolve(dto.Sonarr.ApiKey, config.Arrs.Sonarr.ApiKey);
+        var radarrKey = SecretFields.Resolve(dto.Radarr.ApiKey, config.Arrs.Radarr.ApiKey);
+        config.Arrs.Sonarr = new ArrServiceSettings { Enabled = dto.Sonarr.Enabled, Url = dto.Sonarr.Url, ApiKey = sonarrKey };
+        config.Arrs.Radarr = new ArrServiceSettings { Enabled = dto.Radarr.Enabled, Url = dto.Radarr.Url, ApiKey = radarrKey };
         config.Web.Port = dto.WebPort;
         config.Startup.RunAtLogin = dto.RunAtLogin;
         // Like the poster and HDR choices: a page that does not send these (an older cached one) leaves the saved values alone.
@@ -107,12 +111,12 @@ internal static class ConfigMapping
         if (dto.Posters is { } posters)
         {
             config.Posters.Enabled = posters.Enabled;
-            config.Posters.TmdbApiKey = (posters.TmdbApiKey ?? "").Trim();
+            config.Posters.TmdbApiKey = SecretFields.Resolve(posters.TmdbApiKey, config.Posters.TmdbApiKey);
             config.Posters.Size = Enum.TryParse<PosterSize>(posters.Size, ignoreCase: true, out var posterSize) ? posterSize : PosterSize.Medium;
             config.Posters.SmallerImages = posters.SmallerImages;
             // Added in 2.2.0-rc.2: a page that does not send them (an older cached one) leaves the saved choice alone.
             if (posters.Source is not null) config.Posters.Source = Enum.TryParse<PosterSource>(posters.Source, ignoreCase: true, out var posterSource) ? posterSource : PosterSource.Tmdb;
-            if (posters.OmdbApiKey is not null) config.Posters.OmdbApiKey = posters.OmdbApiKey.Trim();
+            config.Posters.OmdbApiKey = SecretFields.Resolve(posters.OmdbApiKey, config.Posters.OmdbApiKey);
             if (posters.FallbackToOther is { } fallback) config.Posters.FallbackToOther = fallback;
         }
 
@@ -141,15 +145,27 @@ internal static class ConfigMapping
         if (dto.AllowHdrLoss is { } allowHdrLoss) lane.AllowHdrLoss = allowHdrLoss;
     }
 
-    public static NotificationChannelDto ToChannelDto(NotificationChannel channel) => new(
-        channel.Id, channel.Type, channel.DisplayName, channel.Trigger.ToString(), new Dictionary<string, string>(channel.Settings),
+    /// <summary>A channel as the page sees it: the notifier's secret fields (<paramref name="secretKeys"/>) come back as the mask when saved (never the value).</summary>
+    public static NotificationChannelDto ToChannelDto(NotificationChannel channel, HashSet<string> secretKeys) => new(
+        channel.Id, channel.Type, channel.DisplayName, channel.Trigger.ToString(),
+        channel.Settings.ToDictionary(kv => kv.Key, kv => secretKeys.Contains(kv.Key) ? SecretFields.Show(kv.Value) : kv.Value),
         channel.DigestDailyEnabled, channel.DigestWeeklyEnabled, channel.DigestDailyTime, channel.DigestWeeklyTime, channel.DigestWeeklyDay.ToString());
 
-    public static void ApplyChannelDto(NotificationChannel channel, NotificationChannelDto dto)
+    public static void ApplyChannelDto(NotificationChannel channel, NotificationChannelDto dto, HashSet<string> secretKeys)
     {
         channel.DisplayName = dto.DisplayName;
         channel.Trigger = Enum.Parse<NotificationTrigger>(dto.Trigger);
-        channel.Settings = new Dictionary<string, string>(dto.Settings);
+        // A secret field that still shows the mask (or is not sent) keeps the saved value; anything else is what was typed - an empty box removes it. The other fields are taken as sent.
+        var settings = new Dictionary<string, string>(dto.Settings);
+        foreach (var key in secretKeys)
+        {
+            var typed = settings.TryGetValue(key, out var value) ? value : null;
+            var existing = channel.Settings.TryGetValue(key, out var saved) ? saved : "";
+            var resolved = SecretFields.Resolve(typed, existing);
+            if (resolved.Length == 0) settings.Remove(key); else settings[key] = resolved;
+        }
+
+        channel.Settings = settings;
         // Type is deliberately not settable via update - a channel's type is fixed at creation
         // (its field schema depends on it); changing type would need a new channel instead.
 

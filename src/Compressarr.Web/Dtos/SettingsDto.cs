@@ -51,4 +51,6 @@ public sealed record SettingsDto(
 /// <summary>Null (an older page that does not know about posters) leaves the saved poster settings as they are.</summary>
 public sealed record PosterSettingsDto(bool Enabled, string TmdbApiKey, string Size, bool SmallerImages, string? Source = null, string? OmdbApiKey = null, bool? FallbackToOther = null);
 
-public sealed record ArrServiceDto(bool Enabled, string Url, string ApiKey);
+/// <summary>In a response ApiKey is the mask when a key is saved (never the key) and empty when there is none. In a save the mask keeps the saved key, anything else is the new key and an empty
+/// box removes it. <paramref name="Service"/> (sonarr or radarr) lets a Test button that still shows the mask use the saved key.</summary>
+public sealed record ArrServiceDto(bool Enabled, string Url, string ApiKey, string? Service = null);

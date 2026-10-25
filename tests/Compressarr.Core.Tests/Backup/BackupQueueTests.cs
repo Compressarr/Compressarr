@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using Compressarr.Core.Api;
 using Compressarr.Core.Backup;
 using Compressarr.Core.Config;
 using Compressarr.Core.Conversion;
@@ -66,6 +67,27 @@ public class BackupQueueTests : AppDataTestBase
         Assert.DoesNotContain("compressarr.resume.json", entries);
         Assert.True(restore.Success, restore.Error);
         Assert.Equal(new[] { @"C:\In\a.mkv", @"C:\In\b.mkv" }, new SqliteResumeStateStore().Load(AppPaths.GetResumeFilePath()).Select(e => e.FullName));
+    }
+
+    /// <summary>The Compressarr API keys live in the same database, so a backup carries them and a restore brings them back: Home Assistant and other callers keep working with the keys they have.</summary>
+    [Fact]
+    public async Task TheCompressarrApiKeys_AreInTheBackup_AndComeBackOnARestore()
+    {
+        var (service, backupFolder) = Build();
+        var keys = new SqliteApiKeyStore(new SqliteResumeStateStore());
+        var control = keys.GetKey(ApiKeyScope.Control);
+        var read = keys.GetKey(ApiKeyScope.Read);
+
+        var backup = await service.RunBackupAsync();
+        keys.Regenerate(ApiKeyScope.Control);                    // keys changed after the backup
+        keys.Regenerate(ApiKeyScope.Read);
+        var restore = await service.RestoreBackupAsync(backup.FileName!, backupFolder);
+
+        Assert.True(restore.Success, restore.Error);
+        var after = new SqliteApiKeyStore(new SqliteResumeStateStore());
+        Assert.Equal(control, after.GetKey(ApiKeyScope.Control));
+        Assert.Equal(read, after.GetKey(ApiKeyScope.Read));
+        Assert.NotNull(after.Authenticate(control));
     }
 
     [Fact]
