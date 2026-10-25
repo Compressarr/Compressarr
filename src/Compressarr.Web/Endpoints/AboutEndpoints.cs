@@ -11,6 +11,8 @@ public static class AboutEndpoints
     // The informational version carries any pre-release suffix ("2.2.0-dev"), which the numeric
     // assembly version drops - shown so a dev/pre-release build can be told apart from a release.
     // Build metadata after '+' (the commit hash) is trimmed off.
+    internal static string InstalledVersion => InstalledVersionString;
+
     private static string InstalledVersionString =>
         typeof(AboutEndpoints).Assembly
             .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)

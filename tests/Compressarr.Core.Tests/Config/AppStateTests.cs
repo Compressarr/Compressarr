@@ -167,7 +167,7 @@ public class AppStateTests : AppDataTestBase
     {
         var resumePath = AppPaths.GetResumeFilePath();
         new SqliteResumeStateStore().Save(new List<ResumeEntry> { new() { LaneId = "lane1", FullName = @"C:\In\a.mkv", Order = 3 } }, resumePath);
-        // Make it look like a database written by 3.0.0-rc.2: schema version 1, no kv table.
+        // Make it look like a database written by 3.0.0-rc.2: schema version 1, no kv or api_keys table (both are added by the migration).
         var oldFolder = Directory.CreateDirectory(Path.Combine(AppData, "old")).FullName;
         var oldResume = Path.Combine(oldFolder, "compressarr.resume.json");
         StateDatabase.Snapshot(AppPaths.GetStateDbPath(), StateDatabase.PathFor(oldResume));
@@ -175,7 +175,7 @@ public class AppStateTests : AppDataTestBase
         {
             connection.Open();
             using var command = connection.CreateCommand();
-            command.CommandText = "DROP TABLE kv; PRAGMA user_version = 1;";
+            command.CommandText = "DROP TABLE kv; DROP TABLE api_keys; PRAGMA user_version = 1;";
             command.ExecuteNonQuery();
         }
 

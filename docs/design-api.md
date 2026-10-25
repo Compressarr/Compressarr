@@ -99,12 +99,26 @@ through `PATCH /api/v1/schedule`. A custom HACS integration is parked: REST sens
    `compressarr.state.db` instead (copied once from the settings file, then no longer written there; a restored older backup that still carries them is picked up once). The same
    migration adds `api_keys` and `holds`. Ships with rc.3 (rc.1 and rc.2 stay local).
 1. **Keys:** key store, endpoint filter for the `/api/v1` group (scope check, constant-time compare, throttle), the Settings card (create, copy once, revoke), tests.
+   **BUILT 2026-10-25 (uncommitted).** State database v3 adds `api_keys` (id, name, scope, hash, prefix, created_at, last_used_at; revoking deletes the row). `IApiKeyStore` / `SqliteApiKeyStore`
+   (Core/Api), key format `cmpk_` plus 43 URL-safe characters, SHA-256 of the key looked up by hash (the key is 256 random bits, so a plain indexed lookup leaks nothing useful), at most 20 keys,
+   `last_used_at` written at most once a minute. Web: `ApiKeyFilter` (X-Api-Key or Bearer; 401 `no_keys`/`missing_key`/`invalid_key`, 403 `insufficient_scope`, 429 `too_many_attempts` with
+   Retry-After) on the `/api/v1` group, scope marked per endpoint with `.RequireApiScope(...)` (unmarked = read), `ApiKeyThrottle` (five wrong keys from an address within a minute lock it for a
+   minute), `GET /api/v1/whoami`, and the UI's own `GET/POST/DELETE /api/automation/keys` (not under /api/v1: a key cannot make keys). If the state database cannot be opened nothing is accepted.
+   `X-Api-Key` and bearer are both accepted; missing keys are not counted as failures, only wrong ones.
 2. **Read endpoints** and their DTOs, new query methods on the archive (runs list and detail, stats), golden-JSON contract tests so a field cannot be renamed by accident.
 3. **Control endpoints,** the external hold in the engine and `EncodeSchedule` (including with the schedule disabled), the Monitor banner and Release button, schedule `PATCH`.
 3b. **Protect the web interface** (decided 2026-10-25, in rc.3): optional username and password (off by default so nothing changes for an existing install), a login page and session cookie for the browser, the
    tray app's own browser window and the notification links still working, `/api/v1` unaffected (it uses keys), the legacy open `/api/run/status` either kept open or covered by a switch (to decide when
-   designing this stage), secrets (Sonarr/Radarr/TMDb/OMDb keys, webhook URLs) no longer returned in clear by `GET /api/settings`. Needs its own short design note before it is built (cookie lifetime,
+   designing this stage). **Secrets leave the open endpoints in this stage (decided 2026-10-25):** the Sonarr/Radarr/TMDb/OMDb keys and the notification channels' secret fields (the ones their
+   `NotifierField` marks `Secret: true`: webhook URLs, tokens, user keys) are no longer returned by `GET /api/settings` and `GET /api/notifications/channels`; the page shows "saved" for a field that is set,
+   and a save replaces a secret only when a new value is typed (a blank box keeps it). The settings **export** redacts them by default, with an "Include keys and passwords" tick-box that is off unless
+   chosen; backups keep them (they exist to restore the same install). Needs its own short design note before it is built (cookie lifetime,
    password storage with a slow hash, lockout, reverse-proxy and HTTP caveats, recovery if the password is forgotten: a start-up switch or deleting a row in the state database).
+3c. **Secrets move to the state database** (decided 2026-10-25, after 3b): an `ISecretStore` over a `secrets` table (schema v5) holds the Sonarr/Radarr/TMDb/OMDb keys and the notification channels'
+   secret fields, so `compressarr.settings.json` carries none and is safe to share or attach to a support request. About 24 places read the Arr/poster keys and 5 read channel settings; they go through
+   the store. Same pattern as stage 0: the first start moves what an older file holds (and removes it), a restored older backup does the same, an import drops them unless the export included them. The
+   values stay readable (Compressarr must send them), so this is hygiene against accidental sharing, not encryption: against anything running as the user nothing changes, and backups still carry them. No
+   encryption at rest (DPAPI): it adds almost nothing and breaks moving a profile between machines.
 4. **Docs and spec:** OpenAPI document, wiki *API and Automation* page, the rewritten Home Assistant page, README, test plan, CHANGELOG, a short note in the Utilities README.
 5. **After rc.3, once the queue database has had a few weeks in production:** simplify the queue code (user, 2026-10-25). Replace the diff-and-merge code (`ResumeResults.SaveChanges`,
    `QueueRules.MergeUserEdits`, the reflection over every field) with plain row updates (`UPDATE ... WHERE lane_id = ? AND file = ?`), and have the Monitor ask for rows (a page of the queue, a

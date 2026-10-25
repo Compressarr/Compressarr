@@ -13,6 +13,9 @@ for that full history.
 
 > Local build in progress (the API release); rc.1 and rc.2 are local test builds that were never published.
 
+### Added
+- **Automation API keys (the first piece of the Automation API).** Settings has a new **Automation API** card where you create, list and revoke API keys for scripts and Home Assistant. A key is shown **once** when it is made (with a Copy button); only a hash of it is kept, in the state database, so it can never be shown again and is not in settings exports. Each key has a name and an access level: **Read only** (for dashboards) or **Control** (read, plus act). Calls go to addresses starting `/api/v1` with the key in an `X-Api-Key` header (or `Authorization: Bearer`); `GET /api/v1/whoami` says who a key is and which version answered. Until a key exists the API is off, there is no anonymous mode, wrong keys are slowed down (five wrong tries lock that address out for a minute), and a revoked key stops working at once. The status, queue, history and control calls follow in the next steps; the web UI itself is unchanged.
+
 ### Changed
 - **Compressarr no longer rewrites your settings file as it works.** The values the app itself records - when the last backup finished, the day each digest was last sent (so it goes out once a day), and how far you had viewed on the History page (the sidebar badges) - moved from `compressarr.settings.json` into the state database, `compressarr.state.db`. Before, every digest and backup rewrote the settings file (and put those values into every settings export and into support files people shared). The first start moves whatever an older settings file still holds and takes it out of the file; restoring an older backup does the same; importing an export from another computer drops them (its "digest already sent today" must not silence this one). Nothing changes on screen: the Settings page still shows the last backup.
 

@@ -11,6 +11,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCompressarrWeb(this IServiceCollection services)
     {
         services.AddSingleton<CurrentRunStateService>();
+        services.AddSingleton<Compressarr.Web.Api.ApiKeyThrottle>();
         services.AddSingleton<IRunProgressReporter>(sp => sp.GetRequiredService<CurrentRunStateService>());
 
         return services;
