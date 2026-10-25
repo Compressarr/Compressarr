@@ -9,6 +9,7 @@ const OV_DAY = 86400000;
 const OV_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const OV_PERIODS = { all: 'All time', year: 'Last year', d30: 'Last 30 days', d7: 'Last 7 days', today: 'Today' };
 const OV_CARDS_KEY = 'compressarr.history.cards';
+const OV_ORDER_KEY = 'compressarr.history.cardOrder';   // every stat's place in the row, shown or not: the shown ones appear in this order
 const OV_PERIOD_KEY = 'compressarr.history.period';
 const OV_PURPLE = 'var(--notice-text)';
 const OV_GREY = 'color-mix(in srgb, var(--text-dim) 35%, var(--bg-alt))';
@@ -23,6 +24,10 @@ let ovToday = 0;          // the server's date, as UTC milliseconds
 let ovNow = 0;            // the server's date and time, the same way
 let ovRollups = null;
 let ovChosen = null;
+let ovOrder = [];            // the ids of every stat, in the order the user arranged them (see ovShown)
+let ovDragId = null;         // the card being dragged, while it is
+let ovGhost = null;
+let ovGrab = { x: 0, y: 0 };
 let ovPeriod = 'all';
 
 function ovRead(key, fallback) {
@@ -255,10 +260,86 @@ const OV_CARDS = [
       return { value: rate.toFixed(1) + ' fps', sub: 'frames per second, across ' + n + (n === 1 ? ' run' : ' runs'), viz: ovBars(per, per.length - 1, 'var(--accent)', c.buckets.map(b => b.name), v => v ? v.toFixed(1) + ' fps' : 'no reading') }; } }
 ];
 
+const OV_GRIP = '<svg width="18" height="10" viewBox="0 0 18 10" fill="currentColor"><circle cx="3" cy="2" r="1.5"></circle><circle cx="9" cy="2" r="1.5"></circle><circle cx="15" cy="2" r="1.5"></circle><circle cx="3" cy="8" r="1.5"></circle><circle cx="9" cy="8" r="1.5"></circle><circle cx="15" cy="8" r="1.5"></circle></svg>';
+
 function ovTile(card, d) {
   const label = d.label || card.label;
-  return `<div class="stat ov-card" title="${label}"><div class="ov-head"><span class="label">${label}</span><span class="ov-ico">${ovIcon(OV_ICONS[card.icon])}</span></div>` +
+  return `<div class="stat ov-card${card.id === ovDragId ? ' ov-dragging' : ''}" data-c="${card.id}" title="${label}"><span class="ov-grip" role="button" tabindex="0" aria-label="Move ${label}: drag, or press the arrow keys" title="Drag to rearrange (or use the arrow keys)">${OV_GRIP}</span><div class="ov-head"><span class="label">${label}</span><span class="ov-ico">${ovIcon(OV_ICONS[card.icon])}</span></div>` +
          `<div class="value">${d.value}</div><div class="sub">${d.sub}</div><div class="ov-viz">${d.viz}</div></div>`;
+}
+
+// The chosen stats, in the order the user arranged them (new ones come last).
+function ovShown() {
+  return ovOrder.filter(id => ovChosen.includes(id)).map(id => OV_CARDS.find(c => c.id === id));
+}
+
+// Puts a stat where another one is in the shown order: the card dragged onto a neighbour takes its place and the ones between shift along.
+function ovMove(id, targetId) {
+  const shown = ovOrder.filter(x => ovChosen.includes(x));
+  const from = shown.indexOf(id), to = shown.indexOf(targetId);
+  if (from < 0 || to < 0 || from === to) return false;
+  const rest = ovOrder.filter(x => x !== id);
+  const at = rest.indexOf(targetId) + (from < to ? 1 : 0);
+  ovOrder = [...rest.slice(0, at), id, ...rest.slice(at)];
+  ovWrite(OV_ORDER_KEY, ovOrder);
+  return true;
+}
+
+function ovStartDrag(e, tile) {
+  if (e.button !== undefined && e.button !== 0) return;
+  e.preventDefault();
+  const rect = tile.getBoundingClientRect();
+  ovGrab = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  ovDragId = tile.dataset.c;
+  ovGhost = tile.cloneNode(true);
+  ovGhost.classList.add('ov-ghost');
+  ovGhost.style.left = rect.left + 'px';
+  ovGhost.style.top = rect.top + 'px';
+  ovGhost.style.width = rect.width + 'px';
+  ovGhost.style.height = rect.height + 'px';
+  document.body.appendChild(ovGhost);
+  tile.classList.add('ov-dragging');
+  document.addEventListener('pointermove', ovDragMove);
+  document.addEventListener('pointerup', ovDragEnd);
+  document.addEventListener('pointercancel', ovDragEnd);
+}
+
+function ovDragMove(e) {
+  if (!ovGhost) return;
+  ovGhost.style.left = (e.clientX - ovGrab.x) + 'px';
+  ovGhost.style.top = (e.clientY - ovGrab.y) + 'px';
+
+  const under = document.elementsFromPoint(e.clientX, e.clientY).find(el => el.classList.contains('ov-card') && !el.classList.contains('ov-ghost') && el.dataset.c && el.dataset.c !== ovDragId);
+  const mine = document.querySelector(`#ovStrip .ov-card[data-c="${ovDragId}"]`);
+  if (!under || !mine) return;
+
+  // In the same row the card moves once the pointer passes the neighbour's middle; onto another row, as soon as it is over a card.
+  const shown = ovOrder.filter(x => ovChosen.includes(x));
+  const r = under.getBoundingClientRect(), m = mine.getBoundingClientRect();
+  const sameRow = Math.abs(r.top - m.top) < 8;
+  const middle = r.left + r.width / 2;
+  const crossed = !sameRow || (shown.indexOf(ovDragId) < shown.indexOf(under.dataset.c) ? e.clientX > middle : e.clientX < middle);
+  if (crossed && ovMove(ovDragId, under.dataset.c)) ovDraw();
+}
+
+function ovDragEnd() {
+  document.removeEventListener('pointermove', ovDragMove);
+  document.removeEventListener('pointerup', ovDragEnd);
+  document.removeEventListener('pointercancel', ovDragEnd);
+  if (ovGhost) { ovGhost.remove(); ovGhost = null; }
+  ovDragId = null;
+  ovDraw();
+}
+
+// The same job from the keyboard: the arrow keys on a card's handle move it one place along the row.
+function ovNudge(id, delta) {
+  const shown = ovOrder.filter(x => ovChosen.includes(x));
+  const target = shown[shown.indexOf(id) + delta];
+  if (target && ovMove(id, target)) {
+    ovDraw();
+    const grip = document.querySelector(`#ovStrip .ov-card[data-c="${id}"] .ov-grip`);
+    if (grip) grip.focus();
+  }
 }
 
 // Rows as even as possible: as many columns as fit (170px minimum each), then the cards are shared out so no row differs from another by
@@ -335,7 +416,7 @@ function ovDraw() {
   const c = ovContext(ovPeriod);
   const hasRuns = ovRuns.length > 0;
   document.getElementById('ovGroupTitle').textContent = 'Stats for ' + OV_PERIODS[ovPeriod].toLowerCase();
-  if (hasRuns) ovRenderStrip(OV_CARDS.filter(x => ovChosen.includes(x.id)).map(x => ovTile(x, x.make(c))));
+  if (hasRuns) ovRenderStrip(ovShown().map(x => ovTile(x, x.make(c))));
   else document.getElementById('ovStrip').innerHTML = '<p class="muted">No runs recorded yet. The stats appear after the first run that converts a file.</p>';
   document.getElementById('ovGlobal').classList.toggle('hidden', !hasRuns);
   if (hasRuns) {
@@ -371,10 +452,26 @@ function ovWire() {
     const id = e.target.dataset.c;
     if (!id) return;
     ovChosen = e.target.checked ? [...ovChosen, id] : ovChosen.filter(x => x !== id);
+    if (e.target.checked) { ovOrder = [...ovOrder.filter(x => x !== id), id]; ovWrite(OV_ORDER_KEY, ovOrder); }   // a stat you add comes last
     ovWrite(OV_CARDS_KEY, ovChosen);
     ovDraw();
   });
-  document.getElementById('ovPopReset').addEventListener('click', () => { ovChosen = OV_CARDS.filter(c => c.def).map(c => c.id); ovWrite(OV_CARDS_KEY, ovChosen); ovDraw(); });
+  document.getElementById('ovPopReset').addEventListener('click', () => {
+    ovChosen = OV_CARDS.filter(c => c.def).map(c => c.id);
+    ovOrder = OV_CARDS.map(c => c.id);
+    ovWrite(OV_CARDS_KEY, ovChosen);
+    ovWrite(OV_ORDER_KEY, ovOrder);
+    ovDraw();
+  });
+  const strip = document.getElementById('ovStrip');
+  strip.addEventListener('pointerdown', e => { const grip = e.target.closest('.ov-grip'); if (grip) ovStartDrag(e, grip.closest('.ov-card')); });
+  strip.addEventListener('keydown', e => {
+    const grip = e.target.closest && e.target.closest('.ov-grip');
+    const delta = e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : 0;
+    if (!grip || !delta) return;
+    e.preventDefault();
+    ovNudge(grip.closest('.ov-card').dataset.c, delta);
+  });
   document.getElementById('ovPeriods').addEventListener('change', e => { if (e.target.name === 'ovPeriod') ovSetPeriod(e.target.value); });
   document.getElementById('historyRows').addEventListener('click', e => { const tr = e.target.closest('tr'); if (tr && tr.dataset.p) ovSetPeriod(tr.dataset.p); });
   let timer;
@@ -385,6 +482,8 @@ async function loadOverview() {
   const known = new Set(OV_CARDS.map(c => c.id));
   const saved = ovRead(OV_CARDS_KEY, null);
   ovChosen = Array.isArray(saved) ? saved.filter(id => known.has(id)) : OV_CARDS.filter(c => c.def).map(c => c.id);
+  const savedOrder = ovRead(OV_ORDER_KEY, null);
+  ovOrder = [...new Set([...(Array.isArray(savedOrder) ? savedOrder.filter(id => known.has(id)) : []), ...OV_CARDS.map(c => c.id)])];   // a stat added in a later version goes last
   const savedPeriod = ovRead(OV_PERIOD_KEY, 'all');
   ovPeriod = OV_PERIODS[savedPeriod] ? savedPeriod : 'all';
   document.querySelector(`#ovPeriods [value="${ovPeriod}"]`).checked = true;
