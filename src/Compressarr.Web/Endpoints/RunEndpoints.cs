@@ -247,7 +247,7 @@ public static class RunEndpoints
     /// local date/time. Returns null if there's genuinely nothing left to estimate (idle, empty
     /// queue). With the optional off-hours-only schedule on, time the queue is held for the daytime
     /// window is counted too (see IEncodeSchedule.ProjectCompletion).</summary>
-    private static string? ComputeQueueEtaText(IReadOnlyList<UpNextItem> upNext, CurrentRunStateService runState, IEncodeSchedule schedule, ScheduleStatus scheduleStatus)
+    internal static string? ComputeQueueEtaText(IReadOnlyList<UpNextItem> upNext, CurrentRunStateService runState, IEncodeSchedule schedule, ScheduleStatus scheduleStatus)
     {
         var remaining = upNext.Where(i => !i.IsSkipped && !i.IsError).ToList();
         var current = runState.GetCurrentFileRemaining();

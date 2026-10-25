@@ -224,17 +224,7 @@ public static class HistoryEndpoints
         app.MapGet("/api/reports/{key}", (string key, string? download, IConfigStore configStore, IPathExpander pathExpander, IRunArchive archive, IHtmlReportGenerator generator) =>
         {
             if (long.TryParse(key, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var runId))
-            {
-                var legacy = archive.LoadLegacyReportHtml(runId);
-                var model = legacy is null ? archive.LoadReport(runId) : null;
-                if (legacy is null && model is null) return Results.NotFound();
-
-                var bytes = legacy ?? System.Text.Encoding.UTF8.GetBytes(generator.Generate(model!));
-                var name = $"Compressarr_Report_{runId}.html";
-                return download is "1" or "true"
-                    ? Results.File(bytes, "text/html; charset=utf-8", model is null ? name : $"Compressarr_{model.GeneratedAt:yyyy-MM-dd_HH-mm-ss}_Report.html")
-                    : Results.File(bytes, "text/html; charset=utf-8");
-            }
+                return RunReport(runId, download is "1" or "true", archive, generator) ?? Results.NotFound();
 
             var config = configStore.Load(AppPaths.GetConfigFilePath());
             var reportPath = pathExpander.Expand(config.Report.ReportPath);
@@ -243,6 +233,21 @@ public static class HistoryEndpoints
 
             return File.Exists(fullPath) ? Results.File(fullPath, "text/html") : Results.NotFound();
         });
+    }
+
+    /// <summary>A run's report page (built from its rows, or the html an old run was saved with), or null when the run has none. <paramref name="download"/> hands it over as a file.
+    /// Shared by the web UI's <c>/api/reports/{id}</c> and the Automation API's <c>/api/v1/reports/{id}</c>.</summary>
+    internal static IResult? RunReport(long runId, bool download, IRunArchive archive, IHtmlReportGenerator generator)
+    {
+        var legacy = archive.LoadLegacyReportHtml(runId);
+        var model = legacy is null ? archive.LoadReport(runId) : null;
+        if (legacy is null && model is null) return null;
+
+        var bytes = legacy ?? System.Text.Encoding.UTF8.GetBytes(generator.Generate(model!));
+        var name = $"Compressarr_Report_{runId}.html";
+        return download
+            ? Results.File(bytes, "text/html; charset=utf-8", model is null ? name : $"Compressarr_{model.GeneratedAt:yyyy-MM-dd_HH-mm-ss}_Report.html")
+            : Results.File(bytes, "text/html; charset=utf-8");
     }
 
     // [[name, count], ...] biggest first, or null when the run has no such breakdown (an older row).

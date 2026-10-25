@@ -106,6 +106,13 @@ through `PATCH /api/v1/schedule`. A custom HACS integration is parked: REST sens
    minute), `GET /api/v1/whoami`, and the UI's own `GET/POST/DELETE /api/automation/keys` (not under /api/v1: a key cannot make keys). If the state database cannot be opened nothing is accepted.
    `X-Api-Key` and bearer are both accepted; missing keys are not counted as failures, only wrong ones.
 2. **Read endpoints** and their DTOs, new query methods on the archive (runs list and detail, stats), golden-JSON contract tests so a field cannot be renamed by accident.
+   **BUILT 2026-10-25 (uncommitted).** `IRunQueries` (Core/Logging, implemented by `SqliteRunHistoryStore`): `ListRuns` (kind = run, newest first, day window, paged, count), `GetRun` (lanes + files; the file's long
+   detail log is deliberately not exposed), `GetStats` (sums `daily_totals`, lane and profile breakdowns from `daily_lanes`/`daily_profiles`). Web: `status`, `queue`, `lanes`, `schedule`, `runs`, `runs/{id}`,
+   `stats`, `reports/{id}` in `ApiV1Endpoints.cs`, each response built field by field there (never a UI DTO). Decisions made while building: times are server-local with their UTC offset
+   (`2026-10-25T09:30:00-04:00`; a run imported from before 3.0 may only know the day, then 00:00:00); `?period=` takes the History page's windows (today, d7, d30, year, all) and `?from=`/`?to=` (yyyy-MM-dd) win;
+   pages: `page`/`pageSize` with the body carrying `total`, `page`, `pageSize` (runs default 25, max 200; queue default 100, max 500); file names only in the queue (no paths); `stats` counts only runs that
+   produced files, as the History page does, while `runs` also lists all-failed runs with `counted: false`; a CSV-fallback history answers 503 `history_unavailable`; the status queue ETA is `etaState`
+   (`none`, `estimating`, `projected`) plus `eta`. The `hold` field joins `status` and `schedule` in stage 3. `ApiV1ReadEndpointTests` lists every field name of every response.
 3. **Control endpoints,** the external hold in the engine and `EncodeSchedule` (including with the schedule disabled), the Monitor banner and Release button, schedule `PATCH`.
 3b. **Protect the web interface** (decided 2026-10-25, in rc.3): optional username and password (off by default so nothing changes for an existing install), a login page and session cookie for the browser, the
    tray app's own browser window and the notification links still working, `/api/v1` unaffected (it uses keys), the legacy open `/api/run/status` either kept open or covered by a switch (to decide when

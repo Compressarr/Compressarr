@@ -70,6 +70,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<SqliteRunHistoryStore>();
         services.AddSingleton<IRunHistoryStore>(sp => sp.GetRequiredService<SqliteRunHistoryStore>());
         services.AddSingleton<IRunArchive>(sp => sp.GetRequiredService<SqliteRunHistoryStore>());
+        services.AddSingleton<IRunQueries>(sp => sp.GetRequiredService<SqliteRunHistoryStore>());
         services.AddSingleton<IHistoryRollupCalculator, HistoryRollupCalculator>();
         services.AddSingleton<IHistoryThroughputEstimator>(sp => new ArchiveThroughputEstimator(sp.GetRequiredService<IRunArchive>(), new HistoryThroughputEstimator()));
         services.AddSingleton<IWebHistoryRollupCalculator, WebHistoryRollupCalculator>();
