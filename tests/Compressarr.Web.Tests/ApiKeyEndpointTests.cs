@@ -1,6 +1,4 @@
 using System.Net;
-using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json.Nodes;
 using Compressarr.Core.Api;
 using Compressarr.Core.Logging;
@@ -11,18 +9,17 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Compressarr.Web.Tests;
 
-/// <summary>The Automation API's front door, through the real endpoints: off until a key exists, a key in X-Api-Key or as a bearer token, wrong keys slowed
-/// down, a revoked key dead at once, and the key itself shown exactly once.</summary>
+/// <summary>The Automation API's front door and its two fixed keys, through the real endpoints: a key in X-Api-Key or as a bearer token, wrong keys slowed down, a
+/// regenerated key replacing the old one at once, and the keys always visible to the Settings page (as in Sonarr).</summary>
 public class ApiKeyEndpointTests
 {
     private static readonly LaneSpec Lane1 = new("hdsd", "SD-HD");
 
-    private static async Task<(string Key, long Id)> MakeKey(QueueHost host, string name = "Home Assistant", string scope = "read")
+    private static async Task<(string Control, string Read)> Keys(QueueHost host)
     {
-        using var response = await host.Client.PostAsJsonAsync("/api/automation/keys", new { name, scope });
-        response.EnsureSuccessStatusCode();
-        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
-        return (body["key"]!.GetValue<string>(), body["info"]!["id"]!.GetValue<long>());
+        var list = JsonNode.Parse(await host.Client.GetStringAsync("/api/automation/keys"))!["keys"]!.AsArray();
+        return (list.Single(k => k!["scope"]!.GetValue<string>() == "control")!["key"]!.GetValue<string>(),
+                list.Single(k => k!["scope"]!.GetValue<string>() == "read")!["key"]!.GetValue<string>());
     }
 
     private static Task<HttpResponseMessage> Whoami(QueueHost host, string? key = null, bool bearer = false)
@@ -41,103 +38,89 @@ public class ApiKeyEndpointTests
         JsonNode.Parse(await response.Content.ReadAsStringAsync())!["error"]!["code"]!.GetValue<string>();
 
     [Fact]
-    public async Task WithNoKeyMade_TheApiIsOff_AndSaysWhereToMakeOne()
+    public async Task TheTwoKeys_ExistFromTheStart_WithTheirNames_AndAreTheSameOnEveryLoad()
     {
         await using var host = await QueueHost.StartAsync(Lane1);
 
-        using var response = await Whoami(host);
+        var first = JsonNode.Parse(await host.Client.GetStringAsync("/api/automation/keys"))!["keys"]!.AsArray();
+        var (control, read) = await Keys(host);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Equal("no_keys", await ErrorCode(response));
-        Assert.Contains("Settings > Automation API", await response.Content.ReadAsStringAsync());
+        Assert.Equal(2, first.Count);
+        Assert.Equal(new[] { "API Key", "Read-only API Key" }, first.Select(k => k!["name"]!.GetValue<string>()).ToArray());
+        Assert.StartsWith("cmpk_", control);
+        Assert.StartsWith("cmpk_", read);
+        Assert.NotEqual(control, read);
+        Assert.Equal((control, read), await Keys(host));
     }
 
     [Fact]
-    public async Task AKey_OpensTheApi_InTheHeader_OrAsABearerToken()
+    public async Task AKey_OpensTheApi_InTheHeader_OrAsABearerToken_WithItsScopeAndName()
     {
         await using var host = await QueueHost.StartAsync(Lane1);
-        var (key, _) = await MakeKey(host, "Home Assistant", "control");
+        var (control, read) = await Keys(host);
 
-        using var viaHeader = await Whoami(host, key);
-        using var viaBearer = await Whoami(host, key, bearer: true);
+        using var viaHeader = await Whoami(host, control);
+        using var viaBearer = await Whoami(host, control, bearer: true);
+        using var readKey = await Whoami(host, read);
 
         Assert.Equal(HttpStatusCode.OK, viaHeader.StatusCode);
         Assert.Equal(HttpStatusCode.OK, viaBearer.StatusCode);
         var body = JsonNode.Parse(await viaHeader.Content.ReadAsStringAsync())!;
-        Assert.Equal("Home Assistant", body["name"]!.GetValue<string>());
-        Assert.Equal("control", body["scope"]!.GetValue<string>());
+        Assert.Equal(("API Key", "control"), (body["name"]!.GetValue<string>(), body["scope"]!.GetValue<string>()));
         Assert.False(string.IsNullOrWhiteSpace(body["version"]!.GetValue<string>()));
+        var readBody = JsonNode.Parse(await readKey.Content.ReadAsStringAsync())!;
+        Assert.Equal(("Read-only API Key", "read"), (readBody["name"]!.GetValue<string>(), readBody["scope"]!.GetValue<string>()));
     }
 
     [Fact]
-    public async Task OnceAKeyExists_NoKeyAtAll_IsMissing_AndAWrongKeyIsInvalid()
+    public async Task NoKeyAtAll_IsMissing_AndAWrongKeyIsInvalid()
     {
         await using var host = await QueueHost.StartAsync(Lane1);
-        await MakeKey(host);
 
         using var none = await Whoami(host);
         using var wrong = await Whoami(host, "cmpk_wrong");
 
         Assert.Equal(HttpStatusCode.Unauthorized, none.StatusCode);
         Assert.Equal("missing_key", await ErrorCode(none));
+        Assert.Contains("Settings > Security", await none.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);
         Assert.Equal("invalid_key", await ErrorCode(wrong));
     }
 
     [Fact]
-    public async Task ARevokedKey_StopsWorkingAtOnce()
+    public async Task RegeneratingAKey_ReplacesItAtOnce_AndLeavesTheOtherKeyAlone()
     {
         await using var host = await QueueHost.StartAsync(Lane1);
-        var (key, id) = await MakeKey(host);
-        using (var before = await Whoami(host, key)) Assert.Equal(HttpStatusCode.OK, before.StatusCode);
+        var (control, read) = await Keys(host);
 
-        using var revoke = await host.Client.DeleteAsync($"/api/automation/keys/{id}");
-        Assert.Equal(HttpStatusCode.NoContent, revoke.StatusCode);
+        using var response = await host.Client.PostAsync("/api/automation/keys/control/regenerate", null);
+        var body = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        var replaced = body["key"]!.GetValue<string>();
 
-        using var after = await Whoami(host, key);
-        Assert.Equal(HttpStatusCode.Unauthorized, after.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("control", body["scope"]!.GetValue<string>());
+        Assert.NotEqual(control, replaced);
+        using (var old = await Whoami(host, control)) Assert.Equal(HttpStatusCode.Unauthorized, old.StatusCode);
+        using (var fresh = await Whoami(host, replaced)) Assert.Equal(HttpStatusCode.OK, fresh.StatusCode);
+        using (var other = await Whoami(host, read)) Assert.Equal(HttpStatusCode.OK, other.StatusCode);
+        Assert.Equal((replaced, read), await Keys(host));
     }
 
     [Fact]
-    public async Task TheKeyIsShownOnce_TheListHasOnlyItsFirstCharacters()
-    {
-        await using var host = await QueueHost.StartAsync(Lane1);
-        var (key, _) = await MakeKey(host, "Dashboard", "read");
-
-        var listText = await host.Client.GetStringAsync("/api/automation/keys");
-
-        Assert.DoesNotContain(key, listText);
-        var item = JsonNode.Parse(listText)!["keys"]![0]!;
-        Assert.Equal(key[..9], item["prefix"]!.GetValue<string>());
-        Assert.Equal("Dashboard", item["name"]!.GetValue<string>());
-        Assert.Equal("read", item["scope"]!.GetValue<string>());
-        Assert.Null(item["lastUsedAt"]);
-
-        using (var used = await Whoami(host, key)) used.EnsureSuccessStatusCode();
-        Assert.NotNull(JsonNode.Parse(await host.Client.GetStringAsync("/api/automation/keys"))!["keys"]![0]!["lastUsedAt"]);
-    }
-
-    [Theory]
-    [InlineData("", "read")]
-    [InlineData("   ", "read")]
-    [InlineData("ok", "admin")]
-    [InlineData("ok", "")]
-    public async Task ABadRequest_IsRefused_WithAMessage(string name, string scope)
+    public async Task RegeneratingAnUnknownScope_Is404()
     {
         await using var host = await QueueHost.StartAsync(Lane1);
 
-        using var response = await host.Client.PostAsJsonAsync("/api/automation/keys", new { name, scope });
+        using var response = await host.Client.PostAsync("/api/automation/keys/admin/regenerate", null);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.False(string.IsNullOrWhiteSpace(JsonNode.Parse(await response.Content.ReadAsStringAsync())!["message"]!.GetValue<string>()));
-        Assert.Empty(JsonNode.Parse(await host.Client.GetStringAsync("/api/automation/keys"))!["keys"]!.AsArray());
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
     public async Task FiveWrongKeys_LockThatAddressOutForAMinute_EvenForTheRightKey()
     {
         await using var host = await QueueHost.StartAsync(Lane1);
-        var (key, _) = await MakeKey(host);
+        var (control, _) = await Keys(host);
 
         for (var i = 0; i < ApiKeyThrottle.MaxFailures; i++)
         {
@@ -145,7 +128,7 @@ public class ApiKeyEndpointTests
             Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);
         }
 
-        using var locked = await Whoami(host, key);
+        using var locked = await Whoami(host, control);
         Assert.Equal(HttpStatusCode.TooManyRequests, locked.StatusCode);
         Assert.Equal("too_many_attempts", await ErrorCode(locked));
         Assert.True(locked.Headers.TryGetValues("Retry-After", out var retry) && int.Parse(retry.Single()) > 0);
@@ -155,7 +138,6 @@ public class ApiKeyEndpointTests
     public async Task TheWebUisOwnEndpoints_AreNotBehindAKey()
     {
         await using var host = await QueueHost.StartAsync(Lane1);
-        await MakeKey(host);
 
         using var status = await host.Client.GetAsync("/api/run/status");
         using var settings = await host.Client.GetAsync("/api/settings");
@@ -164,16 +146,15 @@ public class ApiKeyEndpointTests
         Assert.Equal(HttpStatusCode.OK, settings.StatusCode);
     }
 
-    // ---- the scope check, on the filter itself (a control endpoint arrives in the next stage) ---------------------------------------------
+    // ---- the scope check, on the filter itself ---------------------------------------------------------------------------------------------
 
     private sealed class OneKey : IApiKeyStore
     {
         private readonly ApiKeyInfo _info;
-        public OneKey(ApiKeyScope scope) => _info = new ApiKeyInfo(1, "k", scope, "cmpk_xxxx", DateTimeOffset.UtcNow, null);
+        public OneKey(ApiKeyScope scope) => _info = new ApiKeyInfo(ApiKeys.DisplayName(scope), scope);
         public ApiKeyInfo? Authenticate(string key) => key == "good" ? _info : null;
-        public CreatedApiKey Create(string name, ApiKeyScope scope) => throw new NotSupportedException();
-        public IReadOnlyList<ApiKeyInfo> List() => new[] { _info };
-        public bool Revoke(long id) => false;
+        public string GetKey(ApiKeyScope scope) => "good";
+        public string Regenerate(ApiKeyScope scope) => "good";
     }
 
     private static async Task<(int Status, bool Reached)> Call(ApiKeyScope keyScope, ApiKeyScope? endpointScope)

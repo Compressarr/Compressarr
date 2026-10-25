@@ -8,7 +8,7 @@ namespace Compressarr.Core.Conversion;
 /// statements are shared with <see cref="HistoryDatabase"/>.</summary>
 internal static class StateDatabase
 {
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 5;
     public const string FileName = "compressarr.state.db";
 
     /// <summary>The database that goes with a resume-file path: the app's own <c>compressarr.resume.json</c> maps to <c>compressarr.state.db</c> in the
@@ -80,7 +80,47 @@ internal static class StateDatabase
             HistoryDatabase.Execute(connection, "PRAGMA user_version = 4;", transaction);
             transaction.Commit();
         }
+
+        if (version < 5)
+        {
+            using var transaction = connection.BeginTransaction();
+            HistoryDatabase.Execute(connection, SchemaV5, transaction);
+            HistoryDatabase.Execute(connection, "PRAGMA user_version = 5;", transaction);
+            transaction.Commit();
+        }
     }
+
+    // v5: the web sign-in (one account, the method, the sessions behind the login cookie) and the two fixed API keys, replacing the named, hashed keys of v3 (never released).
+    private const string SchemaV5 = """
+        DROP TABLE IF EXISTS api_keys;
+
+        CREATE TABLE api_secrets (
+            kind           TEXT PRIMARY KEY CHECK (kind IN ('control', 'read')),
+            key            TEXT NOT NULL,         -- readable, as Sonarr keeps its key: it is shown in Settings > Security
+            created_at     TEXT NOT NULL,
+            regenerated_at TEXT NULL
+        );
+
+        CREATE TABLE auth (
+            id            INTEGER PRIMARY KEY CHECK (id = 1),
+            method        TEXT NOT NULL,          -- None | Forms | Basic
+            required      TEXT NOT NULL,          -- Enabled | DisabledForLocalAddresses | DisabledForLocalhost
+            trust_cgnat   INTEGER NOT NULL DEFAULT 0,
+            username      TEXT NULL,              -- lower case
+            password_hash TEXT NULL,              -- pbkdf2-sha512$rounds$salt$key
+            updated_at    TEXT NOT NULL
+        );
+
+        CREATE TABLE web_sessions (
+            token_hash    TEXT PRIMARY KEY,       -- SHA-256 of the cookie's token
+            username      TEXT NOT NULL,
+            created_at    TEXT NOT NULL,
+            last_used_at  TEXT NOT NULL,
+            expires_at    TEXT NOT NULL,          -- slides a week from each use
+            persistent    INTEGER NOT NULL DEFAULT 0,   -- Remember me
+            first_address TEXT NULL
+        );
+        """;
 
     // v4: the external hold (the Automation API holding the queue); one row at most, always id 1, so it survives a restart.
     private const string SchemaV4 = """
@@ -169,5 +209,18 @@ internal static class StateDatabase
     }
 
     /// <summary>A consistent copy of the live database, made with SQLite's own backup call (correct while the app is writing). False when there is none.</summary>
-    public static bool Snapshot(string sourcePath, string destinationPath) => HistoryDatabase.Snapshot(sourcePath, destinationPath);
+    public static bool Snapshot(string sourcePath, string destinationPath)
+    {
+        if (!HistoryDatabase.Snapshot(sourcePath, destinationPath)) return false;
+
+        // A restore brings the account back but nobody stays signed in through it: the copy carries no sessions.
+        try
+        {
+            using var copy = HistoryDatabase.Open(destinationPath);
+            HistoryDatabase.Execute(copy, "DELETE FROM web_sessions;");
+        }
+        catch (SqliteException) { /* a database from before the table existed has no sessions to drop */ }
+
+        return true;
+    }
 }

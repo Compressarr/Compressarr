@@ -85,7 +85,7 @@ public sealed class ApiKeyThrottle
 }
 
 /// <summary>The door in front of every <c>/api/v1</c> endpoint: a key in <c>X-Api-Key</c> (or <c>Authorization: Bearer</c>), checked against the stored hashes, with
-/// the scope the endpoint needs. No key made yet means the API is off (401 that says where to make one); there is no anonymous mode.</summary>
+/// the scope the endpoint needs. The two keys always exist (Settings > Security); there is no anonymous mode.</summary>
 public sealed class ApiKeyFilter : IEndpointFilter
 {
     public const string ItemKey = "Compressarr.ApiKey";
@@ -115,9 +115,7 @@ public sealed class ApiKeyFilter : IEndpointFilter
         var key = ReadKey(http.Request);
         if (key is null)
         {
-            return _keys.List().Count == 0
-                ? ApiErrors.Result(StatusCodes.Status401Unauthorized, "no_keys", "The Automation API is off until a key exists. Create one in Settings > Automation API.")
-                : ApiErrors.Result(StatusCodes.Status401Unauthorized, "missing_key", "Send your API key in the X-Api-Key header (or as Authorization: Bearer <key>).");
+            return ApiErrors.Result(StatusCodes.Status401Unauthorized, "missing_key", "Send your API key in the X-Api-Key header (or as Authorization: Bearer <key>). It is in Settings > Security.");
         }
 
         var info = _keys.Authenticate(key);

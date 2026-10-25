@@ -58,6 +58,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IResumeStateStore>(sp => sp.GetRequiredService<SqliteResumeStateStore>());
         services.AddSingleton<IAppState, SqliteAppState>();
         services.AddSingleton<Compressarr.Core.Api.IApiKeyStore, Compressarr.Core.Api.SqliteApiKeyStore>();
+        services.AddSingleton<Compressarr.Core.Auth.IWebAuth, Compressarr.Core.Auth.SqliteWebAuth>();
         services.AddSingleton<Compressarr.Core.Scheduling.IExternalHold, Compressarr.Core.Scheduling.SqliteExternalHold>();
         services.AddSingleton<IFileRouter, FileRouter>();
         services.AddSingleton<ICompanionFileService, CompanionFileService>();

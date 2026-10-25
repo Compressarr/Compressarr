@@ -413,38 +413,24 @@
         <h2>Automation API</h2>
       </div>
       <div class="card-body">
-        <p class="muted" style="margin: 0 0 12px;">Lets scripts and Home Assistant read Compressarr's status, queue and history, and - with a control key - start a run, pause, or hold the queue. Each call sends its key in an <code>X-Api-Key</code> header to an address starting <code>/api/v1</code>. Until you create a key the API is off.</p>
+        <p class="muted" style="margin: 0 0 12px;">Lets scripts and Home Assistant read Compressarr's status, queue and history, and - with the API Key - start a run, pause, or hold the queue. Each call sends a key in an <code>X-Api-Key</code> header to an address starting <code>/api/v1</code>. Use the Read-only API Key for dashboards.</p>
         <div class="field-block">
-          <label>Keys<span class="help-tag" tabindex="0" title="Only the first few characters of a key are kept for this list; the key itself cannot be shown again. If you lose one, revoke it and create another.">?<span class="help-tip">Only the first few characters of a key are kept for this list; the key itself cannot be shown again. If you lose one, revoke it and create another.</span></span></label>
-          <div style="overflow-x: auto">
-            <table id="apiKeyTable">
-              <thead><tr><th>Name</th><th>Access</th><th>Key starts</th><th>Created</th><th>Last used</th><th></th></tr></thead>
-              <tbody id="apiKeyBody"></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="two-col" style="margin-top: 12px;">
-          <div class="field-block">
-            <label for="apiKeyName">Name<span class="help-tag" tabindex="0" title="What the key is for, such as Home Assistant. Only for your own reference.">?<span class="help-tip">What the key is for, such as Home Assistant. Only for your own reference.</span></span></label>
-            <input type="text" id="apiKeyName" maxlength="60" placeholder="Home Assistant" />
-          </div>
-          <div class="field-block">
-            <label for="apiKeyScope">Access<span class="help-tag" tabindex="0" title="Read: status, queue, history and statistics. Control: everything Read can do, plus start a run, start or stop monitoring, pause and resume, hold the queue and change the schedule. Use a read key for dashboards.">?<span class="help-tip">Read: status, queue, history and statistics. Control: everything Read can do, plus start a run, start or stop monitoring, pause and resume, hold the queue and change the schedule. Use a read key for dashboards.</span></span></label>
-            <select id="apiKeyScope">
-              <option value="read">Read only</option>
-              <option value="control">Control (read and act)</option>
-            </select>
-          </div>
-        </div>
-        <button type="button" id="createApiKeyBtn">Create key</button>
-        <div class="field-block hidden" id="newApiKeyBox" style="margin-top: 12px;">
-          <label for="newApiKeyText">Your new key - copy it now</label>
-          <p class="muted" style="margin: 0 0 8px;">This is the only time the whole key is shown. Paste it into your automation (in Home Assistant, <code>secrets.yaml</code>). If you lose it, revoke it and create another.</p>
+          <label for="apiKeyControl">API Key<span class="help-tag" tabindex="0" title="Can read everything and act: start a run, start or stop monitoring, pause and resume, hold the queue and change the schedule. Regenerate it if it gets out; the old one stops working at once.">?<span class="help-tip">Can read everything and act: start a run, start or stop monitoring, pause and resume, hold the queue and change the schedule. Regenerate it if it gets out; the old one stops working at once.</span></span></label>
           <div class="field-with-btn">
-            <input type="text" id="newApiKeyText" readonly />
-            <button type="button" id="copyApiKeyBtn">Copy</button>
+            <input type="text" id="apiKeyControl" readonly />
+            <button type="button" id="apiKeyControlCopy">Copy</button>
+            <button type="button" id="apiKeyControlRegenerate" class="danger">Regenerate</button>
           </div>
         </div>
+        <div class="field-block">
+          <label for="apiKeyRead">Read-only API Key<span class="help-tag" tabindex="0" title="Can only read: status, queue, history and statistics. Safe for a dashboard. Regenerate it if it gets out; the old one stops working at once.">?<span class="help-tip">Can only read: status, queue, history and statistics. Safe for a dashboard. Regenerate it if it gets out; the old one stops working at once.</span></span></label>
+          <div class="field-with-btn">
+            <input type="text" id="apiKeyRead" readonly />
+            <button type="button" id="apiKeyReadCopy">Copy</button>
+            <button type="button" id="apiKeyReadRegenerate" class="danger">Regenerate</button>
+          </div>
+        </div>
+        <p class="muted" id="apiKeyStatus" style="margin: 0;"></p>
         <p class="muted" style="margin: 12px 0 0;">Keys protect only the Automation API. Anyone on your network can still open this web interface.</p>
       </div>
     </div>

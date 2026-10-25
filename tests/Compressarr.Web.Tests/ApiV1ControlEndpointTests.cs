@@ -13,11 +13,11 @@ public class ApiV1ControlEndpointTests
 {
     private static readonly LaneSpec Lane1 = new("hdsd", "SD-HD");
 
+    /// <summary>The key of that scope (the two fixed keys exist from the start; the name is only for the reader of the test).</summary>
     private static async Task<string> MakeKey(QueueHost host, string name, string scope)
     {
-        using var response = await host.Client.PostAsJsonAsync("/api/automation/keys", new { name, scope });
-        response.EnsureSuccessStatusCode();
-        return JsonNode.Parse(await response.Content.ReadAsStringAsync())!["key"]!.GetValue<string>();
+        var keys = JsonNode.Parse(await host.Client.GetStringAsync("/api/automation/keys"))!["keys"]!.AsArray();
+        return keys.Single(k => k!["scope"]!.GetValue<string>() == scope)!["key"]!.GetValue<string>();
     }
 
     private static async Task<(HttpStatusCode Status, JsonNode? Body)> Send(QueueHost host, string key, HttpMethod method, string url, string? json = null)
@@ -83,7 +83,7 @@ public class ApiV1ControlEndpointTests
         Assert.Equal(HttpStatusCode.OK, placed);
         var hold = body!["hold"]!;
         Assert.Equal(Sorted("reason", "since", "until", "suspendCurrent", "setBy"), Keys(hold));
-        Assert.Equal(("TV on", true, "Home Assistant"), (hold["reason"]!.GetValue<string>(), hold["suspendCurrent"]!.GetValue<bool>(), hold["setBy"]!.GetValue<string>()));
+        Assert.Equal(("TV on", true, "API Key"), (hold["reason"]!.GetValue<string>(), hold["suspendCurrent"]!.GetValue<bool>(), hold["setBy"]!.GetValue<string>()));
         Assert.Matches(@"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$", hold["since"]!.GetValue<string>());
 
         var (_, status) = await Send(host, read, HttpMethod.Get, "/api/v1/status");

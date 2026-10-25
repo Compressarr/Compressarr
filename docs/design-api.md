@@ -99,7 +99,8 @@ through `PATCH /api/v1/schedule`. A custom HACS integration is parked: REST sens
    `compressarr.state.db` instead (copied once from the settings file, then no longer written there; a restored older backup that still carries them is picked up once). The same
    migration adds `api_keys` and `holds`. Ships with rc.3 (rc.1 and rc.2 stay local).
 1. **Keys:** key store, endpoint filter for the `/api/v1` group (scope check, constant-time compare, throttle), the Settings card (create, copy once, revoke), tests.
-   **BUILT 2026-10-25 (uncommitted).** State database v3 adds `api_keys` (id, name, scope, hash, prefix, created_at, last_used_at; revoking deletes the row). `IApiKeyStore` / `SqliteApiKeyStore`
+   **Superseded 2026-10-25 by the two fixed Sonarr-style keys (docs/design-login.md, "option A"): the named, hashed keys described next were replaced in the login work; the filter, throttle and scope
+   rules below still stand.** Originally **BUILT 2026-10-25.** State database v3 adds `api_keys` (id, name, scope, hash, prefix, created_at, last_used_at; revoking deletes the row). `IApiKeyStore` / `SqliteApiKeyStore`
    (Core/Api), key format `cmpk_` plus 43 URL-safe characters, SHA-256 of the key looked up by hash (the key is 256 random bits, so a plain indexed lookup leaks nothing useful), at most 20 keys,
    `last_used_at` written at most once a minute. Web: `ApiKeyFilter` (X-Api-Key or Bearer; 401 `no_keys`/`missing_key`/`invalid_key`, 403 `insufficient_scope`, 429 `too_many_attempts` with
    Retry-After) on the `/api/v1` group, scope marked per endpoint with `.RequireApiScope(...)` (unmarked = read), `ApiKeyThrottle` (five wrong keys from an address within a minute lock it for a
@@ -123,14 +124,18 @@ through `PATCH /api/v1/schedule`. A custom HACS integration is parked: REST sens
    409 `not_running`. `until`: ISO 8601, no offset means the server's local time, must be in the future and within a year; `reason` at most 200 characters. `PATCH schedule` takes only the schedule's
    own fields, merges over the saved ones, validates the result as if the schedule were on (a time like 25:00 is refused even while it is off) and saves nothing on any problem. The web UI's own
    `POST /api/run/release-hold` backs the Monitor's Release hold button; nav.js, monitor.js and scheduler.js show the hold.
-3b. **Protect the web interface** (decided 2026-10-25, in rc.3): optional username and password (off by default so nothing changes for an existing install), a login page and session cookie for the browser, the
+3b. **Protect the web interface** (decided 2026-10-25, in rc.3). **Revised 2026-10-25 at the user's request to work the way Sonarr and Radarr do:** a Security section with Authentication (None / Forms / Basic),
+   "Authentication Required" (Enabled, or Disabled for Local Addresses, the default) where "local" means the local network (private, loopback and link-local ranges, decided from the TCP peer address only,
+   never a header), a login only for external addresses, and the API key(s) in that same section. The detailed design is `docs/design-login.md` (it also covers the masked secrets and redacted exports
+   below, Allowed Hosts, an always-on cross-site check, and the lessons of Sonarr's CVE-2026-30975), with the login in state database v5 so the secrets table of 3c becomes v6. The text below is the first
+   draft and is superseded where the two differ: optional username and password (off by default so nothing changes for an existing install), a login page and session cookie for the browser, the
    tray app's own browser window and the notification links still working, `/api/v1` unaffected (it uses keys), the legacy open `/api/run/status` either kept open or covered by a switch (to decide when
    designing this stage). **Secrets leave the open endpoints in this stage (decided 2026-10-25):** the Sonarr/Radarr/TMDb/OMDb keys and the notification channels' secret fields (the ones their
    `NotifierField` marks `Secret: true`: webhook URLs, tokens, user keys) are no longer returned by `GET /api/settings` and `GET /api/notifications/channels`; the page shows "saved" for a field that is set,
    and a save replaces a secret only when a new value is typed (a blank box keeps it). The settings **export** redacts them by default, with an "Include keys and passwords" tick-box that is off unless
    chosen; backups keep them (they exist to restore the same install). Needs its own short design note before it is built (cookie lifetime,
    password storage with a slow hash, lockout, reverse-proxy and HTTP caveats, recovery if the password is forgotten: a start-up switch or deleting a row in the state database).
-3c. **Secrets move to the state database** (decided 2026-10-25, after 3b): an `ISecretStore` over a `secrets` table (schema v5) holds the Sonarr/Radarr/TMDb/OMDb keys and the notification channels'
+3c. **Secrets move to the state database** (decided 2026-10-25, after 3b): an `ISecretStore` over a `secrets` table (schema v6, after the login's v5) holds the Sonarr/Radarr/TMDb/OMDb keys and the notification channels'
    secret fields, so `compressarr.settings.json` carries none and is safe to share or attach to a support request. About 24 places read the Arr/poster keys and 5 read channel settings; they go through
    the store. Same pattern as stage 0: the first start moves what an older file holds (and removes it), a restored older backup does the same, an import drops them unless the export included them. The
    values stay readable (Compressarr must send them), so this is hygiene against accidental sharing, not encryption: against anything running as the user nothing changes, and backups still carry them. No

@@ -18,9 +18,8 @@ public class ApiV1ReadEndpointTests
     private static async Task<(QueueHost Host, string Key)> StartWithKey(params LaneSpec[] lanes)
     {
         var host = await QueueHost.StartAsync(lanes.Length == 0 ? new[] { Lane1 } : lanes);
-        using var response = await host.Client.PostAsJsonAsync("/api/automation/keys", new { name = "test", scope = "read" });
-        response.EnsureSuccessStatusCode();
-        return (host, JsonNode.Parse(await response.Content.ReadAsStringAsync())!["key"]!.GetValue<string>());
+        var keys = JsonNode.Parse(await host.Client.GetStringAsync("/api/automation/keys"))!["keys"]!.AsArray();
+        return (host, keys.Single(k => k!["scope"]!.GetValue<string>() == "read")!["key"]!.GetValue<string>());
     }
 
     private static async Task<(HttpStatusCode Status, JsonNode? Body, HttpResponseMessage Response)> Get(QueueHost host, string key, string url)

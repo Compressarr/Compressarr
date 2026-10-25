@@ -13,42 +13,33 @@ public enum ApiKeyScope
     Control
 }
 
-/// <summary>A key as shown in the list: never the key itself, only the first few characters so the user can tell keys apart.</summary>
-public sealed record ApiKeyInfo(long Id, string Name, ApiKeyScope Scope, string Prefix, DateTimeOffset CreatedAt, DateTimeOffset? LastUsedAt);
+/// <summary>Which key a request presented: its display name (<c>API Key</c> or <c>Read-only API Key</c>) and scope.</summary>
+public sealed record ApiKeyInfo(string Name, ApiKeyScope Scope);
 
-/// <summary>A key just created: the only time its full text exists anywhere (only a hash is stored).</summary>
-public sealed record CreatedApiKey(ApiKeyInfo Info, string Key);
-
-/// <summary>The keys for the Automation API (<c>/api/v1</c>), kept as SHA-256 hashes in the state database. See docs/design-api.md.</summary>
+/// <summary>The Automation API's two fixed keys, as Sonarr and Radarr keep theirs: an <b>API Key</b> (control) and a <b>Read-only API Key</b> (for dashboards), made on first
+/// use, shown in Settings > Security with Copy and Regenerate, and kept readable in the state database. See docs/design-login.md.</summary>
 public interface IApiKeyStore
 {
-    /// <summary>The key the text belongs to, or null when it is not a current key. Notes when the key was last used (at most once a minute).</summary>
+    /// <summary>The key the text is, or null when it is neither key. Compared in constant time.</summary>
     ApiKeyInfo? Authenticate(string key);
 
-    /// <summary>Makes a new key. The name is trimmed and must be 1 to 60 characters; at most <see cref="ApiKeys.MaxKeys"/> keys exist at once.</summary>
-    CreatedApiKey Create(string name, ApiKeyScope scope);
+    /// <summary>The key of this scope (made the first time it is asked for). Throws <see cref="InvalidOperationException"/> when the database cannot be opened.</summary>
+    string GetKey(ApiKeyScope scope);
 
-    IReadOnlyList<ApiKeyInfo> List();
-
-    /// <summary>Removes a key for good (it stops working at once). False if there was no such key.</summary>
-    bool Revoke(long id);
+    /// <summary>Replaces the key of this scope; the old one stops working at once. Returns the new key.</summary>
+    string Regenerate(ApiKeyScope scope);
 }
 
 public static class ApiKeys
 {
-    public const int MaxKeys = 20;
-    public const int MaxNameLength = 60;
     public const string KeyPrefix = "cmpk_";
 
     /// <summary>A new random key: <c>cmpk_</c> and 43 URL-safe characters (256 bits).</summary>
     public static string NewKey() => KeyPrefix + Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
-    public static string Hash(string key) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
-
-    /// <summary>What is shown to tell keys apart: <c>cmpk_</c> and the next four characters.</summary>
-    public static string DisplayPrefix(string key) => key.Length <= KeyPrefix.Length + 4 ? key : key[..(KeyPrefix.Length + 4)];
-
     public static string ScopeName(ApiKeyScope scope) => scope == ApiKeyScope.Control ? "control" : "read";
+
+    public static string DisplayName(ApiKeyScope scope) => scope == ApiKeyScope.Control ? "API Key" : "Read-only API Key";
 
     public static bool TryParseScope(string? text, out ApiKeyScope scope)
     {
@@ -62,12 +53,10 @@ public static class ApiKeys
     public static bool Allows(ApiKeyScope have, ApiKeyScope need) => have == ApiKeyScope.Control || need == ApiKeyScope.Read;
 }
 
-/// <summary>The keys in the queue's SQLite file (<c>compressarr.state.db</c>, table <c>api_keys</c>). If that file cannot be opened there are no keys and none can be
-/// made: <see cref="Create"/> says so, and <see cref="Authenticate"/> rejects everything - the API stays closed rather than open.</summary>
+/// <summary>The keys in the queue's SQLite file (<c>compressarr.state.db</c>, table <c>api_secrets</c>). If that file cannot be opened nothing is accepted and no key can be
+/// shown: the API stays closed rather than open.</summary>
 public sealed class SqliteApiKeyStore : IApiKeyStore
 {
-    private static readonly TimeSpan TouchEvery = TimeSpan.FromMinutes(1);
-
     private readonly SqliteResumeStateStore _store;
     private readonly Func<string> _resumeFilePath;
 
@@ -80,98 +69,72 @@ public sealed class SqliteApiKeyStore : IApiKeyStore
         _resumeFilePath = resumeFilePath;
     }
 
-    public ApiKeyInfo? Authenticate(string key)
-    {
-        if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return null;
+    private static string Kind(ApiKeyScope scope) => ApiKeys.ScopeName(scope);
 
+    /// <summary>Both keys, made on first use. Null when the database cannot be opened.</summary>
+    private Dictionary<ApiKeyScope, string>? ReadBoth()
+    {
         using var connection = _store.OpenReady(_resumeFilePath());
         if (connection is null) return null;
 
-        ApiKeyInfo? found;
-        using (var command = connection.CreateCommand())
+        foreach (var scope in new[] { ApiKeyScope.Control, ApiKeyScope.Read })
         {
-            command.CommandText = "SELECT id, name, scope, prefix, created_at, last_used_at FROM api_keys WHERE hash = @hash;";
-            command.Parameters.AddWithValue("@hash", ApiKeys.Hash(key));
-            using var reader = command.ExecuteReader();
-            found = reader.Read() ? ReadInfo(reader) : null;
+            using var make = connection.CreateCommand();
+            make.CommandText = "INSERT OR IGNORE INTO api_secrets (kind, key, created_at) VALUES (@kind, @key, @now);";
+            make.Parameters.AddWithValue("@kind", Kind(scope));
+            make.Parameters.AddWithValue("@key", ApiKeys.NewKey());
+            make.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+            make.ExecuteNonQuery();
         }
 
-        if (found is null) return null;
-
-        var now = DateTimeOffset.UtcNow;
-        if (found.LastUsedAt is null || now - found.LastUsedAt > TouchEvery)
+        var keys = new Dictionary<ApiKeyScope, string>();
+        using var read = connection.CreateCommand();
+        read.CommandText = "SELECT kind, key FROM api_secrets;";
+        using var reader = read.ExecuteReader();
+        while (reader.Read())
         {
-            using var touch = connection.CreateCommand();
-            touch.CommandText = "UPDATE api_keys SET last_used_at = @now WHERE id = @id;";
-            touch.Parameters.AddWithValue("@now", now.ToString("O", CultureInfo.InvariantCulture));
-            touch.Parameters.AddWithValue("@id", found.Id);
-            touch.ExecuteNonQuery();
+            if (ApiKeys.TryParseScope(reader.GetString(0), out var scope)) keys[scope] = reader.GetString(1);
+        }
+
+        return keys;
+    }
+
+    public ApiKeyInfo? Authenticate(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 200) return null;
+        var keys = ReadBoth();
+        if (keys is null) return null;
+
+        var candidate = Encoding.UTF8.GetBytes(key);
+        ApiKeyInfo? found = null;
+        foreach (var (scope, stored) in keys)
+        {
+            // Both are always compared, so which key it was (or that it was neither) cannot be told from how long the answer took.
+            if (CryptographicOperations.FixedTimeEquals(candidate, Encoding.UTF8.GetBytes(stored))) found = new ApiKeyInfo(ApiKeys.DisplayName(scope), scope);
         }
 
         return found;
     }
 
-    public CreatedApiKey Create(string name, ApiKeyScope scope)
+    public string GetKey(ApiKeyScope scope)
     {
-        var trimmed = (name ?? "").Trim();
-        if (trimmed.Length is 0 or > ApiKeys.MaxNameLength) throw new ArgumentException($"A key needs a name of 1 to {ApiKeys.MaxNameLength} characters.", nameof(name));
+        var keys = ReadBoth() ?? throw new InvalidOperationException("The queue database could not be opened, so the API keys cannot be shown right now.");
+        return keys[scope];
+    }
 
+    public string Regenerate(ApiKeyScope scope)
+    {
+        ReadBoth();   // makes them if they were never made
         using var connection = _store.OpenReady(_resumeFilePath())
-            ?? throw new InvalidOperationException("The queue database could not be opened, so keys cannot be saved right now.");
-
-        using (var count = connection.CreateCommand())
-        {
-            count.CommandText = "SELECT COUNT(*) FROM api_keys;";
-            if (Convert.ToInt64(count.ExecuteScalar(), CultureInfo.InvariantCulture) >= ApiKeys.MaxKeys)
-                throw new InvalidOperationException($"There are already {ApiKeys.MaxKeys} keys. Revoke one you no longer use first.");
-        }
+            ?? throw new InvalidOperationException("The queue database could not be opened, so the API key cannot be replaced right now.");
 
         var key = ApiKeys.NewKey();
-        var created = DateTimeOffset.UtcNow;
-        long id;
-        using (var insert = connection.CreateCommand())
-        {
-            insert.CommandText = "INSERT INTO api_keys (name, scope, hash, prefix, created_at) VALUES (@name, @scope, @hash, @prefix, @created); SELECT last_insert_rowid();";
-            insert.Parameters.AddWithValue("@name", trimmed);
-            insert.Parameters.AddWithValue("@scope", ApiKeys.ScopeName(scope));
-            insert.Parameters.AddWithValue("@hash", ApiKeys.Hash(key));
-            insert.Parameters.AddWithValue("@prefix", ApiKeys.DisplayPrefix(key));
-            insert.Parameters.AddWithValue("@created", created.ToString("O", CultureInfo.InvariantCulture));
-            id = Convert.ToInt64(insert.ExecuteScalar(), CultureInfo.InvariantCulture);
-        }
-
-        return new CreatedApiKey(new ApiKeyInfo(id, trimmed, scope, ApiKeys.DisplayPrefix(key), created, null), key);
-    }
-
-    public IReadOnlyList<ApiKeyInfo> List()
-    {
-        using var connection = _store.OpenReady(_resumeFilePath());
-        if (connection is null) return Array.Empty<ApiKeyInfo>();
-
-        var keys = new List<ApiKeyInfo>();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, name, scope, prefix, created_at, last_used_at FROM api_keys ORDER BY id;";
-        using var reader = command.ExecuteReader();
-        while (reader.Read()) keys.Add(ReadInfo(reader));
-        return keys;
+        command.CommandText = "UPDATE api_secrets SET key = @key, regenerated_at = @now WHERE kind = @kind;";
+        command.Parameters.AddWithValue("@key", key);
+        command.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("@kind", Kind(scope));
+        command.ExecuteNonQuery();
+        return key;
     }
-
-    public bool Revoke(long id)
-    {
-        using var connection = _store.OpenReady(_resumeFilePath());
-        if (connection is null) return false;
-
-        using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM api_keys WHERE id = @id;";
-        command.Parameters.AddWithValue("@id", id);
-        return command.ExecuteNonQuery() > 0;
-    }
-
-    private static ApiKeyInfo ReadInfo(Microsoft.Data.Sqlite.SqliteDataReader reader) => new(
-        reader.GetInt64(0),
-        reader.GetString(1),
-        ApiKeys.TryParseScope(reader.GetString(2), out var scope) ? scope : ApiKeyScope.Read,   // an unknown scope is the lesser one
-        reader.GetString(3),
-        DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
-        reader.IsDBNull(5) ? null : DateTimeOffset.Parse(reader.GetString(5), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
 }

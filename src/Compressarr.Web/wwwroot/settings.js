@@ -651,83 +651,29 @@ loadSettings();
 initPwaCard();
 
 // ---- Automation API keys ---------------------------------------------------------------------------------------------------------------
-// Immediate actions, like the backup list: a key is made or revoked the moment the button is pressed, not when Settings is saved.
+// Two fixed keys, as Sonarr shows its one: always visible here, with Copy and Regenerate. Immediate actions, like the backup list: not part of Save.
 
-function formatApiKeyTime(value) {
-  return value ? new Date(value).toLocaleString() : 'never';
-}
+const API_KEY_FIELDS = { control: 'apiKeyControl', read: 'apiKeyRead' };
 
 async function loadApiKeys() {
-  const body = document.getElementById('apiKeyBody');
-  let data = { keys: [], max: 20 };
+  const status = document.getElementById('apiKeyStatus');
   try {
     const res = await fetch('/api/automation/keys');
-    if (res.ok) data = await res.json();
-  } catch { /* the table just shows no keys */ }
-
-  body.innerHTML = '';
-  if (data.keys.length === 0) {
-    const row = document.createElement('tr');
-    row.innerHTML = '<td colspan="6">No keys yet, so the Automation API is off.</td>';
-    body.appendChild(row);
-    return;
-  }
-
-  for (const k of data.keys) {
-    const row = document.createElement('tr');
-    const revokeBtn = document.createElement('button');
-    revokeBtn.textContent = 'Revoke';
-    revokeBtn.className = 'danger';
-    revokeBtn.addEventListener('click', () => revokeApiKey(k));
-
-    const cells = [k.name, k.scope === 'control' ? 'Control' : 'Read only', k.prefix + '...', formatApiKeyTime(k.createdAt), formatApiKeyTime(k.lastUsedAt)];
-    for (const text of cells) {
-      const cell = document.createElement('td');
-      cell.textContent = text;
-      row.appendChild(cell);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) { status.textContent = body.message || 'The keys could not be loaded.'; return; }
+    status.textContent = '';
+    for (const k of body.keys) {
+      const id = API_KEY_FIELDS[k.scope];
+      if (id) document.getElementById(id).value = k.key;
     }
-    const actionCell = document.createElement('td');
-    actionCell.appendChild(revokeBtn);
-    row.appendChild(actionCell);
-    body.appendChild(row);
+  } catch {
+    status.textContent = 'The keys could not be loaded.';
   }
 }
-
-async function revokeApiKey(key) {
-  if (!confirm('Revoke the key "' + key.name + '" (' + key.prefix + '...)?\n\nAnything using it stops working at once. This cannot be undone.')) return;
-  const res = await fetch('/api/automation/keys/' + encodeURIComponent(key.id), { method: 'DELETE' });
-  if (res.ok) {
-    setStatus('Key revoked.', true);
-    document.getElementById('newApiKeyBox').classList.add('hidden');
-    loadApiKeys();
-  } else {
-    setStatus('Could not revoke that key.', 'error');
-  }
-}
-
-document.getElementById('createApiKeyBtn').addEventListener('click', async () => {
-  const name = document.getElementById('apiKeyName').value.trim();
-  if (!name) { setStatus('Give the key a name first, such as Home Assistant.', 'error'); return; }
-
-  const res = await fetch('/api/automation/keys', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, scope: document.getElementById('apiKeyScope').value })
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) { setStatus(body.message || 'Could not create the key.', 'error'); return; }
-
-  document.getElementById('newApiKeyText').value = body.key;
-  document.getElementById('newApiKeyBox').classList.remove('hidden');
-  document.getElementById('newApiKeyText').select();
-  document.getElementById('apiKeyName').value = '';
-  setStatus('Key created. Copy it now - it is not shown again.', true);
-  loadApiKeys();
-});
 
 // navigator.clipboard only exists on a secure page (https or localhost); opened from another machine it is missing, so select-and-copy is the fallback.
-document.getElementById('copyApiKeyBtn').addEventListener('click', async () => {
-  const field = document.getElementById('newApiKeyText');
+async function copyApiKey(fieldId) {
+  const field = document.getElementById(fieldId);
   let ok = false;
   try {
     if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(field.value); ok = true; }
@@ -737,6 +683,21 @@ document.getElementById('copyApiKeyBtn').addEventListener('click', async () => {
     try { ok = document.execCommand('copy'); } catch { ok = false; }
   }
   setStatus(ok ? 'Key copied.' : 'Select the key and copy it with Ctrl+C.', ok);
-});
+}
+
+async function regenerateApiKey(scope, fieldId) {
+  const which = scope === 'control' ? 'API Key' : 'Read-only API Key';
+  if (!confirm('Replace the ' + which + ' with a new one?\n\nAnything using the old key stops working at once.')) return;
+  const res = await fetch('/api/automation/keys/' + scope + '/regenerate', { method: 'POST' });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) { setStatus(body.message || 'Could not replace the key.', 'error'); return; }
+  document.getElementById(fieldId).value = body.key;
+  setStatus(which + ' replaced.', true);
+}
+
+for (const [scope, id] of Object.entries(API_KEY_FIELDS)) {
+  document.getElementById(id + 'Copy').addEventListener('click', () => copyApiKey(id));
+  document.getElementById(id + 'Regenerate').addEventListener('click', () => regenerateApiKey(scope, id));
+}
 
 loadApiKeys();
