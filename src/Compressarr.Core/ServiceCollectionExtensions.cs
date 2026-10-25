@@ -29,7 +29,10 @@ public static class ServiceCollectionExtensions
     {
         services.AddHttpClient();
 
-        services.AddSingleton<IConfigStore, JsonConfigStore>();
+        // The settings file without the secrets: they are kept in the state database (stage 3c), put back into the settings object on Load.
+        services.AddSingleton<ISecretStore, SqliteSecretStore>();
+        services.AddSingleton(sp => new SecretsConfigStore(new JsonConfigStore(), sp.GetRequiredService<ISecretStore>(), () => sp.GetServices<Compressarr.Core.Notifications.INotifier>()));
+        services.AddSingleton<IConfigStore>(sp => sp.GetRequiredService<SecretsConfigStore>());
         services.AddSingleton<IPathExpander, PathExpander>();
         services.AddSingleton<IHandBrakeProfileStore, HandBrakeProfileStore>();
         services.AddSingleton<HandBrakePresetService>();

@@ -8,7 +8,7 @@ namespace Compressarr.Core.Conversion;
 /// statements are shared with <see cref="HistoryDatabase"/>.</summary>
 internal static class StateDatabase
 {
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 6;
     public const string FileName = "compressarr.state.db";
 
     /// <summary>The database that goes with a resume-file path: the app's own <c>compressarr.resume.json</c> maps to <c>compressarr.state.db</c> in the
@@ -88,7 +88,24 @@ internal static class StateDatabase
             HistoryDatabase.Execute(connection, "PRAGMA user_version = 5;", transaction);
             transaction.Commit();
         }
+
+        if (version < 6)
+        {
+            using var transaction = connection.BeginTransaction();
+            HistoryDatabase.Execute(connection, SchemaV6, transaction);
+            HistoryDatabase.Execute(connection, "PRAGMA user_version = 6;", transaction);
+            transaction.Commit();
+        }
     }
+
+    // v6: the keys, tokens and webhook addresses of the settings (Sonarr, Radarr, TMDb, OMDb, the notification channels' secret fields), which used to sit in compressarr.settings.json.
+    private const string SchemaV6 = """
+        CREATE TABLE secrets (
+            name       TEXT PRIMARY KEY,      -- sonarr.apiKey | radarr.apiKey | posters.tmdbApiKey | posters.omdbApiKey | channel.<id>.<setting>
+            value      TEXT NOT NULL,         -- readable: Compressarr has to send it
+            updated_at TEXT NOT NULL
+        );
+        """;
 
     // v5: the web sign-in (one account, the method, the sessions behind the login cookie) and the two fixed API keys, replacing the named, hashed keys of v3 (never released).
     private const string SchemaV5 = """

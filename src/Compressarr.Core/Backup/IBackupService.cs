@@ -49,9 +49,11 @@ public sealed class BackupService : IBackupService
     private readonly IPathExpander _pathExpander;
     private readonly ITrashService _trash;
     private readonly IAppState _appState;
+    private readonly IEnumerable<Compressarr.Core.Notifications.INotifier> _notifiers;
 
-    public BackupService(IConfigStore configStore, IPathExpander pathExpander, ITrashService trash, IAppState appState)
+    public BackupService(IConfigStore configStore, IPathExpander pathExpander, ITrashService trash, IAppState appState, IEnumerable<Compressarr.Core.Notifications.INotifier>? notifiers = null)
     {
+        _notifiers = notifiers ?? Array.Empty<Compressarr.Core.Notifications.INotifier>();
         _configStore = configStore;
         _pathExpander = pathExpander;
         _trash = trash;
@@ -252,6 +254,20 @@ public sealed class BackupService : IBackupService
                 else
                 {
                     RestoreEntry(tempDir, "compressarr.runcount.json", AppPaths.GetRunCountFilePath());
+                }
+
+                // A backup made before the secrets moved to the database holds its keys and tokens in the settings file: now that the restored database is in place, put them into it.
+                if (restoredConfig is not null)
+                {
+                    var channelKeys = ConfigSecrets.ChannelKeys(_notifiers);
+                    if (ConfigSecrets.Collect(restoredConfig, channelKeys).Count > 0)
+                    {
+                        _configStore.Update(AppPaths.GetConfigFilePath(), current =>
+                        {
+                            ConfigSecrets.CopyFilled(restoredConfig, current, channelKeys);
+                            return true;
+                        });
+                    }
                 }
 
                 // A backup made before 3.0 still carries the app-written values (last backup, digest-sent days, viewed-through marker) inside its settings file:

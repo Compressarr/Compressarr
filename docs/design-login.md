@@ -176,14 +176,28 @@ change without the key. The cost is that anyone who can open Settings can point 
 
 **Exports leave secrets out** unless asked: `GET /api/settings/export` redacts the four keys and every channel secret; `?includeSecrets=true` (the Backup & Restore tick-box "Include API
 keys and passwords") adds them. **Import keeps what the install has**: a secret that is blank in the file keeps the current value (a channel is matched by its id), so restoring a redacted
-file never wipes a key; a file that carries keys brings them. **The backups are unchanged and complete**: a backup zip holds the settings file (keys included) and the state database
+file never wipes a key; a file that carries keys brings them. **The backups are unchanged and complete**: a backup zip holds the settings file and the state database
 (`compressarr.state.db`: the Compressarr API keys, the sign-in account as a hash, the queue, holds), with the web sessions emptied; a restore brings all of it back, so integrations keep
-working with the keys they have (test: `TheCompressarrApiKeys_AreInTheBackup_AndComeBackOnARestore`). `sw.js` cache v35. The keys are still stored in `compressarr.json`; moving them to the
-state database (stage 3c) is separate and later.
+working with the keys they have (test: `TheCompressarrApiKeys_AreInTheBackup_AndComeBackOnARestore`). `sw.js` cache v35. The keys moved from the settings file to the state database in stage 3c (below).
 
 ## Stage 5: BUILT 2026-10-25 (uncommitted): the documents
 
 **CHANGELOG** 3.0.0-rc.3 opens with the behaviour change (anyone outside the local network now needs a login; nothing changes at home; Tailscale needs the tick; behind a reverse proxy choose Enabled) and lists the sign-in, Allowed Hosts, the way back from a forgotten password, masked secrets and the redacted export. **Test plan** (docs/test-plan-2.2.html): K46 to K51 (nothing changes at home / outside needs a login; Forms, Basic, locking and signing out; the tray and environment-variable reset; Allowed Hosts and cross-site; keys as dots; export, import and backups), and K37 to K40 now point at Settings > Security. **README:** a Security and the Automation API section, the Host and Security rows in the settings table, the backup bullet (a backup holds keys and the login), the AllowedHosts line in the configuration reference; the stray script text that had been pasted into the Installation section since Phase 5e is gone and the HandBrake rows the Settings page no longer has are out of the table. **Wiki (local, unpublished):** Home-Assistant-Integration rewritten around the API keys (REST sensor on /api/v1/status with the read-only key, template sensors, the card, and a hold / release rest_command with a movie-night automation), Settings-Reference (Host, Security, dots, export tick, backups hold keys), Backups-and-Restore, Notifications, Troubleshooting (stage 3). Not done: the Settings-Reference HandBrake section still describes a card the Settings page no longer has (older, not part of this work).
+
+## Stage 3c: BUILT 2026-10-25 (uncommitted): the secrets leave the settings file
+
+The state database is **v6**: a `secrets` table (`name`, `value`, `updated_at`; names `sonarr.apiKey`, `radarr.apiKey`, `posters.tmdbApiKey`, `posters.omdbApiKey` and `channel.<id>.<setting>`). The design note planned
+an `ISecretStore` that about 24 readers would call; it was built the other way round, which touches none of them: `SecretsConfigStore` wraps `JsonConfigStore` as the registered `IConfigStore`. **Load** puts the stored secrets into the
+settings object (where the settings have none; a value still in the file wins, because it just arrived from an older file or backup), **Save** collects every secret the object holds, replaces the stored set (a removed key or channel
+disappears; nothing is written when the set did not change) and writes the file with them emptied. So every part of the app, the Test buttons, the export and the dots logic keep reading `config.Arrs.Sonarr.ApiKey` and
+friends. Which channel settings are secrets is the notifiers' own `NotifierField.Secret` flag (`ConfigSecrets`, in Core, shared with the web layer). Only the app's own settings file gets this treatment; any other path (an extracted
+backup, a test's file) is read and written as it is. **If the database cannot be read or written the keys stay in the file** (Save falls back; Load just has the file), so a database problem never loses a key.
+
+**Moving.** `SecretsConfigStore.AdoptLegacySecrets()` runs at start-up (beside `AdoptLegacyValues`) and moves what an older settings file holds into the database and out of the file; ordinary saves do the same. A restore of an older
+backup (keys in its settings file, a database without them) copies the file's secrets into the restored database afterwards (`ConfigSecrets.CopyFilled`), and a backup made by 3c carries the secrets in its database (its settings file has
+none). An import goes through Save, so keys in the file move and a redacted file keeps the install's own (stage 4). Not encrypted: the values are readable by anything running as the user, as before, and backups carry them.
+Tests: `SecretsTests` (Core): file without secrets and load-back, clear and channel removal, the legacy file and its first save, file newer than database, database unavailable keeps the file's keys, other paths untouched, no write when
+unchanged, backup and restore (current and older).
 
 ## Storage, endpoints, stages
 

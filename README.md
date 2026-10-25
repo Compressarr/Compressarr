@@ -761,7 +761,8 @@ Config is JSON, stored per-user at `%AppData%\Compressarr\compressarr.settings.j
 next to the install folder, so upgrades never overwrite your settings. Paths may contain
 `%ENVVAR%` tokens (e.g. `%ProgramFiles%`, plus Compressarr's own `%CompressarrAppData%`),
 expanded at the point of use. This shows the shipped defaults - lanes start empty; add your own
-from the Lanes page.
+from the Lanes page. The keys, tokens and webhook addresses (Sonarr, Radarr, TMDb, OMDb, notification channels) are not in this file: they are kept in the state database
+(`compressarr.state.db`, next to it), so the settings file is safe to share. The `ApiKey` fields below stay empty in a file Compressarr wrote.
 
 ```json
 {

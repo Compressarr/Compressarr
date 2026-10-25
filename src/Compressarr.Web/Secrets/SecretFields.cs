@@ -16,11 +16,9 @@ public static class SecretFields
     private static readonly JsonSerializerOptions CloneOptions = new() { Converters = { new JsonStringEnumConverter() } };
 
     /// <summary>For each notifier type, the setting keys its fields mark <c>Secret</c> (webhook addresses, tokens, user keys).</summary>
-    public static Dictionary<string, HashSet<string>> ChannelKeys(IEnumerable<INotifier> notifiers) =>
-        notifiers.ToDictionary(n => n.Type, n => n.Fields.Where(f => f.Secret).Select(f => f.Key).ToHashSet(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
+    public static Dictionary<string, HashSet<string>> ChannelKeys(IEnumerable<INotifier> notifiers) => ConfigSecrets.ChannelKeys(notifiers);
 
-    public static HashSet<string> KeysFor(Dictionary<string, HashSet<string>> channelKeys, string type) =>
-        channelKeys.TryGetValue(type, out var keys) ? keys : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    public static HashSet<string> KeysFor(Dictionary<string, HashSet<string>> channelKeys, string type) => ConfigSecrets.KeysFor(channelKeys, type);
 
     /// <summary>What the page is shown for a stored secret: the mask when there is one, an empty box when there is not.</summary>
     public static string Show(string? stored) => string.IsNullOrEmpty(stored) ? "" : Mask;

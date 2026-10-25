@@ -61,7 +61,10 @@ public sealed class JsonConfigStore : IConfigStore
             ?? throw new InvalidDataException($"Compressarr: merged config for '{path}' deserialized to null.");
     }
 
-    public void Save(CompressarrConfig config, string path)
+    public void Save(CompressarrConfig config, string path) => Save(config, path, null);
+
+    /// <summary>Saves the settings; <paramref name="adjust"/>, when given, changes the JSON on its way to the file (the secrets are taken out of it, see <see cref="SecretsConfigStore"/>).</summary>
+    public void Save(CompressarrConfig config, string path, Action<JsonObject>? adjust)
     {
         var folder = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(folder) && !Directory.Exists(folder))
@@ -69,7 +72,14 @@ public sealed class JsonConfigStore : IConfigStore
             Directory.CreateDirectory(folder);
         }
 
-        var json = JsonSerializer.Serialize(config, SerializerOptions);
+        string json;
+        if (adjust is null) json = JsonSerializer.Serialize(config, SerializerOptions);
+        else
+        {
+            var node = JsonSerializer.SerializeToNode(config, SerializerOptions)!.AsObject();
+            adjust(node);
+            json = node.ToJsonString(SerializerOptions);
+        }
 
         // Write to a temp file and swap it into place rather than writing the target file
         // directly, so a concurrent Load() never observes a partially-written/torn file even if

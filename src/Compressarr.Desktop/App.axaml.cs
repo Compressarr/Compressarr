@@ -287,5 +287,9 @@ public partial class App : Application
         // file is moved on the next start.
         try { Services.GetRequiredService<Compressarr.Core.Config.IAppState>().AdoptLegacyValues(); }
         catch { }
+
+        // The keys, tokens and webhook addresses used to sit in the settings file too: moved into the state database (and out of the file), best effort like the above.
+        try { Services.GetRequiredService<Compressarr.Core.Config.SecretsConfigStore>().AdoptLegacySecrets(); }
+        catch { }
     }
 }
