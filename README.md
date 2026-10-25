@@ -310,8 +310,8 @@ post-execution command, so it should not be open to the internet without a login
   keeps the ones you have.
 - **The Automation API** (`/api/v1`) is for scripts and Home Assistant: an **API Key** (read and act: hold the queue, run now, pause, change the schedule) and a **Read-only API Key**,
   shown in Settings > Security with Copy and Regenerate, sent in an `X-Api-Key` header (or `Authorization: Bearer`). They work from any address and are not part of the web login; five wrong
-  keys lock an address out for a minute. Every field name in the answers is fixed by tests. See the [wiki](https://github.com/Compressarr/Compressarr/wiki/Home-Assistant-Integration) for a
-  Home Assistant dashboard and a "hold the queue during movie night" automation.
+  keys lock an address out for a minute. Every field name in the answers is fixed by tests. The [API and Automation](https://github.com/Compressarr/Compressarr/wiki/API-and-Automation) wiki page lists every call; the
+  [Home Assistant](https://github.com/Compressarr/Compressarr/wiki/Home-Assistant-Integration) page has a dashboard and a "hold the queue during movie night" automation.
 
 ### Backups
 

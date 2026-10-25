@@ -26,7 +26,7 @@ Settings > General on a test machine (Security: Authentication, Authentication R
   server reached from the PC never see a login; one account; PBKDF2-SHA512 at 220,000 rounds; the 5-failures/5-minutes lock per address; Remember me and a 7-day sliding cookie; the local-path return-URL rule;
   the API key living in the Security section; **Allowed Hosts** in the Host section; the secure default (below).
 - **Differ (the CVE lesson):** the local decision uses **only the TCP peer address** (`Connection.RemoteIpAddress`), never a header, and **any** forwarding header at all (`X-Forwarded-For`, `Forwarded`,
-  `X-Real-IP`, `X-Forwarded-Host`, `X-Forwarded-Proto`) makes the request "not local". Compressarr never runs ASP.NET's forwarded-headers middleware, so a header can only ever make a request stricter.
+  `X-Real-IP`, `X-Forwarded-Host`, `X-Forwarded-Proto`, and since the security review also `Via`, `X-Forwarded-Server`, `X-Original-Forwarded-For`, `X-Cluster-Client-IP`, `Fastly-Client-IP`, `X-ProxyUser-Ip`; see `WebAuthPolicy.ForwardingHeaders`) makes the request "not local". Compressarr never runs ASP.NET's forwarded-headers middleware, so a header can only ever make a request stricter.
   Behind a reverse proxy every visitor therefore signs in, which is the safe behaviour; Sonarr's Trusted Networks (believing a trusted proxy's forwarded address) is left for later.
 - **Differ (sessions):** sessions live on the server (state database), not in a data-protection cookie, so Sign out everywhere and a password change really end sessions, and no key ring can break login.
 - **Differ (the cross-site check, below)** applies to every state-changing request, because with "local = open" a hostile web page in a browser on the LAN is the realistic attacker.

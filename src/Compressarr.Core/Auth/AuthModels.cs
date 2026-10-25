@@ -58,7 +58,8 @@ public static class WebAuthPolicy
     /// <summary>Headers a reverse proxy adds. Any one of them on a request means the TCP peer is a proxy, not the person: never "local".</summary>
     public static readonly string[] ForwardingHeaders =
     {
-        "X-Forwarded-For", "Forwarded", "X-Real-IP", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Port", "X-Client-IP", "CF-Connecting-IP", "True-Client-IP"
+        "X-Forwarded-For", "Forwarded", "X-Real-IP", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Port", "X-Client-IP", "CF-Connecting-IP", "True-Client-IP",
+        "Via", "X-Forwarded-Server", "X-Original-Forwarded-For", "X-Cluster-Client-IP", "Fastly-Client-IP", "X-ProxyUser-Ip"
     };
 
     public static bool HasForwardingHeader(IEnumerable<string> headerNames) =>

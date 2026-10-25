@@ -144,6 +144,12 @@ public class WebAuthPolicyTests
     [InlineData("X-Client-IP")]
     [InlineData("CF-Connecting-IP")]
     [InlineData("True-Client-IP")]
+    [InlineData("Via")]
+    [InlineData("X-Forwarded-Server")]
+    [InlineData("X-Original-Forwarded-For")]
+    [InlineData("X-Cluster-Client-IP")]
+    [InlineData("Fastly-Client-IP")]
+    [InlineData("X-ProxyUser-Ip")]
     public void EveryProxyHeader_IsRecognised_InAnyCase(string header)
     {
         Assert.True(WebAuthPolicy.HasForwardingHeader(new[] { "Accept", header, "Host" }));
