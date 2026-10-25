@@ -225,33 +225,13 @@ right on the row so you can verify it without waiting for the schedule.
    > publishing it - the scan link is at the bottom of that release's notes on the
    > [Releases](https://github.com/Compressarr/Compressarr/releases) page, if you'd like to check
    > it independently.
-4. Launch Compressarr from the Start Menu - it runs as a tray icon only, with no window of its
+3. Launch Compressarr from the Start Menu - it runs as a tray icon only, with no window of its
    own. Right-click the tray icon for **Open Web UI**, or just browse to
    `http://localhost:1212` (or whatever port you've configured).
-5. On the **Encoder** page, use **Check/Install** next to HandBrakeCLI path to detect an existing
+4. On the **Encoder** page, use **Check/Install** next to HandBrakeCLI path to detect an existing
    install or download one automatically. Compressarr's own profiles (**Compressarr SD-HD** and
    **Compressarr UHD AV1**) are built in - there is nothing to install or merge. The Monitor page
    shows a *Finish setting up* notice until the tools your lanes need are found.
-O
-
-# ---------------------------------------------------------------- Settings table
-rep(<<'O', "", 'settings rows');
-| HandBrakeCLI path | Path to `HandBrakeCLI.exe` - Check/Install finds or downloads it |
-| presets.json path | Path to HandBrake's presets.json - Install/Merge Presets adds Compressarr's own, Reload picks up changes made to the file without restarting Compressarr |
-| Extra CLI options | Additional flags passed straight through to every HandBrakeCLI conversion |
-O
-
-# ---------------------------------------------------------------- Backups
-rep(<<'O', <<'N', 'backup bullet');
-- **HandBrake presets are not included** in the backup (it's HandBrake's own file, stored outside
-  Compressarr's data folder). If HandBrake is also freshly installed, use the **Install/Merge
-  Presets** button on Settings (in the HandBrake card) to re-add Compressarr's presets to it.
-O
-- **Your own encoding profiles are included** (HandBrake and ffmpeg), so a restore brings back the
-  profiles your lanes use. HandBrake's own `presets.json` is not - Compressarr no longer uses it;
-  the generated file HandBrake is handed is rebuilt automatically. The HandBrake and ffmpeg
-  *programs* themselves are not in the backup - on a fresh machine use **Check/Install** on the
-  Encoder page.
 
 ---
 
@@ -266,9 +246,6 @@ these pages has a small **?** next to it with a tooltip explaining what it does.
 
 | Field | What it's for |
 |---|---|
-| HandBrakeCLI path | Path to `HandBrakeCLI.exe` - Check/Install finds or downloads it |
-| presets.json path | Path to HandBrake's presets.json - Install/Merge Presets adds Compressarr's own, Reload picks up changes made to the file without restarting Compressarr |
-| Extra CLI options | Additional flags passed straight through to every HandBrakeCLI conversion |
 | FileBot Enabled | Turns on the optional FileBot pre-processing pass described above |
 | FileBot path | Path to `filebot.exe` |
 | Process movies / Movie Arguments | Per-type enable toggle and FileBot CLI arguments for Movies |
@@ -295,6 +272,9 @@ these pages has a small **?** next to it with a tooltip explaining what it does.
 | Post-execution command/arguments | Optional command to run after each pass completes |
 | Sonarr/Radarr Enabled, URL, API Key | See below |
 | Port | Port the web UI listens on - changing this needs a restart |
+| Allowed Hosts | Optional list of the names and addresses Compressarr answers to (empty = any; `localhost` always works) |
+| Authentication, Authentication Required, Username, Password | The web login - see [Security and the Automation API](#security-and-the-automation-api) |
+| API Key / Read-only API Key | The keys for `/api/v1` (scripts, Home Assistant) |
 
 **Sonarr/Radarr integration**: after a file finishes converting successfully, Compressarr can
 tell whichever app tracks it to stop monitoring that specific episode or movie, so it isn't
@@ -303,12 +283,35 @@ Compressarr hands it the original filename, and the app's own parser reports bac
 series/episode or movie it matches, if any. A miss is always treated as "leave it alone," never
 as a guess.
 
-**Install as app** (Web UI section): the whole app is an installable PWA - useful on a phone or
+**Install as app** (Host section): the whole app is an installable PWA - useful on a phone or
 tablet, or for one-tap desktop access without a browser tab. This card shows whichever of three
 states actually applies: a real **Install as app** button (Chrome/Edge/Android), static "tap
 Share, then Add to Home Screen" instructions (iOS Safari has no installable prompt at all), or -
 if you're already running the installed app - instructions for uninstalling it from the browser's
 own app list, since no web page can trigger that directly.
+
+### Security and the Automation API
+
+Compressarr works the way Sonarr and Radarr do: **on your own network, and on the computer it runs on, it never asks for a password**; only a request from *outside* your network needs a
+username and password. Until you set them in **Settings > Security**, requests from outside are refused with a message saying so. The web interface can change settings and run a
+post-execution command, so it should not be open to the internet without a login.
+
+- **Authentication** is **None**, **Forms (Login Page)** (the default; a sign-in page with Remember me) or **Basic (Browser Popup)**. **Authentication Required** is **Enabled** (everyone,
+  this computer too), **Disabled for Local Addresses** (the default: your network and this computer are free, outside signs in) or **Disabled for Localhost** (only this computer is
+  free). Local means `127.0.0.1`/`::1`, `10.x`, `172.16-31.x`, `192.168.x` and link-local addresses; Tailscale and carrier-grade NAT (`100.64.0.0/10`) count only if you tick the box.
+  The decision uses the connection's real address, and a request that carries proxy headers (`X-Forwarded-For` and similar) always counts as outside. If you put a reverse proxy in front of
+  Compressarr, set **Enabled**.
+- The password is stored as a salted PBKDF2 hash (in the state database, not the settings file). Five wrong passwords lock an address out for five minutes. A forgotten password is fixed from
+  your own network by typing a new one in Settings > Security; if you chose **Enabled**, use **Turn off web login...** in the tray menu, or start once with the environment variable
+  `COMPRESSARR_RESET_LOGIN=1`.
+- **Allowed Hosts** (Settings > Host) refuses requests whose Host header is not in your list (DNS-rebinding protection); empty means any.
+- **Keys are never sent back to the browser.** A saved Sonarr, Radarr, TMDb or OMDb key, a notification token or webhook address, and your password show as dots; leave them to keep the
+  value, type to replace it, empty the box and Save to remove it. **Export config** leaves them out unless you tick **Include API keys and passwords**, and importing a file without them
+  keeps the ones you have.
+- **The Automation API** (`/api/v1`) is for scripts and Home Assistant: an **API Key** (read and act: hold the queue, run now, pause, change the schedule) and a **Read-only API Key**,
+  shown in Settings > Security with Copy and Regenerate, sent in an `X-Api-Key` header (or `Authorization: Bearer`). They work from any address and are not part of the web login; five wrong
+  keys lock an address out for a minute. Every field name in the answers is fixed by tests. See the [wiki](https://github.com/Compressarr/Compressarr/wiki/Home-Assistant-Integration) for a
+  Home Assistant dashboard and a "hold the queue during movie night" automation.
 
 ### Backups
 
@@ -340,9 +343,12 @@ Your settings, lanes, your own profiles, resume state, run counter, and history 
 the backup.
 
 Two things to know:
-- **HandBrake presets are not included** in the backup (it's HandBrake's own file, stored outside
-  Compressarr's data folder). If HandBrake is also freshly installed, use the **Install/Merge
-  Presets** button on Settings (in the HandBrake card) to re-add Compressarr's presets to it.
+- **Your own encoding profiles are included** (HandBrake and ffmpeg), so a restore brings back the
+  profiles your lanes use. The HandBrake and ffmpeg *programs* themselves are not in the backup -
+  on a fresh machine use **Check/Install** on the Encoder page.
+- **The backup holds your keys and your login**: the Sonarr, Radarr, TMDb and OMDb keys,
+  notification tokens, the web login and the Compressarr API keys, so a restore brings the
+  integrations back working. Keep the backup folder as private as your settings.
 - Use **Backup Now** on Settings at any time to take a fresh backup before decommissioning a
   machine, rather than relying only on the automatic schedule.
 
@@ -812,7 +818,7 @@ from the Lanes page.
     "OnlyEncodeOffHours": false,
     "WhenDayStarts": "FinishCurrentFile"
   },
-  "Web": { "Port": 1212 },
+  "Web": { "Port": 1212, "AllowedHosts": "" },
   "Backup": {
     "FolderPath": "%CompressarrAppData%\\Backups",
     "IntervalDays": 7,

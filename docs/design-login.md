@@ -181,6 +181,10 @@ file never wipes a key; a file that carries keys brings them. **The backups are 
 working with the keys they have (test: `TheCompressarrApiKeys_AreInTheBackup_AndComeBackOnARestore`). `sw.js` cache v35. The keys are still stored in `compressarr.json`; moving them to the
 state database (stage 3c) is separate and later.
 
+## Stage 5: BUILT 2026-10-25 (uncommitted): the documents
+
+**CHANGELOG** 3.0.0-rc.3 opens with the behaviour change (anyone outside the local network now needs a login; nothing changes at home; Tailscale needs the tick; behind a reverse proxy choose Enabled) and lists the sign-in, Allowed Hosts, the way back from a forgotten password, masked secrets and the redacted export. **Test plan** (docs/test-plan-2.2.html): K46 to K51 (nothing changes at home / outside needs a login; Forms, Basic, locking and signing out; the tray and environment-variable reset; Allowed Hosts and cross-site; keys as dots; export, import and backups), and K37 to K40 now point at Settings > Security. **README:** a Security and the Automation API section, the Host and Security rows in the settings table, the backup bullet (a backup holds keys and the login), the AllowedHosts line in the configuration reference; the stray script text that had been pasted into the Installation section since Phase 5e is gone and the HandBrake rows the Settings page no longer has are out of the table. **Wiki (local, unpublished):** Home-Assistant-Integration rewritten around the API keys (REST sensor on /api/v1/status with the read-only key, template sensors, the card, and a hold / release rest_command with a movie-night automation), Settings-Reference (Host, Security, dots, export tick, backups hold keys), Backups-and-Restore, Notifications, Troubleshooting (stage 3). Not done: the Settings-Reference HandBrake section still describes a card the Settings page no longer has (older, not part of this work).
+
 ## Storage, endpoints, stages
 
 - **State database v5:** `auth` (one row: method, required, trust_cgnat, username, password hash) and `web_sessions` (token hash, created, last used, expires, persistent flag, first-seen address); plus,
