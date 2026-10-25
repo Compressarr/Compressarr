@@ -66,8 +66,11 @@ public sealed class UiStateSettings
     /// <summary>The highest IRunHistoryStore.GetRunCount value that existed the last time the
     /// History page was opened - drives the sidebar's error/warning badges, which only count runs
     /// newer than this. 0 before the History page has ever been visited, in which case the badges
-    /// count every run in the retention window (same as before this field existed).</summary>
-    public int HistoryViewedThroughRunNumber { get; set; }
+    /// count every run in the retention window (same as before this field existed).
+    /// Legacy: since 3.0 this lives in the state database (<see cref="IAppState"/>). The property stays only so an older settings file (an upgrade, a restored
+    /// backup, an imported export) can be read once and moved; it is null, and so not written, otherwise.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public int? HistoryViewedThroughRunNumber { get; set; }
 }
 
 /// <summary>The ffmpeg encoder's settings. Paths default to where the Encoder page's Check/Install
@@ -412,8 +415,9 @@ public sealed class BackupSettings
     public int IntervalDays { get; set; } = 7;
     public int RetentionDays { get; set; } = 28;
 
-    /// <summary>Set by BackupService after each successful backup (scheduled or manual) - drives
-    /// both "is a backup due yet" for IBackupScheduler and the "Last backup" display on Settings.</summary>
+    /// <summary>Legacy: the time of the last backup now lives in the state database (<see cref="IAppState.BackupLastRunUtc"/>), which drives both "is a backup due yet" for
+    /// IBackupScheduler and the "Last backup" display on Settings. Kept only so an older settings file can be read once and moved; null, and so not written, otherwise.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? LastRunUtc { get; set; }
 }
 
@@ -478,7 +482,10 @@ public sealed class NotificationSettings
     public string ToastDigestDailyTime { get; set; } = "09:00";
     public string ToastDigestWeeklyTime { get; set; } = "09:00";
     public DayOfWeek ToastDigestWeeklyDay { get; set; } = DayOfWeek.Monday;
+    // Legacy: the day each toast digest was last sent now lives in the state database (IAppState). Kept only so an older settings file can be read once and moved.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public DateOnly? ToastLastDailyDigestSentDate { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public DateOnly? ToastLastWeeklyDigestSentDate { get; set; }
 
     public List<NotificationChannel> Channels { get; set; } = new();
@@ -507,9 +514,11 @@ public sealed class NotificationChannel
     public string DigestWeeklyTime { get; set; } = "09:00";
     public DayOfWeek DigestWeeklyDay { get; set; } = DayOfWeek.Monday;
 
-    /// <summary>Scheduler-internal dedupe stamp, not user-editable - excluded from
-    /// NotificationChannelDto entirely so a Settings save can never accidentally reset it.</summary>
+    /// <summary>Legacy: the day this channel's digest was last sent now lives in the state database (<see cref="IAppState"/>, keyed by the channel's Id). Kept only so an older
+    /// settings file can be read once and moved; null, and so not written, otherwise. Not in NotificationChannelDto.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public DateOnly? LastDailyDigestSentDate { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public DateOnly? LastWeeklyDigestSentDate { get; set; }
 }
 

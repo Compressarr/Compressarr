@@ -51,13 +51,20 @@ public class BackupSchedulerTests
 
     private static CompressarrConfig ConfigNotDueYet() => new()
     {
-        Backup = new BackupSettings { IntervalDays = 7, LastRunUtc = DateTimeOffset.UtcNow }
+        Backup = new BackupSettings { IntervalDays = 7 }
     };
+
+    private static InMemoryAppState BackedUpJustNow()
+    {
+        var state = new InMemoryAppState();
+        state.SetBackupLastRunUtc(DateTimeOffset.UtcNow);
+        return state;
+    }
 
     [Fact]
     public void Start_SetsIsRunningTrue()
     {
-        var scheduler = new BackupScheduler(new FixedConfigStore(ConfigDueNow()), new FakeBackupService(), TinyInterval);
+        var scheduler = new BackupScheduler(new FixedConfigStore(ConfigDueNow()), new FakeBackupService(), new InMemoryAppState(), TinyInterval);
 
         scheduler.Start();
 
@@ -68,7 +75,7 @@ public class BackupSchedulerTests
     public async Task Start_CalledTwice_DoesNotDoubleStart()
     {
         var backupService = new FakeBackupService();
-        var scheduler = new BackupScheduler(new FixedConfigStore(ConfigNotDueYet()), backupService, TinyInterval);
+        var scheduler = new BackupScheduler(new FixedConfigStore(ConfigNotDueYet()), backupService, BackedUpJustNow(), TinyInterval);
 
         scheduler.Start();
         scheduler.Start(); // second call should be a no-op
@@ -83,7 +90,7 @@ public class BackupSchedulerTests
     public async Task Loop_RunsBackup_WhenDue()
     {
         var backupService = new FakeBackupService();
-        var scheduler = new BackupScheduler(new FixedConfigStore(ConfigDueNow()), backupService, TinyInterval);
+        var scheduler = new BackupScheduler(new FixedConfigStore(ConfigDueNow()), backupService, new InMemoryAppState(), TinyInterval);
 
         scheduler.Start();
         await WaitUntil(() => backupService.CallCount >= 1, TimeSpan.FromSeconds(2));
@@ -96,7 +103,7 @@ public class BackupSchedulerTests
     public async Task Loop_DoesNotRunBackup_WhenNotYetDue()
     {
         var backupService = new FakeBackupService();
-        var scheduler = new BackupScheduler(new FixedConfigStore(ConfigNotDueYet()), backupService, TinyInterval);
+        var scheduler = new BackupScheduler(new FixedConfigStore(ConfigNotDueYet()), backupService, BackedUpJustNow(), TinyInterval);
 
         scheduler.Start();
         await Task.Delay(TinyInterval * 5);
@@ -108,7 +115,7 @@ public class BackupSchedulerTests
     [Fact]
     public async Task StopAsync_SetsIsRunningFalse()
     {
-        var scheduler = new BackupScheduler(new FixedConfigStore(ConfigNotDueYet()), new FakeBackupService(), TinyInterval);
+        var scheduler = new BackupScheduler(new FixedConfigStore(ConfigNotDueYet()), new FakeBackupService(), BackedUpJustNow(), TinyInterval);
         scheduler.Start();
 
         await scheduler.StopAsync();

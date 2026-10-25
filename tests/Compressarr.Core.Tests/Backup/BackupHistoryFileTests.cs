@@ -42,7 +42,7 @@ public class BackupHistoryFileTests : AppDataTestBase
         var config = new CompressarrConfig();
         config.Backup.FolderPath = backupFolder;
         config.Logging.LogFilePath = logFolder;
-        return (new BackupService(new FixedConfigStore(config), new PassThroughPathExpander(), new NoTrash()), backupFolder, logFolder);
+        return (new BackupService(new FixedConfigStore(config), new PassThroughPathExpander(), new NoTrash(), new InMemoryAppState()), backupFolder, logFolder);
     }
 
     private static string[] EntriesOf(string folder)

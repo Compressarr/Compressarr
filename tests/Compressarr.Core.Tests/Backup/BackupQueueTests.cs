@@ -39,7 +39,7 @@ public class BackupQueueTests : AppDataTestBase
         var config = new CompressarrConfig();
         config.Backup.FolderPath = backupFolder;
         config.Logging.LogFilePath = Path.Combine(AppData, "Logs");
-        return (new BackupService(new FixedConfigStore(config), new PassThroughPathExpander(), new NoTrash()), backupFolder);
+        return (new BackupService(new FixedConfigStore(config), new PassThroughPathExpander(), new NoTrash(), new InMemoryAppState()), backupFolder);
     }
 
     private static string[] EntriesOf(string folder)

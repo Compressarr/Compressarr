@@ -8,7 +8,7 @@ namespace Compressarr.Web;
 /// JSON instead.</summary>
 internal static class ConfigMapping
 {
-    public static SettingsDto ToSettingsDto(CompressarrConfig config, List<ValidationIssueDto> validationIssues) => new(
+    public static SettingsDto ToSettingsDto(CompressarrConfig config, List<ValidationIssueDto> validationIssues, DateTimeOffset? backupLastRunUtc) => new(
         FileBotEnabled: config.FileBot.Enabled,
         FileBotCliPath: config.FileBot.CliPath,
         FileBotTvEnabled: config.FileBot.TvEnabled,
@@ -46,7 +46,7 @@ internal static class ConfigMapping
         BackupFolderPath: config.Backup.FolderPath,
         BackupIntervalDays: config.Backup.IntervalDays,
         BackupRetentionDays: config.Backup.RetentionDays,
-        BackupLastRunUtc: config.Backup.LastRunUtc,
+        BackupLastRunUtc: backupLastRunUtc,
         ValidationIssues: validationIssues,
         Posters: new PosterSettingsDto(config.Posters.Enabled, config.Posters.TmdbApiKey, config.Posters.Size.ToString(), config.Posters.SmallerImages,
             config.Posters.Source.ToString(), config.Posters.OmdbApiKey, config.Posters.FallbackToOther),
@@ -156,7 +156,7 @@ internal static class ConfigMapping
         channel.DigestDailyTime = dto.DigestDailyTime;
         channel.DigestWeeklyTime = dto.DigestWeeklyTime;
         channel.DigestWeeklyDay = Enum.Parse<DayOfWeek>(dto.DigestWeeklyDay);
-        // LastDailyDigestSentDate/LastWeeklyDigestSentDate are deliberately not in the DTO at all -
-        // scheduler-internal bookkeeping, never user-editable, so a Settings save can never reset it.
+        // The days a digest was last sent are deliberately not in the DTO at all - scheduler-internal bookkeeping (kept in the app state, not the
+        // settings file), never user-editable.
     }
 }

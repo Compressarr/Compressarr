@@ -94,16 +94,15 @@ public class DigestSchedulerTests
         throw new TimeoutException("Condition was not met within the timeout.");
     }
 
-    private static DigestScheduler MakeScheduler(CompressarrConfig config, TimeProvider timeProvider, IEnumerable<INotifier> notifiers, INotificationService toastService) =>
-        new(new FixedConfigStore(config), new FakeHistoryStore(), new IdentityPathExpander(), notifiers, toastService, new NoOpRunLogger(), timeProvider, TinyInterval);
+    private static DigestScheduler MakeScheduler(CompressarrConfig config, TimeProvider timeProvider, IEnumerable<INotifier> notifiers, INotificationService toastService, IAppState? appState = null) =>
+        new(new FixedConfigStore(config), new FakeHistoryStore(), new IdentityPathExpander(), notifiers, toastService, new NoOpRunLogger(), appState ?? new InMemoryAppState(), timeProvider, TinyInterval);
 
-    private static NotificationChannel DailyChannel(string time = "09:00", DateOnly? lastSent = null) => new()
+    private static NotificationChannel DailyChannel(string time = "09:00") => new()
     {
         Type = "fake",
         Trigger = NotificationTrigger.Never, // isolate digest behavior from per-run Trigger
         DigestDailyEnabled = true,
-        DigestDailyTime = time,
-        LastDailyDigestSentDate = lastSent
+        DigestDailyTime = time
     };
 
     [Fact]
@@ -129,14 +128,16 @@ public class DigestSchedulerTests
         var time = new FakeTimeProvider(new DateTimeOffset(day.Year, day.Month, day.Day, 9, 1, 0, TimeSpan.Zero));
         var config = new CompressarrConfig { Notifications = new NotificationSettings { Channels = { DailyChannel("09:00") } } };
         var notifier = new FakeNotifier();
-        var scheduler = MakeScheduler(config, time, new[] { notifier }, new FakeNotificationService());
+        var state = new InMemoryAppState();
+        var scheduler = MakeScheduler(config, time, new[] { notifier }, new FakeNotificationService(), state);
 
         scheduler.Start();
         await WaitUntil(() => notifier.Sent.Count == 1, TimeSpan.FromSeconds(2));
         await scheduler.StopAsync();
 
         Assert.Equal("Compressarr Daily Digest", notifier.Sent[0].Title);
-        Assert.Equal(day, config.Notifications.Channels[0].LastDailyDigestSentDate);
+        Assert.Equal(day, state.GetDigestSent(config.Notifications.Channels[0].Id, DigestKind.Daily));
+        Assert.Null(config.Notifications.Channels[0].LastDailyDigestSentDate);   // never written to the settings any more
     }
 
     [Fact]
@@ -245,14 +246,16 @@ public class DigestSchedulerTests
             }
         };
         var toastService = new FakeNotificationService();
-        var scheduler = MakeScheduler(config, time, new[] { new FakeNotifier() }, toastService);
+        var state = new InMemoryAppState();
+        var scheduler = MakeScheduler(config, time, new[] { new FakeNotifier() }, toastService, state);
 
         scheduler.Start();
         await WaitUntil(() => toastService.DigestCalls.Count == 1, TimeSpan.FromSeconds(2));
         await scheduler.StopAsync();
 
         Assert.Equal("Daily Digest", toastService.DigestCalls[0].PeriodLabel);
-        Assert.Equal(day, config.Notifications.ToastLastDailyDigestSentDate);
+        Assert.Equal(day, state.GetDigestSent(AppStateTargets.Toast, DigestKind.Daily));
+        Assert.Null(config.Notifications.ToastLastDailyDigestSentDate);
     }
 
     [Fact]
@@ -282,6 +285,7 @@ public class DigestSchedulerTests
             new INotifier[] { throwing, healthy },
             toastService,
             new NoOpRunLogger(),
+            new InMemoryAppState(),
             time,
             TinyInterval);
 

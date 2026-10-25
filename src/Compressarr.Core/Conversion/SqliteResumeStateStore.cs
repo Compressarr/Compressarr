@@ -62,6 +62,11 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
         return _notice ?? (_importFailure is null ? null : $"The queue could not be opened in its database ({_importFailure}); the old queue file is used for now and nothing was removed.");
     }
 
+    /// <summary>A connection to the state database, ready to use (created, checked, migrated, the old JSON file imported) - or null when it could not be
+    /// opened and the JSON store is serving instead. For the other things kept in this file (see <see cref="Compressarr.Core.Config.IAppState"/>).</summary>
+    internal Microsoft.Data.Sqlite.SqliteConnection? OpenReady(string resumeFilePath) =>
+        Ready(resumeFilePath) ? HistoryDatabase.Open(StateDatabase.PathFor(resumeFilePath)) : null;
+
     // ---- IResumeStateStore ---------------------------------------------------------------------------------------------------------------
 
     public List<ResumeEntry> Load(string path)

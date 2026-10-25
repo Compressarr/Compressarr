@@ -97,6 +97,9 @@ public static class BackupEndpoints
                     return Results.BadRequest(new { message = "That file doesn't look like a Compressarr export (none of Compressarr's settings are in it), so nothing was changed." });
                 }
 
+                // An export from an earlier version carries that machine's app-written values (last backup, digest-sent days, viewed-through marker): they are
+                // not settings, and another computer's "digest already sent today" must not silence this one, so they are dropped.
+                SqliteAppState.ClearLegacyValues(imported);
                 configStore.Save(imported, AppPaths.GetConfigFilePath());
 
                 // Profiles the export carried that this install doesn't have yet. Same-named ones

@@ -68,7 +68,8 @@ public sealed class BackupServiceTests : IDisposable
     {
         var backupFolder = Path.Combine(_tempDir, "Backups");
         var configStore = new FixedConfigStore(MakeConfig(backupFolder));
-        var service = new BackupService(configStore, new PassThroughPathExpander(), new RecordingTrashService());
+        var appState = new InMemoryAppState();
+        var service = new BackupService(configStore, new PassThroughPathExpander(), new RecordingTrashService(), appState);
 
         var before = DateTimeOffset.UtcNow;
         var result = await service.RunBackupAsync();
@@ -78,8 +79,9 @@ public sealed class BackupServiceTests : IDisposable
         var zipFiles = Directory.GetFiles(backupFolder, "Compressarr_Backup_*.zip");
         Assert.Single(zipFiles);
         Assert.Equal(Path.GetFileName(zipFiles[0]), result.FileName);
-        Assert.NotNull(configStore.Config.Backup.LastRunUtc);
-        Assert.True(configStore.Config.Backup.LastRunUtc >= before);
+        Assert.NotNull(appState.BackupLastRunUtc);
+        Assert.True(appState.BackupLastRunUtc >= before);
+        Assert.Null(configStore.Config.Backup.LastRunUtc);   // the settings file is no longer where it is kept
     }
 
     [Fact]
@@ -93,7 +95,7 @@ public sealed class BackupServiceTests : IDisposable
 
         var configStore = new FixedConfigStore(MakeConfig(backupFolder, retentionDays: 28));
         var trash = new RecordingTrashService();
-        var service = new BackupService(configStore, new PassThroughPathExpander(), trash);
+        var service = new BackupService(configStore, new PassThroughPathExpander(), trash, new InMemoryAppState());
 
         await service.RunBackupAsync();
 
@@ -113,7 +115,7 @@ public sealed class BackupServiceTests : IDisposable
         File.SetCreationTime(newer, DateTime.Now);
 
         var configStore = new FixedConfigStore(MakeConfig(backupFolder));
-        var service = new BackupService(configStore, new PassThroughPathExpander(), new RecordingTrashService());
+        var service = new BackupService(configStore, new PassThroughPathExpander(), new RecordingTrashService(), new InMemoryAppState());
 
         var backups = service.ListBackups();
 
@@ -132,7 +134,7 @@ public sealed class BackupServiceTests : IDisposable
         File.WriteAllText(Path.Combine(overrideFolder, "Compressarr_Backup_override.zip"), "x");
 
         var configStore = new FixedConfigStore(MakeConfig(savedFolder));
-        var service = new BackupService(configStore, new PassThroughPathExpander(), new RecordingTrashService());
+        var service = new BackupService(configStore, new PassThroughPathExpander(), new RecordingTrashService(), new InMemoryAppState());
 
         var backups = service.ListBackups(overrideFolder);
 
@@ -143,7 +145,7 @@ public sealed class BackupServiceTests : IDisposable
     public void ListBackups_ReturnsEmpty_WhenFolderDoesNotExist()
     {
         var configStore = new FixedConfigStore(MakeConfig(Path.Combine(_tempDir, "does-not-exist")));
-        var service = new BackupService(configStore, new PassThroughPathExpander(), new RecordingTrashService());
+        var service = new BackupService(configStore, new PassThroughPathExpander(), new RecordingTrashService(), new InMemoryAppState());
 
         Assert.Empty(service.ListBackups());
     }

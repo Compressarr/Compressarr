@@ -268,5 +268,11 @@ public partial class App : Application
             }
         }
         catch { }
+
+        // The values the app itself writes (last backup, digest-sent days, the History viewed-through marker) used to sit in the settings file. Moved into
+        // the state database before the schedulers start, so the first backup and digest check after an upgrade see them. Best effort: a value left in the
+        // file is moved on the next start.
+        try { Services.GetRequiredService<Compressarr.Core.Config.IAppState>().AdoptLegacyValues(); }
+        catch { }
     }
 }

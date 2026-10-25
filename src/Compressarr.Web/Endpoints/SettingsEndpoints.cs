@@ -12,22 +12,23 @@ public static class SettingsEndpoints
 {
     public static void MapSettingsEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/settings", (IConfigStore configStore, IPathExpander pathExpander) =>
+        app.MapGet("/api/settings", (IConfigStore configStore, IPathExpander pathExpander, IAppState appState) =>
         {
             var config = configStore.Load(AppPaths.GetConfigFilePath());
             var issues = SettingsValidator.Validate(config, pathExpander).Select(i => new ValidationIssueDto(i.Field, i.Message)).ToList();
-            return Results.Json(ConfigMapping.ToSettingsDto(config, issues));
+            return Results.Json(ConfigMapping.ToSettingsDto(config, issues, appState.BackupLastRunUtc));
         });
 
-        app.MapPut("/api/settings", async (SettingsDto dto, IConfigStore configStore, IStartupRegistrationService startupRegistration, IPathExpander pathExpander, IAnnouncementService announcements) =>
+        app.MapPut("/api/settings", async (SettingsDto dto, IConfigStore configStore, IStartupRegistrationService startupRegistration, IPathExpander pathExpander, IAnnouncementService announcements, IAppState appState) =>
         {
             var announcementsWereOn = false;
+            var backupLastRunUtc = appState.BackupLastRunUtc;
             var result = configStore.Update(AppPaths.GetConfigFilePath(), config =>
             {
                 announcementsWereOn = config.Announcements.Enabled;
                 ConfigMapping.ApplySettingsDto(config, dto);
                 var issues = SettingsValidator.Validate(config, pathExpander).Select(i => new ValidationIssueDto(i.Field, i.Message)).ToList();
-                return ConfigMapping.ToSettingsDto(config, issues);
+                return ConfigMapping.ToSettingsDto(config, issues, backupLastRunUtc);
             });
             startupRegistration.Apply(dto.RunAtLogin);
 

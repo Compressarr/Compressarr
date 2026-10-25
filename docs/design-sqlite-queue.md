@@ -57,7 +57,8 @@ It is read by the engine, the Monitor page (every poll), profile and lane delete
 
 ## Later, once it is in (not part of the first release)
 
-- Replace the diff-and-merge code (`SaveChanges`, `MergeUserEdits`) with plain row updates: a queue edit becomes `UPDATE ... WHERE lane_id = ? AND full_name = ?`.
+- Replace the diff-and-merge code (`SaveChanges`, `MergeUserEdits`) with plain row updates: a queue edit becomes `UPDATE ... WHERE lane_id = ? AND full_name = ?`, and have the Monitor ask for rows
+  (a page of the queue, counts per lane) instead of the whole list on every poll. **Gated (user, 2026-10-25): only after the queue database has had a few weeks in production.**
 - **Other app-written values that live in the settings file today** and make the scheduler rewrite the user's settings: `HistoryViewedThroughRunNumber`, `LastRunUtc`, and
   the four digest-sent dates (`ToastLast*DigestSentDate`, `Last*DigestSentDate`). They would move to a small key/value table in the same database, which also stops a settings save
   from racing with them.

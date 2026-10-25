@@ -8,7 +8,7 @@ namespace Compressarr.Core.Conversion;
 /// statements are shared with <see cref="HistoryDatabase"/>.</summary>
 internal static class StateDatabase
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
     public const string FileName = "compressarr.state.db";
 
     /// <summary>The database that goes with a resume-file path: the app's own <c>compressarr.resume.json</c> maps to <c>compressarr.state.db</c> in the
@@ -56,7 +56,24 @@ internal static class StateDatabase
             HistoryDatabase.Execute(connection, "PRAGMA user_version = 1;", transaction);
             transaction.Commit();
         }
+
+        if (version < 2)
+        {
+            using var transaction = connection.BeginTransaction();
+            HistoryDatabase.Execute(connection, SchemaV2, transaction);
+            HistoryDatabase.Execute(connection, "PRAGMA user_version = 2;", transaction);
+            transaction.Commit();
+        }
     }
+
+    // v2: the values the app writes as it works (viewed-through marker, last backup, digest-sent days), which used to live in the settings file.
+    private const string SchemaV2 = """
+        CREATE TABLE kv (
+            key        TEXT PRIMARY KEY,
+            value      TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """;
 
     private const string SchemaV1 = """
         CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);

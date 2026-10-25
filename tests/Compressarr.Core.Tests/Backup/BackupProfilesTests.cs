@@ -42,7 +42,7 @@ public class BackupProfilesTests : AppDataTestBase
             c.Logging.LogFilePath = Path.Combine(AppData, "Logs");
             return true;
         });
-        return (new BackupService(configStore, new PassThroughExpander(), new NoTrash()), folder);
+        return (new BackupService(configStore, new PassThroughExpander(), new NoTrash(), new InMemoryAppState()), folder);
     }
 
     [Fact]

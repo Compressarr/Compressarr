@@ -48,12 +48,14 @@ public sealed class BackupService : IBackupService
     private readonly IConfigStore _configStore;
     private readonly IPathExpander _pathExpander;
     private readonly ITrashService _trash;
+    private readonly IAppState _appState;
 
-    public BackupService(IConfigStore configStore, IPathExpander pathExpander, ITrashService trash)
+    public BackupService(IConfigStore configStore, IPathExpander pathExpander, ITrashService trash, IAppState appState)
     {
         _configStore = configStore;
         _pathExpander = pathExpander;
         _trash = trash;
+        _appState = appState;
     }
 
     private string ResolveFolder(string? folderOverride, CompressarrConfig config) =>
@@ -118,11 +120,7 @@ public sealed class BackupService : IBackupService
 
             RetentionCleaner.CleanUp(_trash, folder, new[] { ".zip" }, config.Backup.RetentionDays, "backup");
 
-            _configStore.Update(AppPaths.GetConfigFilePath(), c =>
-            {
-                c.Backup.LastRunUtc = DateTimeOffset.UtcNow;
-                return true;
-            });
+            _appState.SetBackupLastRunUtc(DateTimeOffset.UtcNow);
 
             return Task.FromResult(new BackupResult(true, fileName, null));
         }
@@ -255,6 +253,10 @@ public sealed class BackupService : IBackupService
                 {
                     RestoreEntry(tempDir, "compressarr.runcount.json", AppPaths.GetRunCountFilePath());
                 }
+
+                // A backup made before 3.0 still carries the app-written values (last backup, digest-sent days, viewed-through marker) inside its settings file:
+                // move them into the state database now, so the restore brings the whole state back.
+                _appState.AdoptLegacyValues();
 
                 return new BackupResult(true, safeName, null);
             }

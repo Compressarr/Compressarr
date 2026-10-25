@@ -9,6 +9,13 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
+## [3.0.0-rc.3] - Unreleased
+
+> Local build in progress (the API release); rc.1 and rc.2 are local test builds that were never published.
+
+### Changed
+- **Compressarr no longer rewrites your settings file as it works.** The values the app itself records - when the last backup finished, the day each digest was last sent (so it goes out once a day), and how far you had viewed on the History page (the sidebar badges) - moved from `compressarr.settings.json` into the state database, `compressarr.state.db`. Before, every digest and backup rewrote the settings file (and put those values into every settings export and into support files people shared). The first start moves whatever an older settings file still holds and takes it out of the file; restoring an older backup does the same; importing an export from another computer drops them (its "digest already sent today" must not silence this one). Nothing changes on screen: the Settings page still shows the last backup.
+
 ## [3.0.0-rc.2] - Unreleased
 
 > Built after 3.0.0-rc.1; ships once rc.1 has been tested.

@@ -134,12 +134,13 @@ public static class HistoryEndpoints
             IConfigStore configStore,
             IPathExpander pathExpander,
             IRunHistoryStore historyStore,
-            IRunArchive archive) =>
+            IRunArchive archive,
+            IAppState appState) =>
         {
             var config = configStore.Load(AppPaths.GetConfigFilePath());
             var retention = config.Report.EffectiveUnseenErrorDays(config.Logging.RetentionDays);
             var unseen = !string.Equals(scope, "recent", StringComparison.OrdinalIgnoreCase);
-            var viewed = config.UiState.HistoryViewedThroughRunNumber;
+            var viewed = appState.HistoryViewedThroughRunNumber;
             var since = unseen ? (retention > 0 ? DateTime.Now.Date.AddDays(-retention) : DateTime.MinValue) : DateTime.MinValue;
             var limit = unseen ? 100 : 50;
 
@@ -161,10 +162,10 @@ public static class HistoryEndpoints
 
         // The sidebar's History badges: runs not yet viewed that had an error, and that had a warning. Every page asks for this on load, so it is one
         // counted query rather than the whole report list.
-        app.MapGet("/api/history/badges", (IConfigStore configStore, IPathExpander pathExpander, IRunHistoryStore historyStore, IRunArchive archive) =>
+        app.MapGet("/api/history/badges", (IConfigStore configStore, IPathExpander pathExpander, IRunHistoryStore historyStore, IRunArchive archive, IAppState appState) =>
         {
             var config = configStore.Load(AppPaths.GetConfigFilePath());
-            var viewed = config.UiState.HistoryViewedThroughRunNumber;
+            var viewed = appState.HistoryViewedThroughRunNumber;
             var retention = config.Report.EffectiveUnseenErrorDays(config.Logging.RetentionDays);
 
             if (archive.IsAvailable())
@@ -181,21 +182,15 @@ public static class HistoryEndpoints
         });
 
         // The sidebar's error/warning badges only count runs newer than this watermark.
-        app.MapGet("/api/history/viewed-through", (IConfigStore configStore) =>
-        {
-            var config = configStore.Load(AppPaths.GetConfigFilePath());
-            return Results.Json(new { runNumber = config.UiState.HistoryViewedThroughRunNumber });
-        });
+        app.MapGet("/api/history/viewed-through", (IAppState appState) =>
+            Results.Json(new { runNumber = appState.HistoryViewedThroughRunNumber }));
 
         // Called once the History page has actually rendered its Reports list - advances the
         // watermark above to "every run that exists right now", clearing the sidebar badges.
-        app.MapPost("/api/history/mark-viewed", (IConfigStore configStore, IRunHistoryStore historyStore) =>
+        app.MapPost("/api/history/mark-viewed", (IAppState appState, IRunHistoryStore historyStore) =>
         {
-            var runNumber = configStore.Update(AppPaths.GetConfigFilePath(), config =>
-            {
-                config.UiState.HistoryViewedThroughRunNumber = historyStore.GetRunCount(AppPaths.GetRunCountFilePath());
-                return config.UiState.HistoryViewedThroughRunNumber;
-            });
+            var runNumber = historyStore.GetRunCount(AppPaths.GetRunCountFilePath());
+            appState.SetHistoryViewedThroughRunNumber(runNumber);
             return Results.Json(new { runNumber });
         });
 

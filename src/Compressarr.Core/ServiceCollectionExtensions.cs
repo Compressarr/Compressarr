@@ -56,6 +56,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMetadataService, MetadataService>();
         services.AddSingleton<SqliteResumeStateStore>();
         services.AddSingleton<IResumeStateStore>(sp => sp.GetRequiredService<SqliteResumeStateStore>());
+        services.AddSingleton<IAppState, SqliteAppState>();
         services.AddSingleton<IFileRouter, FileRouter>();
         services.AddSingleton<ICompanionFileService, CompanionFileService>();
         services.AddSingleton<ITrashService>(sp => TrashServiceFactory.CreateForCurrentPlatform(new RunLoggerTrashWarningSink(sp.GetRequiredService<IRunLogger>())));

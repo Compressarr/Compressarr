@@ -26,6 +26,7 @@ public sealed class DigestScheduler : IDigestScheduler, IDisposable
     private readonly IReadOnlyDictionary<string, INotifier> _notifiersByType;
     private readonly INotificationService _toastService;
     private readonly IRunLogger _logger;
+    private readonly IAppState _appState;
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _checkInterval;
 
@@ -38,8 +39,9 @@ public sealed class DigestScheduler : IDigestScheduler, IDisposable
         IPathExpander pathExpander,
         IEnumerable<INotifier> notifiers,
         INotificationService toastService,
-        IRunLogger logger)
-        : this(configStore, historyStore, pathExpander, notifiers, toastService, logger, TimeProvider.System, TimeSpan.FromMinutes(1))
+        IRunLogger logger,
+        IAppState appState)
+        : this(configStore, historyStore, pathExpander, notifiers, toastService, logger, appState, TimeProvider.System, TimeSpan.FromMinutes(1))
     {
     }
 
@@ -53,6 +55,7 @@ public sealed class DigestScheduler : IDigestScheduler, IDisposable
         IEnumerable<INotifier> notifiers,
         INotificationService toastService,
         IRunLogger logger,
+        IAppState appState,
         TimeProvider timeProvider,
         TimeSpan checkInterval)
     {
@@ -62,6 +65,7 @@ public sealed class DigestScheduler : IDigestScheduler, IDisposable
         _notifiersByType = notifiers.ToDictionary(n => n.Type, StringComparer.OrdinalIgnoreCase);
         _toastService = toastService;
         _logger = logger;
+        _appState = appState;
         _timeProvider = timeProvider;
         _checkInterval = checkInterval;
     }
@@ -117,14 +121,14 @@ public sealed class DigestScheduler : IDigestScheduler, IDisposable
         var dueChannels = new List<(NotificationChannel channel, bool isWeekly)>();
         foreach (var channel in config.Notifications.Channels)
         {
-            if (ShouldFireDaily(channel.DigestDailyEnabled, channel.DigestDailyTime, channel.LastDailyDigestSentDate, today, nowTime))
+            if (ShouldFireDaily(channel.DigestDailyEnabled, channel.DigestDailyTime, _appState.GetDigestSent(channel.Id, DigestKind.Daily), today, nowTime))
                 dueChannels.Add((channel, false));
-            if (ShouldFireWeekly(channel.DigestWeeklyEnabled, channel.DigestWeeklyTime, channel.DigestWeeklyDay, channel.LastWeeklyDigestSentDate, today, todayDow, nowTime))
+            if (ShouldFireWeekly(channel.DigestWeeklyEnabled, channel.DigestWeeklyTime, channel.DigestWeeklyDay, _appState.GetDigestSent(channel.Id, DigestKind.Weekly), today, todayDow, nowTime))
                 dueChannels.Add((channel, true));
         }
 
-        var toastDailyDue = ShouldFireDaily(config.Notifications.ToastDigestDailyEnabled, config.Notifications.ToastDigestDailyTime, config.Notifications.ToastLastDailyDigestSentDate, today, nowTime);
-        var toastWeeklyDue = ShouldFireWeekly(config.Notifications.ToastDigestWeeklyEnabled, config.Notifications.ToastDigestWeeklyTime, config.Notifications.ToastDigestWeeklyDay, config.Notifications.ToastLastWeeklyDigestSentDate, today, todayDow, nowTime);
+        var toastDailyDue = ShouldFireDaily(config.Notifications.ToastDigestDailyEnabled, config.Notifications.ToastDigestDailyTime, _appState.GetDigestSent(AppStateTargets.Toast, DigestKind.Daily), today, nowTime);
+        var toastWeeklyDue = ShouldFireWeekly(config.Notifications.ToastDigestWeeklyEnabled, config.Notifications.ToastDigestWeeklyTime, config.Notifications.ToastDigestWeeklyDay, _appState.GetDigestSent(AppStateTargets.Toast, DigestKind.Weekly), today, todayDow, nowTime);
 
         if (dueChannels.Count == 0 && !toastDailyDue && !toastWeeklyDue) return;
 
@@ -147,21 +151,11 @@ public sealed class DigestScheduler : IDigestScheduler, IDisposable
         if (toastDailyDue) SendToastDigest(dailySummary, "Daily Digest", launchPath);
         if (toastWeeklyDue) SendToastDigest(weeklySummary, "Weekly Digest", launchPath);
 
-        // Stamp dedupe dates atomically, re-resolving each channel by Id against the freshest
-        // config rather than writing back the stale in-loop copy - a concurrent Settings edit from
-        // the web UI (e.g. someone adding a new channel) must never be clobbered by this stamp.
-        _configStore.Update(AppPaths.GetConfigFilePath(), cfg =>
-        {
-            foreach (var (channel, isWeekly) in dueChannels)
-            {
-                var real = cfg.Notifications.Channels.FirstOrDefault(c => c.Id == channel.Id);
-                if (real is null) continue;
-                if (isWeekly) real.LastWeeklyDigestSentDate = today; else real.LastDailyDigestSentDate = today;
-            }
-            if (toastDailyDue) cfg.Notifications.ToastLastDailyDigestSentDate = today;
-            if (toastWeeklyDue) cfg.Notifications.ToastLastWeeklyDigestSentDate = today;
-            return true;
-        });
+        // Stamp the dedupe days in the app state (the state database), keyed by channel Id - not in the settings file, so this can never clobber a
+        // concurrent Settings edit from the web UI, and the scheduler no longer rewrites the user's settings.
+        foreach (var (channel, isWeekly) in dueChannels) _appState.SetDigestSent(channel.Id, isWeekly ? DigestKind.Weekly : DigestKind.Daily, today);
+        if (toastDailyDue) _appState.SetDigestSent(AppStateTargets.Toast, DigestKind.Daily, today);
+        if (toastWeeklyDue) _appState.SetDigestSent(AppStateTargets.Toast, DigestKind.Weekly, today);
     }
 
     /// <summary>Fires once per calendar day, the first tick whose local time-of-day has passed
