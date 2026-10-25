@@ -92,7 +92,7 @@ public static class HistoryEndpoints
             var config = configStore.Load(AppPaths.GetConfigFilePath());
             var logFilePath = pathExpander.Expand(config.Logging.LogFilePath);
             var reportPath = pathExpander.Expand(config.Report.ReportPath);
-            var retention = config.Logging.RetentionDays;
+            var retention = config.Report.EffectiveUnseenErrorDays(config.Logging.RetentionDays);
             var today = DateTime.Now.Date;
 
             // The first day the list covers: "after today minus N days", like the Overview's windows.
@@ -137,7 +137,7 @@ public static class HistoryEndpoints
             IRunArchive archive) =>
         {
             var config = configStore.Load(AppPaths.GetConfigFilePath());
-            var retention = config.Logging.RetentionDays;
+            var retention = config.Report.EffectiveUnseenErrorDays(config.Logging.RetentionDays);
             var unseen = !string.Equals(scope, "recent", StringComparison.OrdinalIgnoreCase);
             var viewed = config.UiState.HistoryViewedThroughRunNumber;
             var since = unseen ? (retention > 0 ? DateTime.Now.Date.AddDays(-retention) : DateTime.MinValue) : DateTime.MinValue;
@@ -165,7 +165,7 @@ public static class HistoryEndpoints
         {
             var config = configStore.Load(AppPaths.GetConfigFilePath());
             var viewed = config.UiState.HistoryViewedThroughRunNumber;
-            var retention = config.Logging.RetentionDays;
+            var retention = config.Report.EffectiveUnseenErrorDays(config.Logging.RetentionDays);
 
             if (archive.IsAvailable())
             {

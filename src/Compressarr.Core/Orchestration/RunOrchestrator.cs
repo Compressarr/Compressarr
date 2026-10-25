@@ -428,7 +428,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
         }
 
         RetentionCleaner.CleanUp(_trash, logFilePath, new[] { ".log", ".txt" }, config.Logging.RetentionDays, "log");
-        RetentionCleaner.CleanUp(_trash, reportPath, new[] { ".html" }, config.Logging.RetentionDays, "report");
+        RetentionCleaner.CleanUp(_trash, reportPath, new[] { ".html" }, config.Report.EffectiveCopyRetentionDays(config.Logging.RetentionDays), "report");
 
         var endTime = DateTime.Now;
         var runTime = endTime - beginTime;

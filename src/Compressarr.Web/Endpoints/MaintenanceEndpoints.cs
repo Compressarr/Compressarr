@@ -60,7 +60,7 @@ public static class MaintenanceEndpoints
         });
 
         // Forces the same retention cleanup RunOrchestrator already does at the end of every real
-        // pass (RetentionCleaner.CleanUp against Logging.RetentionDays) right now, instead of
+        // pass (RetentionCleaner.CleanUp against the log and saved-copy retention settings) right now, instead of
         // waiting for the next one - files go to the Recycle Bin (DeleteAfterConvertMode.Recycle),
         // same as that automatic pass, not a permanent delete.
         app.MapPost("/api/maintenance/cleanup-now", (IConfigStore configStore, IPathExpander pathExpander, ITrashService trash) =>
@@ -70,7 +70,7 @@ public static class MaintenanceEndpoints
             var reportPath = pathExpander.Expand(config.Report.ReportPath);
 
             RetentionCleaner.CleanUp(trash, logPath, new[] { ".log", ".txt" }, config.Logging.RetentionDays, "log");
-            RetentionCleaner.CleanUp(trash, reportPath, new[] { ".html" }, config.Logging.RetentionDays, "report");
+            RetentionCleaner.CleanUp(trash, reportPath, new[] { ".html" }, config.Report.EffectiveCopyRetentionDays(config.Logging.RetentionDays), "report");
 
             return Results.Ok();
         });
@@ -140,7 +140,7 @@ public static class MaintenanceEndpoints
                 foreach (var file in Directory.EnumerateFiles(logPath).Where(f => logExtensions.Contains(Path.GetExtension(f))))
                 {
                     try { File.Delete(file); }
-                    catch (Exception ex) { logger.Log($"Purge Logs & Reports: unable to remove '{file}': {ex.Message}", LogSeverity.Error); }
+                    catch (Exception ex) { logger.Log($"Purge Logs & Report Copies: unable to remove '{file}': {ex.Message}", LogSeverity.Error); }
                 }
             }
 
@@ -150,7 +150,7 @@ public static class MaintenanceEndpoints
                 foreach (var file in Directory.EnumerateFiles(reportPath, "*.html"))
                 {
                     try { File.Delete(file); }
-                    catch (Exception ex) { logger.Log($"Purge Logs & Reports: unable to remove '{file}': {ex.Message}", LogSeverity.Error); }
+                    catch (Exception ex) { logger.Log($"Purge Logs & Report Copies: unable to remove '{file}': {ex.Message}", LogSeverity.Error); }
                 }
             }
 

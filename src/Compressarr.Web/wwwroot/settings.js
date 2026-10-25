@@ -8,6 +8,19 @@ renderNav('settings');
 // success: true = green, 'error' = red, anything else = plain (progress such as "Saving...").
 function setStatus(text, success) { setStatusMessage(text, success === 'error' ? 'error' : success ? 'success' : ''); }
 
+// A blank "days" box means "same as the log retention" (null); anything else is the number typed.
+function optionalDays(id) {
+  const text = document.getElementById(id).value.trim();
+  if (text === '') return null;
+  const n = parseInt(text, 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+// The saved-copy folder and retention only matter while "Also save a copy of each report as a file" is ticked.
+function syncReportCopyOptions() {
+  document.getElementById('reportCopyOptions').classList.toggle('hidden', !document.getElementById('saveReportCopy').checked);
+}
+
 // Logical validation-issue field key -> the actual input it lives on (see ValidationIssue's own
 // note on why these can differ).
 const SETTINGS_FIELD_MAP = {
@@ -84,6 +97,9 @@ function fillForm(dto) {
   document.getElementById('reportPath').value = dto.reportPath;
   document.getElementById('saveReportCopy').checked = !!dto.saveReportCopy;
   document.getElementById('retentionDays').value = dto.retentionDays;
+  document.getElementById('copyRetentionDays').value = dto.reportCopyRetentionDays ?? '';
+  document.getElementById('unseenErrorDays').value = dto.unseenErrorDays ?? '';
+  syncReportCopyOptions();
   document.getElementById('keepSuccessfulHandBrakeLogs').checked = dto.keepSuccessfulHandBrakeLogs;
   document.getElementById('openAfterRun').value = dto.openAfterRun;
   document.getElementById('repeatMonitor').checked = dto.repeatMonitor;
@@ -147,6 +163,8 @@ function readForm() {
     postExecArgs: document.getElementById('postExecArgs').value,
     reportPath: document.getElementById('reportPath').value,
     saveReportCopy: document.getElementById('saveReportCopy').checked,
+    reportCopyRetentionDays: optionalDays('copyRetentionDays'),
+    unseenErrorDays: optionalDays('unseenErrorDays'),
     openAfterRun: document.getElementById('openAfterRun').value,
     repeatCount: 0,
     repeatMonitor: document.getElementById('repeatMonitor').checked,
@@ -448,10 +466,12 @@ document.getElementById('clearHistoryBtn').addEventListener('click', () => runMa
   'History cleared.'
 ));
 
+document.getElementById('saveReportCopy').addEventListener('change', syncReportCopyOptions);
+
 document.getElementById('purgeLogsReportsBtn').addEventListener('click', () => runMaintenanceAction(
   '/api/maintenance/purge-logs-reports',
-  'Permanently delete every log file and every saved report file?\n\nThe run history and its reports are kept.\nThis does NOT go to the Recycle Bin - it cannot be undone.',
-  'Logs and reports purged.'
+  'Permanently delete every log file and every saved report copy (the HTML files in the report folder)?\n\nThe run history and its reports are kept - they are in the database.\nThis does NOT go to the Recycle Bin - it cannot be undone.',
+  'Logs and saved report copies purged.'
 ));
 
 document.getElementById('clearAllBtn').addEventListener('click', () => runMaintenanceAction(

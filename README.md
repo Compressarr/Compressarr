@@ -284,7 +284,9 @@ these pages has a small **?** next to it with a tooltip explaining what it does.
 | Unmatched companion file handling | Maintain, Delete, or Recycle a companion file whose extension isn't on that list |
 | On destination collision | Overwrite (default), Skip, or Rename, when a file already exists at the destination |
 | Log folder / Report folder | Where run logs are written, and where saved copies of reports go. A report is built from the history database whenever you open it, so a file is optional (tick "Also save a copy of each report as a file"). The history is a database in Compressarr's own data folder, so clearing the logs can't delete it |
-| Log/report retention (days) | Logs and reports older than this are cleaned up automatically (0 = keep forever) |
+| Delete logs after (days) | Logs older than this are cleaned up automatically (0 = keep forever); reports in the history database never expire |
+| Flag unseen errors from the last (days) | How far back the History badge and the Unseen errors table look (blank = same as the log setting, 0 = no limit) |
+| Delete saved copies after (days) | Only when "Also save a copy of each report as a file" is ticked: how long the HTML copies are kept (blank = same as the log setting) |
 | Open report after run | Always, On Error, or Never |
 | Enable Monitoring at Startup | Start watching lanes automatically when Compressarr launches |
 | Poll interval (seconds) | How often the monitor loop checks lanes while monitoring is on |

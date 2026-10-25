@@ -50,7 +50,9 @@ internal static class ConfigMapping
         ValidationIssues: validationIssues,
         Posters: new PosterSettingsDto(config.Posters.Enabled, config.Posters.TmdbApiKey, config.Posters.Size.ToString(), config.Posters.SmallerImages,
             config.Posters.Source.ToString(), config.Posters.OmdbApiKey, config.Posters.FallbackToOther),
-        SaveReportCopy: config.Report.SaveCopy);
+        SaveReportCopy: config.Report.SaveCopy,
+        ReportCopyRetentionDays: config.Report.CopyRetentionDays,
+        UnseenErrorDays: config.Report.UnseenErrorDays);
 
     public static void ApplySettingsDto(CompressarrConfig config, SettingsDto dto)
     {
@@ -78,6 +80,9 @@ internal static class ConfigMapping
         config.Report.ReportPath = dto.ReportPath;
         config.Report.OpenAfterRun = Enum.Parse<OpenReportMode>(dto.OpenAfterRun);
         if (dto.SaveReportCopy is { } saveCopy) config.Report.SaveCopy = saveCopy;
+        // Blank (null) means "same as the log retention"; a negative number is not a number of days.
+        config.Report.CopyRetentionDays = dto.ReportCopyRetentionDays is >= 0 ? dto.ReportCopyRetentionDays : null;
+        config.Report.UnseenErrorDays = dto.UnseenErrorDays is >= 0 ? dto.UnseenErrorDays : null;
         config.Repeat.Count = dto.RepeatCount;
         config.Repeat.Monitor = dto.RepeatMonitor;
         config.Repeat.LaunchMonitorAtStartup = dto.LaunchMonitorAtStartup;

@@ -253,6 +253,18 @@ public sealed class ReportSettings
     /// <summary>Since 3.0 a report is built from the run archive when someone opens it, so no HTML file per run is needed. Turn this on to also write
     /// each report as a file in <see cref="ReportPath"/>, as earlier versions did. Off by default.</summary>
     public bool SaveCopy { get; set; }
+
+    /// <summary>How many days a saved report copy (see <see cref="SaveCopy"/>) is kept before the retention cleanup removes it. Null = the same as
+    /// <see cref="LoggingSettings.RetentionDays"/>, which is what one shared setting did before 3.0. 0 = keep forever. Reports in the history database never expire.</summary>
+    public int? CopyRetentionDays { get; set; }
+
+    /// <summary>How many days back the sidebar's History badges and the History page's "unseen errors" table look. Null = the same as
+    /// <see cref="LoggingSettings.RetentionDays"/> (as before 3.0, when one setting did both). 0 = no limit.</summary>
+    public int? UnseenErrorDays { get; set; }
+
+    public int EffectiveCopyRetentionDays(int logRetentionDays) => CopyRetentionDays ?? logRetentionDays;
+
+    public int EffectiveUnseenErrorDays(int logRetentionDays) => UnseenErrorDays ?? logRetentionDays;
 }
 
 public sealed class RepeatSettings

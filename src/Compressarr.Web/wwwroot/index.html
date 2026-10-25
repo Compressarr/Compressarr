@@ -136,33 +136,55 @@
     <div class="card">
       <div class="card-head">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
-        <h2>Logging &amp; Reports</h2>
+        <h2>Logs</h2>
       </div>
       <div class="card-body">
         <div class="two-col">
           <div class="field-block">
-            <label for="logFilePath">Log folder<span class="help-tag" tabindex="0" title="Where run logs are written. The run history itself is a database in Compressarr's own data folder, not here.">?<span class="help-tip">Where run logs are written. The run history itself is a database in Compressarr's own data folder, not here.</span></span></label>
+            <label for="logFilePath">Log folder<span class="help-tag" tabindex="0" title="Where run logs are written. The run history itself is a database in Compressarr's own data folder, not here, so clearing or moving the logs never touches it.">?<span class="help-tip">Where run logs are written. The run history itself is a database in Compressarr's own data folder, not here, so clearing or moving the logs never touches it.</span></span></label>
             <input type="text" id="logFilePath" />
           </div>
           <div class="field-block">
-            <label for="reportPath">Folder for saved report copies<span class="help-tag" tabindex="0" title="Reports are built from the run history when you open them, so no file is needed. If you tick 'Also save a copy of each report' below, the copies are written here.">?<span class="help-tip">Reports are built from the run history when you open them, so no file is needed. If you tick 'Also save a copy of each report' below, the copies are written here.</span></span></label>
-            <input type="text" id="reportPath" />
-            <div class="check-row"><input type="checkbox" id="saveReportCopy" /><label for="saveReportCopy">Also save a copy of each report as a file</label></div>
-          </div>
-          <div class="field-block">
-            <label for="retentionDays">Log/report retention (days)<span class="help-tag" tabindex="0" title="Logs, saved report copies and the History page's report list older than this many days are removed (the run history itself and its reports are kept). 0 = keep forever.">?<span class="help-tip">Logs, saved report copies and the History page's report list older than this many days are removed (the run history itself and its reports are kept). 0 = keep forever.</span></span></label>
+            <label for="retentionDays">Delete logs after (days)<span class="help-tag" tabindex="0" title="Log files, and queue posters that have not been used, older than this many days are moved to the Recycle Bin automatically. 0 = keep forever. The run history and its reports are never removed by this.">?<span class="help-tip">Log files, and queue posters that have not been used, older than this many days are moved to the Recycle Bin automatically. 0 = keep forever. The run history and its reports are never removed by this.</span></span></label>
             <input type="number" id="retentionDays" min="0" />
           </div>
+        </div>
+        <div class="check-row"><input type="checkbox" id="keepSuccessfulHandBrakeLogs" /><label for="keepSuccessfulHandBrakeLogs">Keep logs of successful encodes<span class="help-tag" tabindex="0" title="HandBrake writes its own detailed log for every file it converts. When off (default), a successful encode's own log is deleted as soon as that file is fully done processing, instead of sitting around until it ages out under Delete logs after - most of these are never opened, and by far most conversions succeed, so they're the biggest source of log clutter. A failed encode's log is always kept regardless of this setting, since it's linked from the report.">?<span class="help-tip">HandBrake writes its own detailed log for every file it converts. When off (default), a successful encode's own log is deleted as soon as that file is fully done processing, instead of sitting around until it ages out under Delete logs after - most of these are never opened, and by far most conversions succeed, so they're the biggest source of log clutter. A failed encode's log is always kept regardless of this setting, since it's linked from the report.</span></span></label></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+        <h2>Reports</h2>
+      </div>
+      <div class="card-body">
+        <p class="muted" style="margin: 0 0 12px; font-size: 13px;">Reports are kept in the run history database and built when you open them, so they never expire. Saving a copy as a file is optional.</p>
+        <div class="two-col">
           <div class="field-block">
-            <label for="openAfterRun">Open report after run<span class="help-tag" tabindex="0" title="Whether the HTML report opens automatically after a run: always, only when there were errors, or never.">?<span class="help-tip">Whether the HTML report opens automatically after a run: always, only when there were errors, or never.</span></span></label>
+            <label for="openAfterRun">Open report after run<span class="help-tag" tabindex="0" title="Whether the report opens automatically after a run: always, only when there were errors, or never.">?<span class="help-tip">Whether the report opens automatically after a run: always, only when there were errors, or never.</span></span></label>
             <select id="openAfterRun">
               <option value="Always">Always</option>
               <option value="OnError">On Error</option>
               <option value="Never">Never</option>
             </select>
           </div>
+          <div class="field-block">
+            <label for="unseenErrorDays">Flag unseen errors from the last (days)<span class="help-tag" tabindex="0" title="The sidebar's History badge and the Unseen errors table on the History page look back this many days for runs you have not opened. Leave blank to use Delete logs after. 0 = no limit. The reports themselves are never removed.">?<span class="help-tip">The sidebar's History badge and the Unseen errors table on the History page look back this many days for runs you have not opened. Leave blank to use Delete logs after. 0 = no limit. The reports themselves are never removed.</span></span></label>
+            <input type="number" id="unseenErrorDays" min="0" placeholder="Same as logs" />
+          </div>
         </div>
-        <div class="check-row"><input type="checkbox" id="keepSuccessfulHandBrakeLogs" /><label for="keepSuccessfulHandBrakeLogs">Keep logs of successful encodes<span class="help-tag" tabindex="0" title="HandBrake writes its own detailed log for every file it converts. When off (default), a successful encode's own log is deleted as soon as that file is fully done processing, instead of sitting around until it ages out under Log/report retention above - most of these are never opened, and by far most conversions succeed, so they're the biggest source of log clutter. A failed encode's log is always kept regardless of this setting, since it's linked from the report.">?<span class="help-tip">HandBrake writes its own detailed log for every file it converts. When off (default), a successful encode's own log is deleted as soon as that file is fully done processing, instead of sitting around until it ages out under Log/report retention above - most of these are never opened, and by far most conversions succeed, so they're the biggest source of log clutter. A failed encode's log is always kept regardless of this setting, since it's linked from the report.</span></span></label></div>
+        <div class="check-row"><input type="checkbox" id="saveReportCopy" /><label for="saveReportCopy">Also save a copy of each report as a file<span class="help-tag" tabindex="0" title="Reports are built from the run history when you open them, so no file is needed. Tick this if you also want each report written as an HTML file, for example to keep or share. The copies are written to the folder below and removed after the number of days you choose.">?<span class="help-tip">Reports are built from the run history when you open them, so no file is needed. Tick this if you also want each report written as an HTML file, for example to keep or share. The copies are written to the folder below and removed after the number of days you choose.</span></span></label></div>
+        <div class="two-col hidden" id="reportCopyOptions" style="margin-top: 12px;">
+          <div class="field-block">
+            <label for="reportPath">Folder for saved report copies<span class="help-tag" tabindex="0" title="Where the copies are written. Reports from before 3.0 are also looked for here when the history is first imported.">?<span class="help-tip">Where the copies are written. Reports from before 3.0 are also looked for here when the history is first imported.</span></span></label>
+            <input type="text" id="reportPath" />
+          </div>
+          <div class="field-block">
+            <label for="copyRetentionDays">Delete saved copies after (days)<span class="help-tag" tabindex="0" title="Saved report copies older than this many days are moved to the Recycle Bin automatically. Leave blank to use Delete logs after. 0 = keep forever. The reports in the history database are not affected.">?<span class="help-tip">Saved report copies older than this many days are moved to the Recycle Bin automatically. Leave blank to use Delete logs after. 0 = keep forever. The reports in the history database are not affected.</span></span></label>
+            <input type="number" id="copyRetentionDays" min="0" placeholder="Same as logs" />
+          </div>
+        </div>
       </div>
     </div>
 
@@ -421,11 +443,11 @@
       <div class="card-body">
         <div class="maintenance-list">
           <div class="field-row">
-            <label>Reset resume file<span class="help-tag" tabindex="0" title="Clears every tracked entry (Pending, Completed, and Error) from the resume-state file. The next pass does a completely fresh scan of every lane's Input folder instead of resuming or skipping anything.">?<span class="help-tip">Clears every tracked entry (Pending, Completed, and Error) from the resume-state file. The next pass does a completely fresh scan of every lane's Input folder instead of resuming or skipping anything.</span></span></label>
+            <label>Reset resume file<span class="help-tag" tabindex="0" title="Clears every tracked entry (Pending, Completed, and Error) from the saved queue state. The next pass does a completely fresh scan of every lane's Input folder instead of resuming or skipping anything.">?<span class="help-tip">Clears every tracked entry (Pending, Completed, and Error) from the saved queue state. The next pass does a completely fresh scan of every lane's Input folder instead of resuming or skipping anything.</span></span></label>
             <button id="resetResumeBtn">Reset Resume File</button>
           </div>
           <div class="field-row">
-            <label>Clean up old logs &amp; reports<span class="help-tag" tabindex="0" title="Runs the same retention cleanup a normal pass already does automatically (using the Log/report retention setting above) right now, instead of waiting for the next one. Removed files go to the Recycle Bin, not a permanent delete.">?<span class="help-tip">Runs the same retention cleanup a normal pass already does automatically (using the Log/report retention setting above) right now, instead of waiting for the next one. Removed files go to the Recycle Bin, not a permanent delete.</span></span></label>
+            <label>Clean up old logs &amp; report copies<span class="help-tag" tabindex="0" title="Runs the same retention cleanup a normal pass already does automatically (using the Delete logs after and Delete saved copies after settings above) right now, instead of waiting for the next one. Removed files go to the Recycle Bin, not a permanent delete.">?<span class="help-tip">Runs the same retention cleanup a normal pass already does automatically (using the Delete logs after and Delete saved copies after settings above) right now, instead of waiting for the next one. Removed files go to the Recycle Bin, not a permanent delete.</span></span></label>
             <button id="cleanupNowBtn">Clean Up Now</button>
           </div>
           <div class="field-row">
@@ -442,8 +464,8 @@
             <button id="clearHistoryBtn" class="danger">Clear History</button>
           </div>
           <div class="field-row adv-only">
-            <label>Purge logs &amp; reports<span class="help-tag" tabindex="0" title="Disk cleanup: deletes every log file and every saved report file, permanently, not to the Recycle Bin. The run history and its reports are kept. Faster for a large accumulated backlog, since recycling happens one file at a time, but cannot be undone.">?<span class="help-tip">Disk cleanup: deletes every log file and every saved report file, permanently, not to the Recycle Bin. The run history and its reports are kept. Faster for a large accumulated backlog, since recycling happens one file at a time, but cannot be undone.</span></span></label>
-            <button id="purgeLogsReportsBtn" class="danger">Purge Logs &amp; Reports</button>
+            <label>Purge logs &amp; report copies<span class="help-tag" tabindex="0" title="Disk cleanup: deletes every log file and every saved report copy (the HTML files in the report folder), permanently, not to the Recycle Bin. The run history and its reports are kept - they are in the database. Faster for a large accumulated backlog, since recycling happens one file at a time, but cannot be undone.">?<span class="help-tip">Disk cleanup: deletes every log file and every saved report copy (the HTML files in the report folder), permanently, not to the Recycle Bin. The run history and its reports are kept - they are in the database. Faster for a large accumulated backlog, since recycling happens one file at a time, but cannot be undone.</span></span></label>
+            <button id="purgeLogsReportsBtn" class="danger">Purge Logs &amp; Report Copies</button>
           </div>
           <div class="field-row adv-only">
             <label>Clear all<span class="help-tag" tabindex="0" title="Deletes everything except Settings and Lanes: the whole run history and its reports, every log, and all tracked resume state - a full reset for starting genuinely fresh. Leaves the run counter untouched (a lifetime stat, not test data). Files go to the Recycle Bin; the history is deleted from its database, and a backup is the way back.">?<span class="help-tip">Deletes everything except Settings and Lanes: the whole run history and its reports, every log, and all tracked resume state - a full reset for starting genuinely fresh. Leaves the run counter untouched (a lifetime stat, not test data). Files go to the Recycle Bin; the history is deleted from its database, and a backup is the way back.</span></span></label>
