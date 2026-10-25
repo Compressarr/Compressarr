@@ -1,0 +1,42 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Compressarr.Desktop.Views.ConfirmWindow"
+        Title="Compressarr"
+        Width="440" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen"
+        Topmost="True"
+        Icon="/Assets/CompressarrIcon.ico">
+    <Window.Styles>
+        <!-- The same native-dialog look as the "already running" window. -->
+        <Style Selector="Button.dialogButton">
+            <Setter Property="Background" Value="#E1E1E1" />
+            <Setter Property="BorderBrush" Value="#ADADAD" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="2" />
+            <Setter Property="Foreground" Value="Black" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.dialogButton:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="#E5F1FB" />
+            <Setter Property="BorderBrush" Value="#0078D4" />
+        </Style>
+        <Style Selector="Button.dialogButton:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="#CCE4F7" />
+            <Setter Property="BorderBrush" Value="#005A9E" />
+        </Style>
+    </Window.Styles>
+    <StackPanel Orientation="Vertical" Spacing="18" Margin="24">
+        <StackPanel Orientation="Horizontal" Spacing="16">
+            <Image Source="/Assets/CompressarrLogo.png" Width="48" Height="48" VerticalAlignment="Top" />
+            <TextBlock x:Name="MessageText" TextWrapping="Wrap" Width="320" VerticalAlignment="Center" />
+        </StackPanel>
+        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+            <Button x:Name="YesButton" Classes="dialogButton" Click="OnYesClicked" Width="96" Height="28" />
+            <Button x:Name="NoButton" Classes="dialogButton" Click="OnNoClicked" Width="96" Height="28" />
+        </StackPanel>
+    </StackPanel>
+</Window>

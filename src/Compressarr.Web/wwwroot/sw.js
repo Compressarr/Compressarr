@@ -3,7 +3,7 @@
 // shows live state (the queue, run status, logs), and a cached API response would show stale data
 // indefinitely, which is worse than no offline support at all. Bump CACHE_NAME on any real static
 // asset change so old clients pick up the new shell instead of serving a stale cached copy forever.
-const CACHE_NAME = 'compressarr-shell-v33';
+const CACHE_NAME = 'compressarr-shell-v34';
 
 const SHELL_ASSETS = [
   '/monitor.html',
@@ -39,10 +39,20 @@ const SHELL_ASSETS = [
   '/assets/favicon.ico'
 ];
 
+// Only a plain, successful answer is worth keeping: not a redirect (to the sign-in page), not an error, not an opaque answer.
+function isCacheable(response) {
+  return response.ok && !response.redirected && response.type === 'basic';
+}
+
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(SHELL_ASSETS))
+      // One by one, and only what really arrived: with a sign-in in front, an install made while signed out would otherwise store the login page under every page's name
+      // (a redirected response), or fail altogether (addAll rejects if any request does). A file that does not arrive is simply not cached.
+      .then(cache => Promise.all(SHELL_ASSETS.map(asset =>
+        fetch(asset, { cache: 'reload' })
+          .then(response => (isCacheable(response) ? cache.put(asset, response) : null))
+          .catch(() => null))))
       .then(() => self.skipWaiting())
   );
 });
@@ -71,8 +81,10 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     fetch(event.request)
       .then(response => {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+        if (isCacheable(response)) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+        }
         return response;
       })
       .catch(() => caches.match(event.request))

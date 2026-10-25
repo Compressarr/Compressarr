@@ -20,6 +20,8 @@
                         <NativeMenuItem Header="Start Monitoring" Command="{Binding StartMonitoringCommand}" IsEnabled="{Binding !IsMonitoring}" />
                         <NativeMenuItem Header="{Binding StopMenuHeader}" Command="{Binding StopMonitoringCommand}" IsEnabled="{Binding CanStopMonitoring}" />
                         <NativeMenuItemSeparator />
+                        <NativeMenuItem Header="Turn off web login..." Command="{Binding ResetWebLoginCommand}" />
+                        <NativeMenuItemSeparator />
                         <NativeMenuItem Header="Exit" Command="{Binding ExitCommand}" />
                     </NativeMenu>
                 </TrayIcon.Menu>

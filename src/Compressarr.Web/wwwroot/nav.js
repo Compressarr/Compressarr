@@ -1,3 +1,21 @@
+// Sign-in: when the server answers any API call with 401 login_required (a session ended, or the page was opened from outside the local network), every page goes to the login
+// page and comes back to where it was. Wrapped once here so no page needs its own handling. The page's own call never resolves, so its code does not run on an error body.
+(function () {
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async function (...args) {
+    const response = await nativeFetch(...args);
+    if (response.status !== 401 || location.pathname.startsWith('/login.html')) return response;
+    try {
+      const body = await response.clone().json();
+      if (body && body.error && body.error.code === 'login_required') {
+        location.replace('/login.html?returnUrl=' + encodeURIComponent(location.pathname + location.search));
+        return new Promise(() => { });
+      }
+    } catch { /* not our error body */ }
+    return response;
+  };
+})();
+
 const THEME_STORAGE_KEY = 'compressarr.theme';
 
 function getPreferredTheme() {
@@ -147,6 +165,7 @@ function renderNav(activePage) {
       <span id="scheduleTag" class="toolbar-schedule hidden"></span>
       <span class="toolbar-cpu" title="CPU Usage">${CPU_ICON}<span id="cpuValue">-</span></span>
     </div>
+    <button type="button" id="signOutBtn" class="toolbar-signout hidden" title="Sign out of Compressarr">Sign out</button>
     <label class="theme-toggle">
       <span>&#9728;</span>
       <span class="theme-switch">
@@ -215,6 +234,17 @@ function renderNav(activePage) {
   document.getElementById('themeToggleInput').addEventListener('change', e => {
     setTheme(e.target.checked ? 'dark' : 'light');
   });
+
+  // Sign out only appears when this browser is signed in with a session (a local request, which needs no sign-in, has nothing to sign out of).
+  fetch('/api/auth/status').then(r => r.json()).then(status => {
+    if (!status.signedIn) return;
+    const button = document.getElementById('signOutBtn');
+    button.classList.remove('hidden');
+    button.addEventListener('click', async () => {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      location.replace('/login.html');
+    });
+  }).catch(() => { /* no sign-out button if the status cannot be read */ });
 
   function closeSidebar() {
     sidebar.classList.remove('open');

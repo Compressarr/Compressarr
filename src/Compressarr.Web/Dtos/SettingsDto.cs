@@ -45,7 +45,8 @@ public sealed record SettingsDto(
     PosterSettingsDto? Posters = null,
     bool? SaveReportCopy = null,
     int? ReportCopyRetentionDays = null,
-    int? UnseenErrorDays = null);
+    int? UnseenErrorDays = null,
+    string? AllowedHosts = null);
 
 /// <summary>Null (an older page that does not know about posters) leaves the saved poster settings as they are.</summary>
 public sealed record PosterSettingsDto(bool Enabled, string TmdbApiKey, string Size, bool SmallerImages, string? Source = null, string? OmdbApiKey = null, bool? FallbackToOther = null);

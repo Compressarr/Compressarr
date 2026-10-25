@@ -146,6 +146,20 @@ Basic remembers a verified user:password pair for five minutes (a browser repeat
 start-up. Checked in the real app: "Enabled" redirects a page to the login page with the return address, wrong and right sign-ins, Remember me, the HttpOnly cookie, Basic's challenge and
 credentials, and putting the settings back with the password.
 
+## Stage 3: BUILT 2026-10-25 (uncommitted)
+
+`nav.js` wraps `fetch` once: a `401 login_required` sends any page to `/login.html?returnUrl=...` (its own call never resolves, so the page's code does not run on an error body), and a **Sign out**
+button appears in the toolbar for a browser that signed in with a session (`GET /api/auth/status` says so; a free local request has nothing to sign out of). `sw.js` caches only a plain
+success (`response.ok`, not `redirected`, type `basic`), installs file by file (a missing one is skipped, no `addAll`) and the cache name moved to v34. **Settings:** the Web UI card is now
+**Host** (Port plus **Allowed Hosts**, carried by the ordinary settings call as `allowedHosts` and applied at once: saving refreshes the middleware's cache), and the Automation API card is the
+**Security** card: Authentication (None / Forms / Basic), the orange notice, Authentication Required with a plain-words note per choice, Username, Password ("saved - type to replace"), Password
+Confirmation, Current Password (shown only when the page was opened from outside the local network), the Tailscale / CGNAT tick-box, **Sign out everywhere**, and the two API key rows with
+Copy and Regenerate under an Automation API heading. The card is saved by the page's Save button, as a second call (`PUT /api/auth/settings`) right after the settings, and a refusal is shown in
+the toolbar and keeps what was typed. **Tray:** "Turn off web login..." (`ResetWebLoginCommand`, a small `ConfirmWindow`: it asks, then `ResetToLocalOnly()`; when the sign-in is already
+"Disabled for Local Addresses" or None it only says so). **Wiki:** Troubleshooting has the forgotten-password and locked-out entry. Checked in the real app: the new cards, setting
+"Enabled" through the card's Save, a session ended on the server turning the next page call into a redirect to the login page, signing back in returning to the page, and restoring the setting
+from outside the local network with the current password.
+
 ## Storage, endpoints, stages
 
 - **State database v5:** `auth` (one row: method, required, trust_cgnat, username, password hash) and `web_sessions` (token hash, created, last used, expires, persistent flag, first-seen address); plus,

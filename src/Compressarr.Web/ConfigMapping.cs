@@ -52,7 +52,8 @@ internal static class ConfigMapping
             config.Posters.Source.ToString(), config.Posters.OmdbApiKey, config.Posters.FallbackToOther),
         SaveReportCopy: config.Report.SaveCopy,
         ReportCopyRetentionDays: config.Report.CopyRetentionDays,
-        UnseenErrorDays: config.Report.UnseenErrorDays);
+        UnseenErrorDays: config.Report.UnseenErrorDays,
+        AllowedHosts: config.Web.AllowedHosts);
 
     public static void ApplySettingsDto(CompressarrConfig config, SettingsDto dto)
     {
@@ -83,6 +84,7 @@ internal static class ConfigMapping
         // Blank (null) means "same as the log retention"; a negative number is not a number of days.
         config.Report.CopyRetentionDays = dto.ReportCopyRetentionDays is >= 0 ? dto.ReportCopyRetentionDays : null;
         config.Report.UnseenErrorDays = dto.UnseenErrorDays is >= 0 ? dto.UnseenErrorDays : null;
+        if (dto.AllowedHosts is { } allowedHosts) config.Web.AllowedHosts = allowedHosts.Trim();
         config.Repeat.Count = dto.RepeatCount;
         config.Repeat.Monitor = dto.RepeatMonitor;
         config.Repeat.LaunchMonitorAtStartup = dto.LaunchMonitorAtStartup;

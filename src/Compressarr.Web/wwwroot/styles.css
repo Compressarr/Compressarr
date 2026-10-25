@@ -1869,6 +1869,21 @@ pre.ed-cmd { margin: 0; padding: 12px 14px; background: #1d2130; color: #d6dcf0;
 .toolbar .toolbar-bell:hover { background: none; border-color: rgba(255, 255, 255, 0.15); color: #ffffff; }
 .toolbar-bell.hidden, .toolbar .toolbar-bell.hidden { display: none; }
 .toolbar-bell svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+/* Sign out: a plain text button in the toolbar, shown only to a browser that signed in with a session. */
+.toolbar .toolbar-signout {
+  margin-right: 10px;
+  padding: 0 12px 0 0;
+  background: none;
+  border: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 0;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.toolbar .toolbar-signout:hover { background: none; color: #ffffff; }
+.toolbar-signout.hidden, .toolbar .toolbar-signout.hidden { display: none; }
 .toolbar-bell:hover { color: #ffffff; }
 .bell-dot { position: absolute; top: -3px; right: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--badge-warning); }
 .bell-dot.hidden { display: none; }

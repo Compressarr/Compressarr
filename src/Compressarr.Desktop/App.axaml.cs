@@ -172,6 +172,7 @@ public partial class App : Application
         builder.Services.AddSingleton(sp => new AppTrayViewModel(
             sp.GetRequiredService<IConfigStore>(),
             sp.GetRequiredService<Compressarr.Core.Orchestration.IRunLoopController>(),
+            sp.GetRequiredService<Compressarr.Core.Auth.IWebAuth>(),
             webUrl));
 #if WINDOWS
         builder.Services.AddSingleton<INotificationService, Notifications.WindowsNotificationService>();

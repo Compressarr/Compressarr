@@ -127,6 +127,7 @@ function fillForm(dto) {
   document.getElementById('radarrUrl').value = dto.radarr.url;
   document.getElementById('radarrApiKey').value = dto.radarr.apiKey;
   document.getElementById('webPort').value = dto.webPort;
+  document.getElementById('allowedHosts').value = dto.allowedHosts || '';
   document.getElementById('backupFolderPath').value = dto.backupFolderPath;
   document.getElementById('backupIntervalDays').value = dto.backupIntervalDays;
   document.getElementById('backupRetentionDays').value = dto.backupRetentionDays;
@@ -182,6 +183,7 @@ function readForm() {
       apiKey: document.getElementById('radarrApiKey').value
     },
     webPort: parseInt(document.getElementById('webPort').value, 10) || 1212,
+    allowedHosts: document.getElementById('allowedHosts').value,
     runAtLogin: document.getElementById('runAtLogin').checked,
     announcementsEnabled: document.getElementById('announcementsEnabled').checked,
     posters: {
@@ -210,6 +212,7 @@ async function loadSettings() {
   fillForm(dto);
   settingsDirty = false;
   applySettingsValidation(dto.validationIssues);
+  await loadAuth();
 }
 
 document.getElementById('saveBtn').addEventListener('click', async () => {
@@ -222,6 +225,8 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
   if (res.ok) {
     const dto = await res.json();
     settingsDirty = false;
+    // The sign-in settings are saved by their own call, right after the rest; a refusal (a short password, a wrong current password) is said, and the card keeps what was typed.
+    if (!(await saveAuth())) return;
     // The toolbar (announcements bell, update arrow) follows what was just saved without a page change.
     document.dispatchEvent(new CustomEvent('compressarr:settings-saved'));
     if (!applySettingsValidation(dto.validationIssues)) {
@@ -649,6 +654,93 @@ function initPwaCard() {
 
 loadSettings();
 initPwaCard();
+
+// ---- Security: authentication, who must sign in, and the account -----------------------------------------------------------------------------------------
+// Saved with the Save button (a separate call, /api/auth/settings, so the password never travels with the rest of the settings).
+
+let authLoaded = null;       // what the server last said, to know whether anything changed
+let authDirty = false;
+
+function syncAuthVisibility() {
+  const method = document.getElementById('authMethod').value;
+  document.getElementById('authDetails').classList.toggle('hidden', method === 'None');
+  const required = document.getElementById('authRequired').value;
+  const notes = {
+    Enabled: 'Everyone signs in, including this computer. If you forget the password, use "Turn off web login..." in the Compressarr tray menu.',
+    DisabledForLocalAddresses: 'Anyone on your own network (and this computer) uses Compressarr without signing in; only requests from outside your network need the username and password.',
+    DisabledForLocalhost: 'Only this computer is free of signing in; everyone else, your own network included, signs in.'
+  };
+  document.getElementById('authRequiredNote').textContent = notes[required] || '';
+  document.getElementById('authNote').classList.toggle('hidden', method !== 'None' && authLoaded && authLoaded.hasPassword);
+}
+
+async function loadAuth() {
+  try {
+    const res = await fetch('/api/auth/settings');
+    if (!res.ok) return;
+    const a = await res.json();
+    authLoaded = a;
+    document.getElementById('authMethod').value = a.method;
+    document.getElementById('authRequired').value = a.required;
+    document.getElementById('authUsername').value = a.username || '';
+    document.getElementById('authPassword').value = '';
+    document.getElementById('authPasswordConfirm').value = '';
+    document.getElementById('authCurrentPassword').value = '';
+    document.getElementById('authPassword').placeholder = a.hasPassword ? 'saved - type to replace' : '';
+    document.getElementById('authTrustCgnat').checked = !!a.trustCgnat;
+    // Signed in from outside the local network: the current password is needed to change anything here.
+    document.getElementById('authCurrentPasswordBlock').classList.toggle('hidden', !!a.requestIsLocal);
+    authDirty = false;
+    syncAuthVisibility();
+  } catch { /* the card keeps what it shows */ }
+}
+
+// Returns false when the server refused (the message is in the toolbar), true when nothing needed saving or it was saved.
+async function saveAuth() {
+  if (!authDirty) return true;
+  const res = await fetch('/api/auth/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      method: document.getElementById('authMethod').value,
+      required: document.getElementById('authRequired').value,
+      trustCgnat: document.getElementById('authTrustCgnat').checked,
+      username: document.getElementById('authUsername').value,
+      password: document.getElementById('authPassword').value,
+      passwordConfirmation: document.getElementById('authPasswordConfirm').value,
+      currentPassword: document.getElementById('authCurrentPassword').value
+    })
+  });
+  if (res.ok) {
+    await loadAuth();
+    setStatus('Settings saved.', true);
+    return true;
+  }
+
+  const body = await res.json().catch(() => ({}));
+  setStatus((body.error && body.error.message) || 'The sign-in settings could not be saved.', 'error');
+  return false;
+}
+
+document.getElementById('securityCard').addEventListener('input', event => {
+  if (event.target.id && event.target.id.startsWith('auth')) { authDirty = true; syncAuthVisibility(); }
+});
+document.getElementById('securityCard').addEventListener('change', event => {
+  if (event.target.id && event.target.id.startsWith('auth')) { authDirty = true; syncAuthVisibility(); }
+});
+
+document.getElementById('signOutEverywhereBtn').addEventListener('click', async () => {
+  if (!confirm('Sign every browser out of Compressarr, including this one?\n\nOn your own network (and this computer) nothing changes; from outside it everyone must sign in again.')) return;
+  const res = await fetch('/api/auth/sign-out-everywhere', { method: 'POST' });
+  if (res.ok) {
+    const body = await res.json();
+    setStatus(body.ended + ' sign-in(s) ended.', true);
+    const status = await (await fetch('/api/auth/status')).json().catch(() => ({}));
+    if (status.needsLogin) location.replace('/login.html?returnUrl=' + encodeURIComponent(location.pathname));
+  } else {
+    setStatus('Could not sign everyone out.', 'error');
+  }
+});
 
 // ---- Automation API keys ---------------------------------------------------------------------------------------------------------------
 // Two fixed keys, as Sonarr shows its one: always visible here, with Copy and Regenerate. Immediate actions, like the backup list: not part of Save.

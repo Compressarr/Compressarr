@@ -19,7 +19,7 @@ public static class SettingsEndpoints
             return Results.Json(ConfigMapping.ToSettingsDto(config, issues, appState.BackupLastRunUtc));
         });
 
-        app.MapPut("/api/settings", async (SettingsDto dto, IConfigStore configStore, IStartupRegistrationService startupRegistration, IPathExpander pathExpander, IAnnouncementService announcements, IAppState appState) =>
+        app.MapPut("/api/settings", async (SettingsDto dto, IConfigStore configStore, IStartupRegistrationService startupRegistration, IPathExpander pathExpander, IAnnouncementService announcements, IAppState appState, Compressarr.Web.Auth.WebAuthGate authGate) =>
         {
             var announcementsWereOn = false;
             var backupLastRunUtc = appState.BackupLastRunUtc;
@@ -30,6 +30,7 @@ public static class SettingsEndpoints
                 var issues = SettingsValidator.Validate(config, pathExpander).Select(i => new ValidationIssueDto(i.Field, i.Message)).ToList();
                 return ConfigMapping.ToSettingsDto(config, issues, backupLastRunUtc);
             });
+            authGate.Invalidate();   // the allowed-hosts list applies at once
             startupRegistration.Apply(dto.RunAtLogin);
 
             // Turning announcements on looks for news now, so the bell can appear as soon as this save returns instead of at the next
