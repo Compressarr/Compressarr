@@ -12,6 +12,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton<CurrentRunStateService>();
         services.AddSingleton<Compressarr.Web.Api.ApiKeyThrottle>();
+        services.AddSingleton<Compressarr.Web.Auth.WebAuthGate>();
         services.AddSingleton<IRunProgressReporter>(sp => sp.GetRequiredService<CurrentRunStateService>());
 
         return services;

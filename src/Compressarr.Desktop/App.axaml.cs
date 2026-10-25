@@ -178,6 +178,8 @@ public partial class App : Application
 #endif
 
         var webApp = builder.Build();
+        // Before the static files and the endpoints: the allowed-hosts check, the cross-site check and the sign-in wall (see docs/design-login.md).
+        Compressarr.Web.Auth.WebAuthExtensions.UseCompressarrWebAuth(webApp);
         // Monitor, not Settings (the plain UseDefaultFiles()/index.html default) - the tray icon's
         // "Open Web UI" and a bare http://localhost:{port}/ should land wherever a user checks in
         // most often day-to-day, which is the running queue, not the one-time setup page. Settings
@@ -265,6 +267,16 @@ public partial class App : Application
             if (queueNotice is not null)
             {
                 Services.GetRequiredService<Compressarr.Core.Logging.IRunLogger>().Log(queueNotice, Compressarr.Core.Logging.LogSeverity.Error);
+            }
+        }
+        catch { }
+
+        // COMPRESSARR_RESET_LOGIN=1 (a container, a service) puts the sign-in back to "Disabled for Local Addresses" once, for a forgotten password under "Enabled".
+        try
+        {
+            if (Services.GetRequiredService<Compressarr.Core.Auth.IWebAuth>().ApplyEnvironmentReset())
+            {
+                Services.GetRequiredService<Compressarr.Core.Logging.IRunLogger>().Log("COMPRESSARR_RESET_LOGIN is set: the web sign-in was put back to \"Disabled for Local Addresses\". Remove the variable once you have set a new password.");
             }
         }
         catch { }

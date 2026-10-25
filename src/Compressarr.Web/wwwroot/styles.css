@@ -969,7 +969,7 @@ html[data-advanced="on"] .adv-off-only { display: none !important; }
    sizes to the browser's intrinsic default (~180px) instead of filling its grid column - visibly
    inconsistent next to a full-width select in the next row (e.g. Video extensions vs. Original
    file after convert). */
-.field-block input[type="text"], .field-block input[type="number"] { width: 100%; }
+.field-block input[type="text"], .field-block input[type="number"], .field-block input[type="password"] { width: 100%; }
 
 .field-with-btn { display: flex; gap: 8px; }
 

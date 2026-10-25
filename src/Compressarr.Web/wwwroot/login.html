@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Compressarr - Sign in</title>
+  <link rel="icon" href="/assets/favicon.ico" />
+  <meta name="theme-color" content="#5b6389" />
+  <script>document.documentElement.setAttribute('data-theme', localStorage.getItem('compressarr.theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    .login-wrap { max-width: 380px; margin: 8vh auto 0; padding: 0 16px; }
+    .login-brand { display: flex; align-items: center; gap: 12px; justify-content: center; margin-bottom: 20px; }
+    .login-brand img { width: 44px; height: 44px; }
+    .login-brand span { font-size: 24px; font-weight: 800; }
+    .login-error { color: var(--err); font-size: 13px; margin-top: 10px; min-height: 1.4em; }
+    .login-card .field-block { margin-bottom: 14px; }
+    .login-card button.primary { width: 100%; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <main class="login-wrap">
+    <div class="login-brand">
+      <img src="/assets/logo.png" alt="" />
+      <span>Compressarr</span>
+    </div>
+    <div class="card login-card">
+      <div class="card-head"><h2>Sign in</h2></div>
+      <form class="card-body" id="loginForm" autocomplete="on">
+        <div class="field-block">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus />
+        </div>
+        <div class="field-block">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" autocomplete="current-password" required />
+        </div>
+        <div class="check-row"><input type="checkbox" id="remember" /><label for="remember">Remember me</label></div>
+        <button type="submit" class="primary" id="signInBtn">Sign in</button>
+        <div class="login-error" id="loginError" role="alert"></div>
+      </form>
+    </div>
+  </main>
+
+  <script src="/login.js"></script>
+</body>
+</html>

@@ -396,9 +396,13 @@ public sealed class WebSettings
     /// <summary>Port the embedded web UI/API listens on, bound to all interfaces (0.0.0.0) so
     /// it's reachable from other devices on the LAN - the whole point of the web-first design.
     /// User-configurable from the settings page so it can be changed if it collides with
-    /// something else already running on the machine. No authentication in v2.0.0 (matches
-    /// Radarr/Sonarr's own default posture).</summary>
+    /// something else already running on the machine. Who may use it is decided by the sign-in
+    /// settings (Settings > Security; see Compressarr.Core.Auth), which live in the state database.</summary>
     public int Port { get; set; } = 1212;
+
+    /// <summary>Comma-separated host names and addresses Compressarr answers to, checked against the request's Host header (Sonarr's "Allowed Hosts"): a web page that points
+    /// its own name at your network address (DNS rebinding) gets nothing. Empty = any. <c>localhost</c> and the loopback addresses are always accepted, so the owner can fix a mistake.</summary>
+    public string AllowedHosts { get; set; } = "";
 }
 
 /// <summary>Settings for the automatic backup feature (IBackupScheduler/IBackupService) - same

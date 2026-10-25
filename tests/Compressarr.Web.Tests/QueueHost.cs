@@ -128,6 +128,15 @@ public sealed class QueueHost : IAsyncDisposable
         builder.Services.AddSingleton<IHttpClientFactory>(http);
 
         var app = builder.Build();
+        // TestServer has no remote address. Each request is "from" this computer unless a test says otherwise with X-Test-Peer; the real middleware then decides.
+        app.Use((context, next) =>
+        {
+            var peer = context.Request.Headers["X-Test-Peer"].FirstOrDefault();
+            context.Connection.RemoteIpAddress = IPAddress.Parse(string.IsNullOrEmpty(peer) ? "127.0.0.1" : peer);
+            context.Request.Headers.Remove("X-Test-Peer");
+            return next(context);
+        });
+        Compressarr.Web.Auth.WebAuthExtensions.UseCompressarrWebAuth(app);
         app.MapCompressarrEndpoints();
         await app.StartAsync();
 

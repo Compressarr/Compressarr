@@ -130,6 +130,22 @@ and `api_secrets` and drops v3's `api_keys`; the backup snapshot keeps `auth` an
 `Authenticate`), `ApiKeyFilter` and the `/api/v1` contract are unchanged, the Automation API card shows the keys with Copy and Regenerate (`GET /api/automation/keys`,
 `POST /api/automation/keys/{scope}/regenerate`), and its move into the Security card comes with stage 3. Nothing enforces a login yet: the middleware is stage 2, so behaviour is unchanged.
 
+## Stage 2: BUILT 2026-10-25 (uncommitted)
+
+`Compressarr.Web/Auth/WebAuthMiddleware.cs` sits before the static files and endpoints (`UseCompressarrWebAuth()`, wired in the desktop host), in this order: the **Allowed Hosts** check (new
+`Web.AllowedHosts` setting; `localhost` and the loopback addresses always pass; `400` otherwise; applies to `/api/v1` too), `/api/v1` passes to its own key door, the **cross-site check** on every
+state-changing request (`Sec-Fetch-Site` must be same-origin or none, else the `Origin` must be this site, else `403`; scripts with neither pass), the anonymous allow-list (`/login.html`, `/login.js`,
+`/styles.css`, `/manifest.json`, `/sw.js`, `/assets/**`, `/api/auth/status|login|logout`), then `WebAuthPolicy.IsFree` (peer address and forwarding headers only), then credentials: a Forms
+session cookie (page requests redirect to `/login.html?returnUrl=...`, API calls get `401 login_required`) or a Basic header (`401` with `WWW-Authenticate: Basic`, `429` when locked), and the
+"nothing set up yet" answer (`401 login_not_set_up`, a plain page for browsers). `WebAuthGate` caches the settings for two seconds. `/api/auth/*` (`AuthEndpoints.cs`): `status` (anonymous; the
+username only to someone already free or signed in), `login` (cookie `compressarr.session`: HttpOnly, SameSite=Lax, Secure on HTTPS, a week ahead only when Remember me; a wait on every failure;
+the fifth wrong attempt answers 429), `logout`, `settings` GET/PUT (the Security card: confirmation must match, the current password is required from outside the local network, a state nobody can
+leave is refused, a new password ends every session and gives the browser that made it a fresh one) and `sign-out-everywhere`. `ReturnUrls.Safe` allows only plain paths on this site. A minimal
+`login.html`/`login.js` makes the flow work end to end (Remember me, errors, redirect); stage 3 adds the `nav.js` 401 wrapper and Sign out, the `sw.js` fix, the Security card and the tray item.
+Basic remembers a verified user:password pair for five minutes (a browser repeats it on every request; 220,000 rounds each time would be slow). `COMPRESSARR_RESET_LOGIN` is applied at
+start-up. Checked in the real app: "Enabled" redirects a page to the login page with the return address, wrong and right sign-ins, Remember me, the HttpOnly cookie, Basic's challenge and
+credentials, and putting the settings back with the password.
+
 ## Storage, endpoints, stages
 
 - **State database v5:** `auth` (one row: method, required, trust_cgnat, username, password hash) and `web_sessions` (token hash, created, last used, expires, persistent flag, first-seen address); plus,

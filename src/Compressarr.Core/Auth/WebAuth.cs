@@ -97,6 +97,10 @@ public interface IWebAuth
     /// are changed from outside the local network.</summary>
     bool CheckCurrentPassword(string password, string address);
 
+    /// <summary>Starts a session for the account without asking for the password: for the one case where the caller already proved it (the current password was just
+    /// checked, and changing it ended every session, this browser's too). Throws when no account is set up.</summary>
+    LoginResult StartSession(string address, bool persistent);
+
     /// <summary>The session behind a cookie, extended by its sliding week, or null when it is unknown or has lapsed.</summary>
     SessionInfo? ValidateSession(string token);
 
@@ -127,6 +131,9 @@ public sealed class SqliteWebAuth : IWebAuth
     private readonly Func<string> _resumeFilePath;
     private readonly TimeProvider _time;
     private readonly AttemptThrottle _throttle;
+    private readonly Dictionary<string, DateTimeOffset> _basicVerified = new();   // SHA-256 of "user:password" -> good until
+    private readonly object _basicLock = new();
+    private static readonly TimeSpan BasicRemembered = TimeSpan.FromMinutes(5);
 
     public SqliteWebAuth(SqliteResumeStateStore store) : this(store, AppPaths.GetResumeFilePath, TimeProvider.System) { }
 
@@ -204,6 +211,7 @@ public sealed class SqliteWebAuth : IWebAuth
             command.ExecuteNonQuery();
         }
 
+        lock (_basicLock) _basicVerified.Clear();
         if (passwordChanged) EndAllSessions();
         return new AuthSettings(method, required, trustCgnat, name.Length == 0 ? null : name, !string.IsNullOrEmpty(hash));
     }
@@ -256,11 +264,24 @@ public sealed class SqliteWebAuth : IWebAuth
         var stored = Read();
         if (stored.Settings.Method != AuthMethod.Basic || !stored.Settings.CredentialsSet) return new LoginResult(LoginOutcome.NotAvailable);
         if (!TryParseBasic(authorizationHeader, out var username, out var password)) return new LoginResult(LoginOutcome.NoCredentials);   // the browser's first, header-less request: not a failure
+
+        // A browser repeats its credentials on every request, so a pair that was just verified against the current account is trusted for a few minutes (cleared when the account changes).
+        var remembered = HashToken(username.Trim().ToLowerInvariant() + ":" + password);
+        lock (_basicLock)
+        {
+            if (_basicVerified.TryGetValue(remembered, out var until) && until > _time.GetUtcNow() && string.Equals(username.Trim().ToLowerInvariant(), stored.Settings.Username, StringComparison.Ordinal))
+                return new LoginResult(LoginOutcome.Success);
+        }
+
         if (_throttle.RetryAfter(address) is { } wait) return new LoginResult(LoginOutcome.LockedOut, RetryAfter: wait);
 
-        return Check(stored, username, password, address)
-            ? new LoginResult(LoginOutcome.Success)
-            : _throttle.RetryAfter(address) is { } nowLocked ? new LoginResult(LoginOutcome.WrongCredentials, RetryAfter: nowLocked) : new LoginResult(LoginOutcome.WrongCredentials);
+        if (Check(stored, username, password, address))
+        {
+            lock (_basicLock) _basicVerified[remembered] = _time.GetUtcNow() + BasicRemembered;
+            return new LoginResult(LoginOutcome.Success);
+        }
+
+        return _throttle.RetryAfter(address) is { } nowLocked ? new LoginResult(LoginOutcome.WrongCredentials, RetryAfter: nowLocked) : new LoginResult(LoginOutcome.WrongCredentials);
     }
 
     internal static bool TryParseBasic(string? header, out string username, out string password)
@@ -325,6 +346,15 @@ public sealed class SqliteWebAuth : IWebAuth
         insert.Parameters.AddWithValue("@address", address);
         insert.ExecuteNonQuery();
         return (token, expires);
+    }
+
+    public LoginResult StartSession(string address, bool persistent)
+    {
+        var stored = Read();
+        if (!stored.Settings.CredentialsSet) throw new InvalidOperationException("No account is set up.");
+
+        var (token, expires) = CreateSession(stored.Settings.Username!, address, persistent);
+        return new LoginResult(LoginOutcome.Success, token, expires, persistent);
     }
 
     public SessionInfo? ValidateSession(string token)
@@ -402,6 +432,7 @@ public sealed class SqliteWebAuth : IWebAuth
 
     public void ResetToLocalOnly()
     {
+        lock (_basicLock) _basicVerified.Clear();
         var current = Read().Settings;
         using var connection = _store.OpenReady(_resumeFilePath());
         if (connection is null) return;
