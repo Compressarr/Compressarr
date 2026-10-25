@@ -43,6 +43,18 @@ public sealed class WebHistoryRollupCalculator : IWebHistoryRollupCalculator
 
     public WebHistoryRollups Calculate(string logFilePath)
     {
+        // From the running totals when the store keeps them: at most a year of small daily rows, whatever the size of the history.
+        if (_historyStore is IRunTotals totals && totals.Sum(Now.Date, Now.Date) is { } todayTotals)
+        {
+            var day = Now.Date;
+            return new WebHistoryRollups(
+                todayTotals,
+                totals.Sum(day.AddDays(-6), day) ?? todayTotals,                      // the windows are "after today minus N days"
+                totals.Sum(day.AddDays(-29), day) ?? todayTotals,
+                totals.Sum(day.AddYears(-1).AddDays(1), day) ?? todayTotals,
+                totals.Sum(null, null) ?? todayTotals);
+        }
+
         var history = _historyStore.GetHistory(logFilePath).Where(r => !r.IsAllFailed).ToList();
         var today = Now.Date;
 

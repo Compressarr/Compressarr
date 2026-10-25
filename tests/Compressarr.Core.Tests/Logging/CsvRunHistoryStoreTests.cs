@@ -60,6 +60,29 @@ public class CsvRunHistoryStoreTests : AppDataTestBase
     }
 
     [Fact]
+    public void Export_WritesTheWholeHistoryInTheCsvLayout_AndTheCsvReaderReadsItBackExactly()
+    {
+        var runs = new[]
+        {
+            new RunHistoryRecord(2026, 9, 3, 10.5, 4.25, 3, 1, 5, 7, RunNumber: 41, ReportFileName: "a.html", ErrorCount: 1, MovieCount: 2, TvCount: 1,
+                AvgFps: 23.45, HandBrakeCount: 2, FfmpegCount: 1, PassthroughCount: 0,
+                LaneCounts: new Dictionary<string, int> { ["Movies, HD"] = 2, ["TV"] = 1 }, PresetCounts: new Dictionary<string, int> { ["HB 1080"] = 3 }),
+            new RunHistoryRecord(2026, 9, 4, 8, 2, 2, 0, 9, 0, RunNumber: 42)           // an older-style run: the unknown columns stay blank
+        };
+
+        var text = CsvRunHistoryStore.Export(runs);
+        File.WriteAllText(AppPaths.GetHistoryFilePath(), text);
+        var read = new CsvRunHistoryStore().GetHistory(_tempDir);
+
+        Assert.StartsWith("yyyy,mm,dd,BegSize", text);
+        Assert.Equal(3, text.Split("\r\n", StringSplitOptions.RemoveEmptyEntries).Length);      // the header and two runs
+        Assert.Equal(runs[0].LaneCounts, read[0].LaneCounts);
+        Assert.Equal((runs[0].AvgFps, runs[0].MovieCount, runs[0].RunNumber), (read[0].AvgFps, read[0].MovieCount, read[0].RunNumber));
+        Assert.Null(read[1].MovieCount);
+        Assert.Null(read[1].HandBrakeCount);
+    }
+
+    [Fact]
     public void AppendRun_ThenGetHistory_RoundTripsTheSpeedEnginesLanesAndProfiles()
     {
         var store = new CsvRunHistoryStore();

@@ -17,6 +17,8 @@ public static class MaintenanceEndpoints
     private static IEnumerable<string> HistoryFiles(string logPath)
     {
         yield return AppPaths.GetHistoryFilePath();
+        yield return AppPaths.GetHistoryFilePath() + ".imported";   // the copy the first 3.0 start kept after importing it
+        yield return AppPaths.GetRunCountFilePath() + ".imported";
         if (!string.IsNullOrWhiteSpace(logPath)) yield return Path.Combine(logPath, "Compressarr_History.csv");
     }
 
@@ -94,7 +96,7 @@ public static class MaintenanceEndpoints
         // Everything the History page shows: every HTML report, plus the run-history CSV rollup
         // (kept in the app data folder - see AppPaths.GetHistoryFilePath - so clearing Logs never touches it).
         // Deliberately leaves the run counter alone - a separate lifetime stat, not "history."
-        app.MapPost("/api/maintenance/clear-history", (IConfigStore configStore, IPathExpander pathExpander, ITrashService trash) =>
+        app.MapPost("/api/maintenance/clear-history", (IConfigStore configStore, IPathExpander pathExpander, ITrashService trash, IRunHistoryStore historyStore) =>
         {
             var config = configStore.Load(AppPaths.GetConfigFilePath());
             var reportPath = pathExpander.Expand(config.Report.ReportPath);
@@ -105,6 +107,10 @@ public static class MaintenanceEndpoints
                     trash.DeleteFile(file, DeleteAfterConvertMode.Recycle);
                 }
             }
+
+            // The runs, their files and every total derived from them (the run counter stays). Rows in a database cannot go to the
+            // Recycle Bin; a backup is the way back.
+            historyStore.ClearHistory();
 
             var logPath = pathExpander.Expand(config.Logging.LogFilePath);
             foreach (var historyFile in HistoryFiles(logPath).Where(File.Exists))
@@ -157,7 +163,7 @@ public static class MaintenanceEndpoints
         // starting genuinely fresh testing. Deliberately leaves the run counter alone - it's a
         // lifetime stat of the install, not test/report data, and there's no way to reconstruct it
         // once cleared (unlike reports/logs, which just regenerate from the next real pass).
-        app.MapPost("/api/maintenance/clear-all", (IConfigStore configStore, IPathExpander pathExpander, ITrashService trash, IResumeStateStore resumeStore) =>
+        app.MapPost("/api/maintenance/clear-all", (IConfigStore configStore, IPathExpander pathExpander, ITrashService trash, IResumeStateStore resumeStore, IRunHistoryStore historyStore) =>
         {
             var config = configStore.Load(AppPaths.GetConfigFilePath());
 
@@ -181,6 +187,7 @@ public static class MaintenanceEndpoints
 
             // The run history is no longer one of the files in the Logs folder, but "everything except settings
             // and lanes" still means it.
+            historyStore.ClearHistory();
             foreach (var historyFile in HistoryFiles(logPath).Where(File.Exists).Where(f => !f.StartsWith(logPath, StringComparison.OrdinalIgnoreCase)))
             {
                 trash.DeleteFile(historyFile, DeleteAfterConvertMode.Recycle);

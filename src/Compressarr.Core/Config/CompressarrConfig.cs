@@ -246,8 +246,13 @@ public sealed class PostExecSettings
 
 public sealed class ReportSettings
 {
+    /// <summary>Where a saved copy of each report goes (see <see cref="SaveCopy"/>), and where reports from before 3.0 are looked for when the history is imported.</summary>
     public string ReportPath { get; set; } = "%CompressarrAppData%\\Reports";
     public OpenReportMode OpenAfterRun { get; set; } = OpenReportMode.OnError;
+
+    /// <summary>Since 3.0 a report is built from the run archive when someone opens it, so no HTML file per run is needed. Turn this on to also write
+    /// each report as a file in <see cref="ReportPath"/>, as earlier versions did. Off by default.</summary>
+    public bool SaveCopy { get; set; }
 }
 
 public sealed class RepeatSettings

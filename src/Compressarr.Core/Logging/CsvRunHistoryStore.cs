@@ -17,7 +17,7 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
     /// <summary>The history file to use. If there isn't one in the app data folder yet but 2.1.x left one in the old Logs
     /// folder, it is copied across, then the old copy is removed so there is a single live file (a stale duplicate left
     /// behind would otherwise come back after the history is cleared).</summary>
-    private static string ResolveHistoryFile(string legacyLogFolder)
+    internal static string ResolveHistoryFile(string legacyLogFolder)
     {
         var target = AppPaths.GetHistoryFilePath();
         if (File.Exists(target) || string.IsNullOrWhiteSpace(legacyLogFolder)) return target;
@@ -57,6 +57,15 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
             writer.WriteLine(string.Join(",", Header));
         }
 
+        writer.WriteLine(Row(record));
+    }
+
+    /// <summary>The whole history as CSV text (the layout earlier versions kept on disk), for the History page's "Export as CSV".</summary>
+    public static string Export(IEnumerable<RunHistoryRecord> runs) =>
+        string.Join("\r\n", new[] { string.Join(",", Header) }.Concat(runs.Select(Row))) + "\r\n";
+
+    private static string Row(RunHistoryRecord record)
+    {
         var fields = new[]
         {
             record.Year.ToString(CultureInfo.InvariantCulture),
@@ -83,7 +92,7 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
             RunBreakdown.Encode(record.LaneCounts),
             RunBreakdown.Encode(record.PresetCounts)
         };
-        writer.WriteLine(string.Join(",", fields));
+        return string.Join(",", fields);
     }
 
     public IReadOnlyList<RunHistoryRecord> GetHistory(string legacyLogFolder)
@@ -93,12 +102,17 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
 
         var lines = File.ReadAllLines(historyFile);
         var results = new List<RunHistoryRecord>();
+        LastSkippedRows = 0;
 
         foreach (var line in lines.Skip(1))
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
             var parts = line.Split(',');
-            if (parts.Length < 9) continue;
+            if (parts.Length < 9) { LastSkippedRows++; continue; }   // a truncated line (the app died mid-write) is skipped, not trusted
+
+            // A row whose numbers do not parse is skipped on its own: one damaged line must not take the whole history down with it.
+            try
+            {
 
             // RunNumber/ReportFileName/ErrorCount/WarningCount were all added later - rows written
             // before then simply don't have columns 9-12, so default them rather than
@@ -138,13 +152,27 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
                 PassthroughCount: OptionalCount(parts, 19),
                 LaneCounts: parts.Length > 20 ? RunBreakdown.Decode(parts[20]) : null,
                 PresetCounts: parts.Length > 21 ? RunBreakdown.Decode(parts[21]) : null));
+            }
+            catch (Exception ex) when (ex is FormatException or OverflowException)
+            {
+                LastSkippedRows++;
+            }
         }
 
         return results;
     }
 
+    /// <summary>How many lines the last <see cref="GetHistory"/> skipped because they were truncated or not numbers.</summary>
+    public int LastSkippedRows { get; private set; }
+
     private static int? OptionalCount(string[] parts, int index) =>
         parts.Length > index && int.TryParse(parts[index], NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) && n >= 0 ? n : null;
+
+    public void ClearHistory()
+    {
+        try { File.Delete(AppPaths.GetHistoryFilePath()); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* in use: the next clear tries again */ }
+    }
 
     public int GetRunCount(string runCountPath)
     {

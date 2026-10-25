@@ -13,7 +13,11 @@ namespace Compressarr.Core.Orchestration;
 public sealed class RunResult
 {
     public required ReportModel Report { get; init; }
+    /// <summary>Where the report was written as a file: set when a copy was saved (always so before 3.0, or while the CSV history is serving), else empty.</summary>
     public required string ReportFilePath { get; init; }
+
+    /// <summary>The report's id in the run archive (its address is /api/reports/{id}); 0 when it was written as a file only.</summary>
+    public long ReportId { get; init; }
     public required int TotalFiles { get; init; }
 
     /// <summary>Count of MoveFailed/CompanionMoveFailed/CleanupPending entries this pass's own
@@ -81,6 +85,10 @@ public sealed class RunOrchestrator : IRunOrchestrator
     /// <summary>Per-lane encoder choice (2.2); null = HandBrake only, as before.</summary>
     private readonly IEncoderResolver? _encoders;
 
+    /// <summary>The run archive (3.0), when the history store is one: runs are recorded with their files and the report is built on demand. Null (a plain
+    /// store, as in tests) keeps the earlier behaviour of writing a report file for every run.</summary>
+    private readonly IRunArchive? _archive;
+
     public RunOrchestrator(
         IPathExpander pathExpander,
         IEncoderPresetService presets,
@@ -98,10 +106,11 @@ public sealed class RunOrchestrator : IRunOrchestrator
         IRunProgressReporter progress,
         IActiveRunController activeRunController,
         IEncodeSchedule schedule,
-        IEncoderResolver? encoders = null)
+        IEncoderResolver? encoders = null,
+        IRunArchive? archive = null)
         : this(pathExpander, presets, conversionOrchestrator, metadata, resumeStore, logger, historyStore,
               rollupCalculator, reportGenerator, reportLauncher, notifications, notificationDispatcher, trash,
-              progress, activeRunController, schedule, DefaultPostExecTimeout, encoders)
+              progress, activeRunController, schedule, DefaultPostExecTimeout, encoders, archive)
     {
     }
 
@@ -129,9 +138,12 @@ public sealed class RunOrchestrator : IRunOrchestrator
         IActiveRunController activeRunController,
         IEncodeSchedule schedule,
         TimeSpan postExecTimeout,
-        IEncoderResolver? encoders = null)
+        IEncoderResolver? encoders = null,
+        IRunArchive? archive = null)
     {
         _encoders = encoders;
+        // Only when it really is the history store in use: a test that swaps in its own store must see its own AppendRun calls.
+        _archive = archive is not null && ReferenceEquals(archive, historyStore) ? archive : null;
         _postExecTimeout = postExecTimeout;
         _pathExpander = pathExpander;
         _presets = presets;
@@ -427,6 +439,11 @@ public sealed class RunOrchestrator : IRunOrchestrator
 
         var runCountPath = AppPaths.GetRunCountFilePath();
         var reportFileName = $"Compressarr_{timestamp}_Report.html";
+        // With the archive a report is built from its rows when someone opens it, so a file is only written when the user asked for copies (or while
+        // the CSV fallback is serving, which has no archive).
+        var archive = _archive is not null && _archive.IsAvailable() ? _archive : null;
+        var keepCopy = archive is null || config.Report.SaveCopy;
+        long runId = 0;
         // 0 means "this pass found nothing to do" - the report shows a plain "Run:" label
         // instead of "Run #N:" for one of those, matching v1.1.
         var runNumber = 0;
@@ -446,17 +463,19 @@ public sealed class RunOrchestrator : IRunOrchestrator
             // The run's own permanent number is "how many runs came before it, plus one" - read
             // before IncrementRunCount below so the record and the counter agree on the same value.
             runNumber = _historyStore.GetRunCount(runCountPath) + 1;
-            _historyStore.AppendRun(logFilePath, new RunHistoryRecord(
+            var record = new RunHistoryRecord(
                 endTime.Year, endTime.Month, endTime.Day, totalBeg, totalEnd, counted.Count,
                 runTime.Hours, runTime.Minutes, runTime.Seconds,
-                RunNumber: runNumber, ReportFileName: reportFileName,
+                RunNumber: runNumber, ReportFileName: keepCopy ? reportFileName : "",
                 ErrorCount: errorCount, WarningCount: warningCount,
                 RedirectCount: allResults.Count(r => r.RedirectedToLaneId is not null),
                 MovieCount: counted.Count(r => r.ContentType == "Movie"),
                 TvCount: counted.Count(r => r.ContentType == "TV Show"),
                 AvgFps: breakdown.AvgFps,
                 HandBrakeCount: breakdown.HandBrake, FfmpegCount: breakdown.FFmpeg, PassthroughCount: breakdown.Passthrough,
-                LaneCounts: breakdown.Lanes, PresetCounts: breakdown.Presets));
+                LaneCounts: breakdown.Lanes, PresetCounts: breakdown.Presets);
+            if (archive is not null) runId = archive.RecordRun(record);
+            else _historyStore.AppendRun(logFilePath, record);
 
             // Only a pass that actually processed files counts as a "run" - an empty scan
             // (including every quiet monitor-mode poll) never moves this counter.
@@ -550,11 +569,30 @@ public sealed class RunOrchestrator : IRunOrchestrator
         // successful MoveFailed/CompanionMoveFailed/CleanupPending retry also gets a report - see
         // RunResult.RetriesSucceeded - so that activity has a durable, visible record too, not
         // just a log line.
+        // Where the report can be found: its web address when the archive holds it (remoteAddress is the one other devices can reach, for notifications),
+        // else the file, as before.
+        var reportAddress = reportFilePath;
+        var remoteAddress = reportFilePath;
         if (totalFiles > 0 || (reportModel.HasAnyLaneProblems && anyLaneProblemsChanged) || totalRetriesSucceeded > 0)
         {
-            Directory.CreateDirectory(reportPath);
-            var html = _reportGenerator.Generate(reportModel);
-            File.WriteAllText(reportFilePath, html);
+            if (archive is not null)
+            {
+                if (runId > 0) archive.SaveReport(runId, reportModel);
+                else runId = archive.RecordPass(reportModel);
+                if (runId > 0)
+                {
+                    reportAddress = ReportLinks.LocalUrl(config.Web.Port, runId);
+                    remoteAddress = ReportLinks.RemoteUrl(config.Web.Port, runId);
+                }
+            }
+
+            if (keepCopy)
+            {
+                Directory.CreateDirectory(reportPath);
+                var html = _reportGenerator.Generate(reportModel);
+                File.WriteAllText(reportFilePath, html);
+                if (archive is not null && runId > 0) archive.SetSavedCopy(runId, reportFileName);
+            }
 
             var shouldOpen = config.Report.OpenAfterRun switch
             {
@@ -564,7 +602,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
             };
             if (shouldOpen)
             {
-                _reportLauncher.Open(reportFilePath);
+                _reportLauncher.Open(reportAddress);
             }
         }
 
@@ -580,7 +618,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
 
                 _notifications.NotifyRunComplete(
                     new RunCompletionSummary(totalFiles, toastBeg, toastEnd, runTime),
-                    reportFilePath);
+                    reportAddress);
             }
 
             // Separate from the toast above - toast is a local-OS-only channel, this is the
@@ -599,12 +637,12 @@ public sealed class RunOrchestrator : IRunOrchestrator
             var machineName = MachineLabel.For(config.Notifications);
             var notifyEvent = new NotificationEvent(
                 outcome,
-                Title: NotificationMessageRenderer.Render(titleTemplate, outcome, reportModel, reportFilePath, machineName),
-                Body: NotificationMessageRenderer.Render(bodyTemplate, outcome, reportModel, reportFilePath, machineName),
+                Title: NotificationMessageRenderer.Render(titleTemplate, outcome, reportModel, remoteAddress, machineName),
+                Body: NotificationMessageRenderer.Render(bodyTemplate, outcome, reportModel, remoteAddress, machineName),
                 totalFiles,
                 SavedGb: reportModel.TotalBeforeGb - reportModel.TotalAfterGb,
                 runTime,
-                reportFilePath,
+                remoteAddress,
                 MachineName: machineName,
                 PrefixMachineName: !isCustomStyle);
             await _notificationDispatcher.DispatchAsync(config.Notifications, notifyEvent);
@@ -615,7 +653,8 @@ public sealed class RunOrchestrator : IRunOrchestrator
         return new RunResult
         {
             Report = reportModel,
-            ReportFilePath = reportFilePath,
+            ReportFilePath = keepCopy ? reportFilePath : "",
+            ReportId = runId,
             TotalFiles = totalFiles,
             RetriesSucceeded = totalRetriesSucceeded,
             DiskFull = allResults.Any(r => r.DiskFull)

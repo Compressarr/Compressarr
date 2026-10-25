@@ -332,22 +332,17 @@ function checkForUpdate() {
 }
 
 // Counts runs (within the History page's own retention window, and not yet seen - see
-// /api/history/viewed-through) that had at least one error or at least one post-process warning -
-// same data /api/history/reports already exposes, just aggregated here since every page (not only
-// History) shows the sidebar. Best-effort: if this fails, the badges just don't appear rather than
-// breaking the rest of the nav.
+// /api/history/viewed-through) that had at least one error or at least one post-process warning.
+// /api/history/badges counts them in one query (every page, not only History, shows the sidebar, so
+// this runs on every load - it must not fetch the whole report list). Best-effort: if this fails,
+// the badges just don't appear rather than breaking the rest of the nav.
 function renderHistoryBadges() {
   const holder = document.getElementById('historyBadges');
   if (!holder) return;
 
-  Promise.all([
-    fetch('/api/history/reports').then(res => res.json()),
-    fetch('/api/history/viewed-through').then(res => res.json())
-  ])
-    .then(([entries, viewed]) => {
-      const unseen = entries.filter(e => e.runNumber > viewed.runNumber);
-      const errorRuns = unseen.filter(e => e.errorCount > 0).length;
-      const warningRuns = unseen.filter(e => e.warningCount > 0).length;
+  fetch('/api/history/badges')
+    .then(res => res.json())
+    .then(({ errorRuns, warningRuns }) => {
       const parts = [];
       if (errorRuns > 0) parts.push(`<span class="sidebar-badge err" title="${errorRuns} unseen run(s) with errors">${errorRuns}</span>`);
       if (warningRuns > 0) parts.push(`<span class="sidebar-badge warn" title="${warningRuns} unseen run(s) with warnings">${warningRuns}</span>`);

@@ -63,9 +63,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IArrUnmonitorService, ArrUnmonitorService>();
 
         services.AddSingleton<IRunLogger, FileRunLogger>();
-        services.AddSingleton<IRunHistoryStore, CsvRunHistoryStore>();
+        // One store, two faces: the history rows (IRunHistoryStore) and the run archive behind the reports (IRunArchive).
+        services.AddSingleton<SqliteRunHistoryStore>();
+        services.AddSingleton<IRunHistoryStore>(sp => sp.GetRequiredService<SqliteRunHistoryStore>());
+        services.AddSingleton<IRunArchive>(sp => sp.GetRequiredService<SqliteRunHistoryStore>());
         services.AddSingleton<IHistoryRollupCalculator, HistoryRollupCalculator>();
-        services.AddSingleton<IHistoryThroughputEstimator, HistoryThroughputEstimator>();
+        services.AddSingleton<IHistoryThroughputEstimator>(sp => new ArchiveThroughputEstimator(sp.GetRequiredService<IRunArchive>(), new HistoryThroughputEstimator()));
         services.AddSingleton<IWebHistoryRollupCalculator, WebHistoryRollupCalculator>();
         services.AddSingleton<ICpuUsageSampler>(_ => CpuUsageSamplerFactory.CreateForCurrentPlatform());
         services.AddSingleton<IFileSystemBrowser, FileSystemBrowser>();

@@ -141,15 +141,16 @@
       <div class="card-body">
         <div class="two-col">
           <div class="field-block">
-            <label for="logFilePath">Log folder<span class="help-tag" tabindex="0" title="Where run logs and the history CSV are written.">?<span class="help-tip">Where run logs and the history CSV are written.</span></span></label>
+            <label for="logFilePath">Log folder<span class="help-tag" tabindex="0" title="Where run logs are written. The run history itself is a database in Compressarr's own data folder, not here.">?<span class="help-tip">Where run logs are written. The run history itself is a database in Compressarr's own data folder, not here.</span></span></label>
             <input type="text" id="logFilePath" />
           </div>
           <div class="field-block">
-            <label for="reportPath">Report folder<span class="help-tag" tabindex="0" title="Where HTML run reports are written.">?<span class="help-tip">Where HTML run reports are written.</span></span></label>
+            <label for="reportPath">Folder for saved report copies<span class="help-tag" tabindex="0" title="Reports are built from the run history when you open them, so no file is needed. If you tick 'Also save a copy of each report' below, the copies are written here.">?<span class="help-tip">Reports are built from the run history when you open them, so no file is needed. If you tick 'Also save a copy of each report' below, the copies are written here.</span></span></label>
             <input type="text" id="reportPath" />
+            <div class="check-row"><input type="checkbox" id="saveReportCopy" /><label for="saveReportCopy">Also save a copy of each report as a file</label></div>
           </div>
           <div class="field-block">
-            <label for="retentionDays">Log/report retention (days)<span class="help-tag" tabindex="0" title="Logs and reports older than this many days are automatically deleted. 0 = keep forever.">?<span class="help-tip">Logs and reports older than this many days are automatically deleted. 0 = keep forever.</span></span></label>
+            <label for="retentionDays">Log/report retention (days)<span class="help-tag" tabindex="0" title="Logs, saved report copies and the History page's report list older than this many days are removed (the run history itself and its reports are kept). 0 = keep forever.">?<span class="help-tip">Logs, saved report copies and the History page's report list older than this many days are removed (the run history itself and its reports are kept). 0 = keep forever.</span></span></label>
             <input type="number" id="retentionDays" min="0" />
           </div>
           <div class="field-block">
@@ -437,15 +438,15 @@
             <button id="clearLogsBtn" class="danger">Clear Logs</button>
           </div>
           <div class="field-row adv-only">
-            <label>Clear history<span class="help-tag" tabindex="0" title="Deletes every HTML report and the run-history CSV - everything the History page shows. Leaves the run counter untouched. Removed files go to the Recycle Bin, not a permanent delete.">?<span class="help-tip">Deletes every HTML report and the run-history CSV - everything the History page shows. Leaves the run counter untouched. Removed files go to the Recycle Bin, not a permanent delete.</span></span></label>
+            <label>Clear history<span class="help-tag" tabindex="0" title="Deletes the whole run history - every run, its files and its report - and any saved report files. Leaves the run counter untouched. The history lives in a database, so it cannot go to the Recycle Bin: restoring a backup is the way back.">?<span class="help-tip">Deletes the whole run history - every run, its files and its report - and any saved report files. Leaves the run counter untouched. The history lives in a database, so it cannot go to the Recycle Bin: restoring a backup is the way back.</span></span></label>
             <button id="clearHistoryBtn" class="danger">Clear History</button>
           </div>
           <div class="field-row adv-only">
-            <label>Purge logs &amp; reports<span class="help-tag" tabindex="0" title="Disk cleanup: deletes every log file and every HTML report, permanently, not to the Recycle Bin. The run history is kept (its report links just stop working). Faster for a large accumulated backlog, since recycling happens one file at a time, but cannot be undone.">?<span class="help-tip">Disk cleanup: deletes every log file and every HTML report, permanently, not to the Recycle Bin. The run history is kept (its report links just stop working). Faster for a large accumulated backlog, since recycling happens one file at a time, but cannot be undone.</span></span></label>
+            <label>Purge logs &amp; reports<span class="help-tag" tabindex="0" title="Disk cleanup: deletes every log file and every saved report file, permanently, not to the Recycle Bin. The run history and its reports are kept. Faster for a large accumulated backlog, since recycling happens one file at a time, but cannot be undone.">?<span class="help-tip">Disk cleanup: deletes every log file and every saved report file, permanently, not to the Recycle Bin. The run history and its reports are kept. Faster for a large accumulated backlog, since recycling happens one file at a time, but cannot be undone.</span></span></label>
             <button id="purgeLogsReportsBtn" class="danger">Purge Logs &amp; Reports</button>
           </div>
           <div class="field-row adv-only">
-            <label>Clear all<span class="help-tag" tabindex="0" title="Deletes everything except Settings and Lanes: every report, every log, and all tracked resume state - a full reset for starting genuinely fresh. Leaves the run counter untouched (a lifetime stat, not test data). Removed files go to the Recycle Bin, not a permanent delete.">?<span class="help-tip">Deletes everything except Settings and Lanes: every report, every log, and all tracked resume state - a full reset for starting genuinely fresh. Leaves the run counter untouched (a lifetime stat, not test data). Removed files go to the Recycle Bin, not a permanent delete.</span></span></label>
+            <label>Clear all<span class="help-tag" tabindex="0" title="Deletes everything except Settings and Lanes: the whole run history and its reports, every log, and all tracked resume state - a full reset for starting genuinely fresh. Leaves the run counter untouched (a lifetime stat, not test data). Files go to the Recycle Bin; the history is deleted from its database, and a backup is the way back.">?<span class="help-tip">Deletes everything except Settings and Lanes: the whole run history and its reports, every log, and all tracked resume state - a full reset for starting genuinely fresh. Leaves the run counter untouched (a lifetime stat, not test data). Files go to the Recycle Bin; the history is deleted from its database, and a backup is the way back.</span></span></label>
             <button id="clearAllBtn" class="danger">Clear All</button>
           </div>
           <div class="maintenance-divider adv-only"></div>

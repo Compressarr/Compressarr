@@ -49,7 +49,8 @@ internal static class ConfigMapping
         BackupLastRunUtc: config.Backup.LastRunUtc,
         ValidationIssues: validationIssues,
         Posters: new PosterSettingsDto(config.Posters.Enabled, config.Posters.TmdbApiKey, config.Posters.Size.ToString(), config.Posters.SmallerImages,
-            config.Posters.Source.ToString(), config.Posters.OmdbApiKey, config.Posters.FallbackToOther));
+            config.Posters.Source.ToString(), config.Posters.OmdbApiKey, config.Posters.FallbackToOther),
+        SaveReportCopy: config.Report.SaveCopy);
 
     public static void ApplySettingsDto(CompressarrConfig config, SettingsDto dto)
     {
@@ -76,6 +77,7 @@ internal static class ConfigMapping
         config.PostExec.Args = dto.PostExecArgs;
         config.Report.ReportPath = dto.ReportPath;
         config.Report.OpenAfterRun = Enum.Parse<OpenReportMode>(dto.OpenAfterRun);
+        if (dto.SaveReportCopy is { } saveCopy) config.Report.SaveCopy = saveCopy;
         config.Repeat.Count = dto.RepeatCount;
         config.Repeat.Monitor = dto.RepeatMonitor;
         config.Repeat.LaunchMonitorAtStartup = dto.LaunchMonitorAtStartup;

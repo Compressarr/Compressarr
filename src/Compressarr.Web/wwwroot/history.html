@@ -24,6 +24,7 @@
       <button id="toggleReportsBtn">Hide reports</button>
       <span class="tb-sep"></span>
       <button id="statsBtn" title="Choose which stats are shown at the top of the Overview"><svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><path d="M17.5 14v7M14 17.5h7"></path></svg>Stats</button>
+      <button id="exportCsvBtn" title="Download the whole run history as a CSV file (opens in a spreadsheet)"><svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>Export CSV</button>
     </div>
 
     <div class="ov-pop hidden" id="ovPop" role="dialog" aria-label="Stats on this page">
@@ -67,8 +68,26 @@
       <div class="card-head">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
         <h2>Reports</h2>
+        <div class="ov-periods" id="rpPeriods" role="radiogroup" aria-label="Reports period">
+          <label><input type="radio" name="rpPeriod" value="all" /><span>All time</span></label>
+          <label><input type="radio" name="rpPeriod" value="year" /><span>Last year</span></label>
+          <label><input type="radio" name="rpPeriod" value="d30" /><span>Last 30 days</span></label>
+          <label><input type="radio" name="rpPeriod" value="d7" /><span>Last 7 days</span></label>
+          <label><input type="radio" name="rpPeriod" value="today" checked /><span>Today</span></label>
+        </div>
+        <button type="button" id="rpProblemsBtn" class="rp-problems-btn" aria-pressed="false" title="Show the latest runs that had errors or warnings, including ones you have already seen">View recent errors</button>
       </div>
       <div class="card-body">
+        <div class="rp-attention" id="rpAttention" hidden>
+          <h3 id="rpAttentionTitle"></h3>
+          <table>
+            <thead>
+              <tr><th>Run #</th><th>Report</th><th>Files</th><th>Before</th><th>After</th><th>Saved</th></tr>
+            </thead>
+            <tbody id="rpAttentionRows"></tbody>
+          </table>
+          <div class="status" id="rpAttentionStatus"></div>
+        </div>
         <table>
           <thead>
             <tr><th>Run #</th><th>Report</th><th>Files</th><th>Before</th><th>After</th><th>Saved</th></tr>
@@ -76,6 +95,7 @@
           <tbody id="reportsRows"></tbody>
         </table>
         <div class="status" id="reportsStatus"></div>
+        <div class="rp-pager" id="rpPager"></div>
       </div>
     </div>
   </main>

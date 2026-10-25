@@ -385,15 +385,12 @@ public class LaneAssignmentEndpointTests
         await using var host = await QueueHost.StartAsync(Home, Kids);
         var config = host.Services.GetRequiredService<IConfigStore>().Load(AppPaths.GetConfigFilePath());
         var expander = host.Services.GetRequiredService<IPathExpander>();
-        var logPath = expander.Expand(config.Logging.LogFilePath);
-        var reportPath = expander.Expand(config.Report.ReportPath);
-        Directory.CreateDirectory(reportPath);
-        File.WriteAllText(Path.Combine(reportPath, "run1.html"), "<html></html>");
-        File.WriteAllText(Path.Combine(reportPath, "run2.html"), "<html></html>");
         var today = DateTime.Now;
-        var history = host.Services.GetRequiredService<IRunHistoryStore>();
-        history.AppendRun(logPath, new RunHistoryRecord(today.Year, today.Month, today.Day, 10, 4, 2, 0, 1, 0, RunNumber: 1, ReportFileName: "run1.html"));
-        history.AppendRun(logPath, new RunHistoryRecord(today.Year, today.Month, today.Day, 10, 4, 2, 0, 1, 0, RunNumber: 2, ReportFileName: "run2.html", RedirectCount: 3));
+        // Runs the way the app records them since 3.0: the history row, then the report's rows (here an empty report: only the list is looked at).
+        var archive = host.Services.GetRequiredService<IRunArchive>();
+        var emptyReport = new Compressarr.Core.Reporting.ReportModel { GeneratedAt = today, RunTime = TimeSpan.FromMinutes(1), Lanes = Array.Empty<Compressarr.Core.Reporting.LaneReportSection>() };
+        archive.SaveReport(archive.RecordRun(new RunHistoryRecord(today.Year, today.Month, today.Day, 10, 4, 2, 0, 1, 0, RunNumber: 1)), emptyReport);
+        archive.SaveReport(archive.RecordRun(new RunHistoryRecord(today.Year, today.Month, today.Day, 10, 4, 2, 0, 1, 0, RunNumber: 2, RedirectCount: 3)), emptyReport);
 
         using var doc = JsonDocument.Parse(await host.Client.GetStringAsync("/api/history/reports"));
 

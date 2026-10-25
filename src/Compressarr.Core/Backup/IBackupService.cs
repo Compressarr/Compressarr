@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using Compressarr.Core.Config;
+using Compressarr.Core.Logging;
 using Compressarr.Core.Orchestration;
 using Compressarr.Core.Routing;
 
@@ -75,23 +76,41 @@ public sealed class BackupService : IBackupService
             // already retention-pruned).
             // A 2.1.x install's history is still in the Logs folder until 2.2 first starts; pick it up from there too so a
             // backup taken before that point doesn't silently leave it out.
-            var historyFile = AppPaths.GetHistoryFilePath();
-            var legacyHistoryFile = Path.Combine(_pathExpander.Expand(config.Logging.LogFilePath), "Compressarr_History.csv");
-            if (!File.Exists(historyFile) && File.Exists(legacyHistoryFile)) historyFile = legacyHistoryFile;
-            var sources = new[]
+            // From 3.0 the history (runs, files, totals, run counter) is one SQLite file, copied with SQLite's own backup call so the copy is
+            // consistent while the app runs. Until the first 3.0 start has imported it, the old CSV is what there is.
+            var snapshotFolder = Path.Combine(Path.GetTempPath(), $"compressarr-backup-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(snapshotFolder);
+            try
             {
-                AppPaths.GetConfigFilePath(),
-                AppPaths.GetRunCountFilePath(),
-                AppPaths.GetResumeFilePath(),
-                AppPaths.GetHandBrakeProfilesFilePath(),
-                AppPaths.GetFFmpegProfilesFilePath(),
-                AppPaths.GetCatalogHandBrakeFilePath(),
-                AppPaths.GetCatalogFFmpegFilePath(),
-                AppPaths.GetCatalogRecordsFilePath(),
-                historyFile
-            };
+                string? historyFile = null;
+                var snapshot = Path.Combine(snapshotFolder, Path.GetFileName(AppPaths.GetHistoryDbPath()));
+                if (HistoryDatabase.Snapshot(AppPaths.GetHistoryDbPath(), snapshot)) historyFile = snapshot;
+                else
+                {
+                    historyFile = AppPaths.GetHistoryFilePath();
+                    var legacyHistoryFile = Path.Combine(_pathExpander.Expand(config.Logging.LogFilePath), "Compressarr_History.csv");
+                    if (!File.Exists(historyFile) && File.Exists(legacyHistoryFile)) historyFile = legacyHistoryFile;
+                }
 
-            CreateBundleZip(zipPath, sources);
+                var sources = new[]
+                {
+                    AppPaths.GetConfigFilePath(),
+                    AppPaths.GetRunCountFilePath(),
+                    AppPaths.GetResumeFilePath(),
+                    AppPaths.GetHandBrakeProfilesFilePath(),
+                    AppPaths.GetFFmpegProfilesFilePath(),
+                    AppPaths.GetCatalogHandBrakeFilePath(),
+                    AppPaths.GetCatalogFFmpegFilePath(),
+                    AppPaths.GetCatalogRecordsFilePath(),
+                    historyFile
+                };
+
+                CreateBundleZip(zipPath, sources);
+            }
+            finally
+            {
+                try { Directory.Delete(snapshotFolder, recursive: true); } catch { }
+            }
 
             RetentionCleaner.CleanUp(_trash, folder, new[] { ".zip" }, config.Backup.RetentionDays, "backup");
 
@@ -158,6 +177,16 @@ public sealed class BackupService : IBackupService
                 try { ZipFile.ExtractToDirectory(zipPath, tempDir, overwriteFiles: true); }
                 catch (InvalidDataException) { return new BackupResult(false, null, "That backup file is damaged or incomplete, so nothing was restored."); }
 
+                // The history database is checked (and brought up to this build's schema) before anything is written, so a damaged one
+                // leaves the current data exactly as it was.
+                var extractedDatabase = Path.Combine(tempDir, Path.GetFileName(AppPaths.GetHistoryDbPath()));
+                if (File.Exists(extractedDatabase))
+                {
+                    try { HistoryDatabase.ValidateAndMigrate(extractedDatabase); }
+                    catch (InvalidDataException) { return new BackupResult(false, null, "The history inside that backup is damaged, so nothing was restored."); }
+                    catch (InvalidOperationException e) { return new BackupResult(false, null, $"The history inside that backup cannot be used by this version ({e.Message}), so nothing was restored."); }
+                }
+
                 // Settings/lanes go through the same validate + merge-over-defaults path
                 // /api/settings/import already uses (load the extracted file through IConfigStore,
                 // then Save it as the real config), rather than a raw file copy - an
@@ -178,7 +207,6 @@ public sealed class BackupService : IBackupService
                     _configStore.Save(restoredConfig, AppPaths.GetConfigFilePath());
                 }
 
-                RestoreEntry(tempDir, "compressarr.runcount.json", AppPaths.GetRunCountFilePath());
                 RestoreEntry(tempDir, "compressarr.resume.json", AppPaths.GetResumeFilePath());
                 RestoreEntry(tempDir, "handbrake-profiles.json", AppPaths.GetHandBrakeProfilesFilePath());
                 RestoreEntry(tempDir, "ffmpeg-profiles.json", AppPaths.GetFFmpegProfilesFilePath());
@@ -187,9 +215,24 @@ public sealed class BackupService : IBackupService
                 RestoreEntry(tempDir, "catalog-ffmpeg.json", AppPaths.GetCatalogFFmpegFilePath());
                 RestoreEntry(tempDir, "catalog-installed.json", AppPaths.GetCatalogRecordsFilePath());
 
-                // The history goes back into the app data folder (also for a backup made by 2.1.x, where it was
-                // the Logs folder's file - the entry name is the same).
-                RestoreEntry(tempDir, "Compressarr_History.csv", AppPaths.GetHistoryFilePath());
+                // The history goes back into the app data folder. A 3.0 backup carries the database (counter included) and replaces the
+                // current one. An older backup carries the CSV (also a 2.1.x one, where it was the Logs folder's file - the entry name is the
+                // same) and the run counter file: the current database is removed so the next use imports those, which makes the history
+                // what the backup had.
+                if (File.Exists(extractedDatabase))
+                {
+                    RestoreEntry(tempDir, Path.GetFileName(extractedDatabase), AppPaths.GetHistoryDbPath());
+                }
+                else if (File.Exists(Path.Combine(tempDir, "Compressarr_History.csv")))
+                {
+                    try { File.Delete(AppPaths.GetHistoryDbPath()); } catch { /* in use: the restored CSV is then picked up on the next start */ }
+                    RestoreEntry(tempDir, "compressarr.runcount.json", AppPaths.GetRunCountFilePath());
+                    RestoreEntry(tempDir, "Compressarr_History.csv", AppPaths.GetHistoryFilePath());
+                }
+                else
+                {
+                    RestoreEntry(tempDir, "compressarr.runcount.json", AppPaths.GetRunCountFilePath());
+                }
 
                 return new BackupResult(true, safeName, null);
             }

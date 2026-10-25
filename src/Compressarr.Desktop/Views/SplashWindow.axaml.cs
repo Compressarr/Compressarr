@@ -17,7 +17,7 @@ public partial class SplashWindow : Window
     /// <summary>"Starting...", "Almost ready...": what is happening now. Safe to call from the UI thread only.</summary>
     public void SetStatus(string text) => this.FindControl<TextBlock>("StatusText")!.Text = text;
 
-    /// <summary>"v2.2.0-rc.3": the running version with its pre-release tag, without the build metadata after '+'.</summary>
+    /// <summary>"v3.0.0-rc.1": the running version with its pre-release tag, without the build metadata after '+'.</summary>
     internal static string VersionLabel()
     {
         var assembly = typeof(SplashWindow).Assembly;

@@ -316,6 +316,12 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
         sb.Append("  </tbody>\n</table>\n</div>\n");
     }
 
+    /// <summary>The logo and favicon the report embeds, as base64. The run archive keeps an old saved report with these swapped for a short
+    /// token (they are about 20 KB of poorly compressible text in every report) and puts them back when the report is opened.</summary>
+    internal static string? LogoBase64() => LoadEmbeddedBase64(LogoResourceName);
+
+    internal static string? FaviconBase64() => LoadEmbeddedBase64(FaviconResourceName);
+
     private static string? LoadEmbeddedBase64(string resourceName)
     {
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName);

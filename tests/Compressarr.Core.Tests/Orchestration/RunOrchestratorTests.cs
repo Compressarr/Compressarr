@@ -223,7 +223,7 @@ public class RunOrchestratorTests : IDisposable
     private (RunOrchestrator Orchestrator, string ResumeFilePath) BuildOrchestrator(
         CompressarrConfig config, IEncoderRunner processRunner, IResumeStateStore? resumeStore = null,
         IRunLogger? logger = null, TimeSpan? postExecTimeout = null, IEncodeSchedule? schedule = null, IRunHistoryStore? historyStore = null,
-        IEncoderResolver? encoders = null)
+        IEncoderResolver? encoders = null, IRunArchive? archive = null)
     {
         // HandBrakeCLI/presets "paths" just need to exist on disk for PathExists to pass -
         // PassThroughPathExpander does no real expansion, and FixedExtensionPresetService never
@@ -264,7 +264,7 @@ public class RunOrchestratorTests : IDisposable
                 new PassThroughPathExpander(), new FixedExtensionPresetService(), conversionOrchestrator, new MetadataService(),
                 effectiveResumeStore, effectiveLogger, effectiveHistory, new NoOpHistoryRollupCalculator(),
                 new Compressarr.Core.Reporting.HtmlReportGenerator(), new NoOpReportLauncher(), new NoOpNotificationService(), new NoOpNotificationDispatcher(),
-                new NoOpTrashService(), new NoOpProgressReporter(), new ActiveRunController(), effectiveSchedule, encoders);
+                new NoOpTrashService(), new NoOpProgressReporter(), new ActiveRunController(), effectiveSchedule, encoders, archive);
 
         return (runOrchestrator, resumeFilePath);
     }
@@ -446,6 +446,71 @@ public class RunOrchestratorTests : IDisposable
         var reportHtml = File.ReadAllText(Assert.Single(Directory.GetFiles(config.Report.ReportPath, "*.html")));
         Assert.Contains("Landed in Kids - redirected from SD-HD", reportHtml);
         Assert.Contains("1 file(s) redirected to a different lane", reportHtml);
+    }
+
+    // ---- the run archive (3.0): the report is built when it is opened, not written as a file ----------------------------------------------
+
+    [Fact]
+    public async Task RunOnceAsync_WithTheArchive_RecordsTheRunAndItsFiles_AndWritesNoReportFile()
+    {
+        var (config, _) = MakeSingleLaneConfig("Fight Club (1999).mkv", "Caddyshack (1980).mkv");
+        var store = new SqliteRunHistoryStore(AppPaths.GetHistoryDbPath);
+        var (orchestrator, _) = BuildOrchestrator(config, new RecordingProcessRunner(), historyStore: store, archive: store);
+
+        var result = await orchestrator.RunOnceAsync(config);
+
+        Assert.True(result!.ReportId > 0);
+        Assert.Equal("", result.ReportFilePath);                                    // no file was written ...
+        Assert.False(Directory.Exists(config.Report.ReportPath) && Directory.GetFiles(config.Report.ReportPath).Length > 0);
+        var run = Assert.Single(store.GetHistory(""));                               // ... the run is in the history, with its report
+        Assert.Equal((2, 1, true, result.ReportId), (run.FileCount, run.RunNumber, run.HasReport, run.Id));
+        var html = new Compressarr.Core.Reporting.HtmlReportGenerator().Generate(store.LoadReport(result.ReportId)!);
+        Assert.Contains("Fight Club (1999).mkv", html);
+        Assert.Contains("Caddyshack (1980).mkv", html);
+        Assert.Contains("Run #1:", html);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_WithTheArchive_AndSaveCopyOn_AlsoWritesTheReportFile_ThatCarriesTheSameFiles()
+    {
+        var (config, _) = MakeSingleLaneConfig("Fight Club (1999).mkv");
+        config.Report.SaveCopy = true;
+        var store = new SqliteRunHistoryStore(AppPaths.GetHistoryDbPath);
+        var (orchestrator, _) = BuildOrchestrator(config, new RecordingProcessRunner(), historyStore: store, archive: store);
+
+        var result = await orchestrator.RunOnceAsync(config);
+
+        Assert.True(File.Exists(result!.ReportFilePath));
+        Assert.True(result.ReportId > 0);
+        Assert.Contains("Fight Club (1999).mkv", File.ReadAllText(result.ReportFilePath));
+        Assert.Equal(Path.GetFileName(result.ReportFilePath), Assert.Single(store.GetHistory("")).ReportFileName);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_WithTheArchive_AMisconfiguredLaneStillGetsAReport_ButNoHistoryRow()
+    {
+        var inputDir = Path.Combine(_tempDir, "Input");
+        var outputDir = Path.Combine(_tempDir, "Output");
+        Directory.CreateDirectory(inputDir);
+        Directory.CreateDirectory(outputDir);
+        var lane = new LaneConfig { Id = "lane1", DisplayName = "Broken Lane", Enabled = true, Input = inputDir, Output = outputDir };
+        var config = new CompressarrConfig { Processing = new ProcessingSettings { MoveFiles = false, ClearTitleMetadata = false } };
+        config.HandBrake.CliPath = Path.Combine(_tempDir, "HandBrakeCLI.exe");
+        config.HandBrake.PresetsPath = Path.Combine(_tempDir, "presets.json");
+        config.Logging.LogFilePath = Path.Combine(_tempDir, "Logs");
+        config.Report.ReportPath = Path.Combine(_tempDir, "Reports");
+        config.Lanes.Add(lane);
+        var store = new SqliteRunHistoryStore(AppPaths.GetHistoryDbPath);
+        var (orchestrator, _) = BuildOrchestrator(config, new RecordingProcessRunner(), historyStore: store, archive: store);
+
+        var result = await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(0, result!.TotalFiles);
+        Assert.True(result.ReportId > 0);
+        Assert.Contains("ERROR 106", new Compressarr.Core.Reporting.HtmlReportGenerator().Generate(store.LoadReport(result.ReportId)!));
+        Assert.Empty(store.GetHistory(""));                       // a pass with nothing processed is not a run
+        Assert.Equal(0, store.GetRunCount(AppPaths.GetRunCountFilePath()));
+        Assert.Empty(store.ListReports(DateTime.MinValue));       // and is not in the History page's list either
     }
 
     [Fact]

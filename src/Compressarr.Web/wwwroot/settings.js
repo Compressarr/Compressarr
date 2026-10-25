@@ -82,6 +82,7 @@ function fillForm(dto) {
   document.getElementById('deleteAfterConvert').value = dto.deleteAfterConvert;
   document.getElementById('logFilePath').value = dto.logFilePath;
   document.getElementById('reportPath').value = dto.reportPath;
+  document.getElementById('saveReportCopy').checked = !!dto.saveReportCopy;
   document.getElementById('retentionDays').value = dto.retentionDays;
   document.getElementById('keepSuccessfulHandBrakeLogs').checked = dto.keepSuccessfulHandBrakeLogs;
   document.getElementById('openAfterRun').value = dto.openAfterRun;
@@ -145,6 +146,7 @@ function readForm() {
     postExecCmd: document.getElementById('postExecCmd').value,
     postExecArgs: document.getElementById('postExecArgs').value,
     reportPath: document.getElementById('reportPath').value,
+    saveReportCopy: document.getElementById('saveReportCopy').checked,
     openAfterRun: document.getElementById('openAfterRun').value,
     repeatCount: 0,
     repeatMonitor: document.getElementById('repeatMonitor').checked,
@@ -442,19 +444,19 @@ document.getElementById('clearLogsBtn').addEventListener('click', () => runMaint
 
 document.getElementById('clearHistoryBtn').addEventListener('click', () => runMaintenanceAction(
   '/api/maintenance/clear-history',
-  'Delete every HTML report and the run-history CSV - everything the History page shows?\n\nRemoved files go to the Recycle Bin.',
+  'Delete the whole run history (every run, its files and its report) and any saved report files - everything the History page shows?\n\nThis cannot be undone, except by restoring a backup.',
   'History cleared.'
 ));
 
 document.getElementById('purgeLogsReportsBtn').addEventListener('click', () => runMaintenanceAction(
   '/api/maintenance/purge-logs-reports',
-  'Permanently delete every log file and every HTML report?\n\nThe run history is kept, but its report links stop working.\nThis does NOT go to the Recycle Bin - it cannot be undone.',
+  'Permanently delete every log file and every saved report file?\n\nThe run history and its reports are kept.\nThis does NOT go to the Recycle Bin - it cannot be undone.',
   'Logs and reports purged.'
 ));
 
 document.getElementById('clearAllBtn').addEventListener('click', () => runMaintenanceAction(
   '/api/maintenance/clear-all',
-  'Delete everything except Settings and Lanes - every report, every log, and all tracked resume state?\n\nThe run counter is left untouched. Removed files go to the Recycle Bin.',
+  'Delete everything except Settings and Lanes - the whole run history and its reports, every log, and all tracked resume state?\n\nThe run counter is left untouched. Files go to the Recycle Bin; the history cannot be undone, except by restoring a backup.',
   'Everything except Settings and Lanes cleared.'
 ));
 

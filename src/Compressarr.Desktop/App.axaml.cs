@@ -241,5 +241,20 @@ public partial class App : Application
             Services.GetRequiredService<Compressarr.Core.Startup.IStartupRegistrationService>().Reconcile(startupConfig.Startup.RunAtLogin);
         }
         catch { }
+
+        // The first start of 3.0 imports the old CSV history (and keeps the old reports) into the run archive. Done here, behind the splash, rather
+        // than on the first page request. Every later start only opens the file. Best effort: a failure is remembered by the store, which then serves
+        // the CSV as before, and is looked at again on the next start.
+        try
+        {
+            var archive = Services.GetRequiredService<Compressarr.Core.Logging.IRunArchive>();
+            if (!archive.IsAvailable())
+            {
+                Services.GetRequiredService<Compressarr.Core.Logging.IRunLogger>().Log(
+                    $"The run history could not be opened in its database ({(archive as Compressarr.Core.Logging.SqliteRunHistoryStore)?.ImportFailure}); the old history file is used for now and nothing was removed.",
+                    Compressarr.Core.Logging.LogSeverity.Error);
+            }
+        }
+        catch { }
     }
 }

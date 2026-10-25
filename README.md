@@ -158,7 +158,7 @@ immediately. The recent-log panel and CPU usage update live while a pass runs.
 
 ### Reports and notifications
 
-At the end of a run, Compressarr writes a **standalone HTML report** covering per-lane results
+At the end of a run, Compressarr records the run, file by file, in its history database, and builds a **standalone HTML report** from that record whenever you open one (from History, or automatically after the run), covering per-lane results
 (each file's type, preset, and Sonarr/Radarr outcome), disk savings, any errors, and rolling
 Today/This Month/This Year history. The Open report after run setting
 (Always/On Error/Never) controls whether it opens automatically - independent of that setting, a
@@ -283,7 +283,7 @@ these pages has a small **?** next to it with a tooltip explaining what it does.
 | Companion file extensions | Which sibling file extensions (subtitles, `.nfo`, artwork, etc.) move along with a converted file |
 | Unmatched companion file handling | Maintain, Delete, or Recycle a companion file whose extension isn't on that list |
 | On destination collision | Overwrite (default), Skip, or Rename, when a file already exists at the destination |
-| Log folder / Report folder | Where run logs and HTML reports are written (the history CSV is kept in Compressarr's own data folder, so clearing the logs can't delete it) |
+| Log folder / Report folder | Where run logs are written, and where saved copies of reports go. A report is built from the history database whenever you open it, so a file is optional (tick "Also save a copy of each report as a file"). The history is a database in Compressarr's own data folder, so clearing the logs can't delete it |
 | Log/report retention (days) | Logs and reports older than this are cleaned up automatically (0 = keep forever) |
 | Open report after run | Always, On Error, or Never |
 | Enable Monitoring at Startup | Start watching lanes automatically when Compressarr launches |
@@ -415,7 +415,7 @@ literal text rather than breaking the message:
 | `{outcome}` | Success / Warning / Error |
 | `{error_count}` / `{warning_count}` | Counts for this run |
 | `{retries_succeeded}` | Files recovered via automatic retry this run |
-| `{report_path}` | Local path to this run's HTML report |
+| `{report_path}` | The web address of this run's report (this computer's name, the web port and the run's number), which opens from any device that can reach this machine |
 | `{today_files}` / `{today_saved_gb}` | Rollup for today so far |
 | `{month_files}` / `{month_saved_gb}` | Rollup for this calendar month so far |
 | `{year_files}` / `{year_saved_gb}` | Rollup for this calendar year so far |
@@ -428,9 +428,9 @@ so it only ever appears in a message if you type it into a Custom template yours
 **What data is sent**: every channel receives the run number, an aggregate summary (e.g. "12
 file(s) processed, 4.2 GB saved"), and the outcome (success/warning/error) - never filenames,
 media titles, folder paths, or anything else from your configuration. The one exception is the
-local path to the HTML report file, which only the **Generic Webhook** and **IFTTT** channels
-include - worth knowing before pointing either at a third-party service, since a path like
-`C:\Users\you\AppData\Roaming\Compressarr\Reports\...` leaves your machine as plain text. Every
+link to the report, which only the **Generic Webhook** and **IFTTT** channels
+include - worth knowing before pointing either at a third-party service, since an address like
+`http://my-pc:1212/api/reports/412` (your computer's name) leaves your machine as plain text. Every
 other channel type (Discord, Slack, Telegram, Pushover, ntfy, Gotify, Notifiarr) never sends the
 report path at all. A digest isn't tied to any single run, so it never includes a report path
 either way, regardless of channel type.

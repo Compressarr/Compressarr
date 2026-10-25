@@ -17,9 +17,16 @@ public static class AppPaths
     /// Always null outside tests.</summary>
     public static string? TestOverrideAppDataDirectory { get; set; }
 
+    /// <summary>Names a folder to use as the data folder instead of the per-OS default (a portable copy, a container, a trial run against a copy of
+    /// someone's data). Unset for a normal install.</summary>
+    public const string DataDirectoryVariable = "COMPRESSARR_DATA_DIR";
+
     public static string GetAppDataDirectory()
     {
         if (TestOverrideAppDataDirectory is not null) return TestOverrideAppDataDirectory;
+
+        var configured = Environment.GetEnvironmentVariable(DataDirectoryVariable);
+        if (!string.IsNullOrWhiteSpace(configured)) return configured.Trim();
 
         if (OperatingSystem.IsWindows())
         {
@@ -54,6 +61,10 @@ public static class AppPaths
     /// the Logs folder (a place people clear out, and one that moves when the log path is changed). The file keeps its
     /// 2.1.x name, so a 2.2 backup restores into a 2.1.x install's expectations and vice versa.</summary>
     public static string GetHistoryFilePath() => Path.Combine(GetAppDataDirectory(), "Compressarr_History.csv");
+
+    /// <summary>The run archive (3.0): every run, its files, the running totals and the run counter, in one SQLite file. The first start of 3.0
+    /// imports the CSV above into it and renames the CSV to Compressarr_History.csv.imported.</summary>
+    public static string GetHistoryDbPath() => Path.Combine(GetAppDataDirectory(), "compressarr.history.db");
 
     /// <summary>Compressarr's own encoder profiles live here: the user's HandBrake profiles (backed
     /// up with the rest of the settings) and the generated file HandBrake is actually handed.</summary>

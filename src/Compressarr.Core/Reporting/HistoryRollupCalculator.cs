@@ -19,6 +19,18 @@ public sealed class HistoryRollupCalculator : IHistoryRollupCalculator
 
     public (HistoryRollup Today, HistoryRollup ThisMonth, HistoryRollup ThisYear) Calculate(string logFilePath)
     {
+        // From the running totals when the store keeps them: a few small rows instead of every run in the history.
+        if (_historyStore is IRunTotals totals)
+        {
+            var day = DateTime.Now.Date;
+            if (totals.Sum(day, day) is { } fromTotals)
+            {
+                return (fromTotals,
+                    totals.Sum(new DateTime(day.Year, day.Month, 1), day) ?? fromTotals,
+                    totals.Sum(new DateTime(day.Year, 1, 1), day) ?? fromTotals);
+            }
+        }
+
         var history = _historyStore.GetHistory(logFilePath).Where(r => !r.IsAllFailed).ToList();
         var now = DateTime.Now;
 
