@@ -8,6 +8,8 @@ using Compressarr.Core.Orchestration;
 using Compressarr.Core.Queue;
 using Compressarr.Core.Reporting;
 using Compressarr.Core.Scheduling;
+using System.Text.Json.Nodes;
+using Compressarr.Web.Dtos;
 using Compressarr.Web.Api;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -97,13 +99,14 @@ public static class ApiV1Endpoints
                 secondsUntilNextRun,
                 cpuPercent = cpu,
                 schedule = ScheduleStateOf(scheduleStatus),
+                hold = HoldOf(scheduleStatus.Hold),
                 queue = new
                 {
                     pending = upNext.Count(i => !i.IsError && !i.IsSkipped),
                     skipped = upNext.Count(i => !i.IsError && i.IsSkipped),
                     errors = upNext.Count(i => i.IsError),
-                    etaState = etaText is null ? "none" : etaText == "Estimating" ? "estimating" : "projected",
-                    eta = etaText is null || etaText == "Estimating" ? null : etaText
+                    etaState = scheduleStatus.Hold is not null ? "held" : etaText is null ? "none" : etaText == "Estimating" ? "estimating" : "projected",
+                    eta = scheduleStatus.Hold is not null || etaText is null || etaText == "Estimating" ? null : etaText
                 }
             });
         }).RequireApiScope(ApiKeyScope.Read);
@@ -182,25 +185,7 @@ public static class ApiV1Endpoints
         v1.MapGet("/schedule", (IConfigStore configStore, IEncodeSchedule schedule) =>
         {
             var config = configStore.Load(AppPaths.GetConfigFilePath());
-            var s = ScheduleEndpoints.ToDto(config.Schedule);
-            return Results.Json(new
-            {
-                settings = new
-                {
-                    enabled = s.Enabled,
-                    mode = s.Mode,
-                    dayStart = s.DayStart,
-                    dayEnd = s.DayEnd,
-                    weekendDayStart = s.WeekendDayStart,
-                    weekendDayEnd = s.WeekendDayEnd,
-                    days = s.Days.Select(d => new { day = d.Day, start = d.Start, end = d.End }).ToList(),
-                    dayPriority = s.DayPriority,
-                    nightPriority = s.NightPriority,
-                    onlyEncodeOffHours = s.OnlyEncodeOffHours,
-                    whenDayStarts = s.WhenDayStarts
-                },
-                state = ScheduleStateOf(schedule.GetStatus(config))
-            });
+            return Results.Json(ScheduleBody(config.Schedule, schedule.GetStatus(config)));
         }).RequireApiScope(ApiKeyScope.Read);
 
         // The runs, newest first. ?period= (today, d7, d30, year, all) is the History page's windows; ?from= and ?to= (yyyy-MM-dd) give your own and win.
@@ -292,12 +277,234 @@ public static class ApiV1Endpoints
         v1.MapGet("/reports/{id:long}", (long id, string? download, IRunArchive archive, IHtmlReportGenerator generator) =>
             HistoryEndpoints.RunReport(id, download is "1" or "true", archive, generator)
             ?? ApiErrors.Result(StatusCodes.Status404NotFound, "not_found", $"Run {id} has no report.")).RequireApiScope(ApiKeyScope.Read);
+
+        // ---- control (needs a control key) ---------------------------------------------------------------------------------------------------
+
+        // The hold in force, or null.
+        v1.MapGet("/hold", (IExternalHold hold) => Results.Json(new { hold = HoldOf(hold.Current()) })).RequireApiScope(ApiKeyScope.Read);
+
+        // Holds the queue: no new file starts until it is released (or lapses at "until"). The file in flight finishes unless suspendCurrent is true. Placing it
+        // again changes the one in force and keeps its start time, so an automation can assert it as often as it likes.
+        v1.MapPost("/hold", (HttpContext http, HoldRequest? request, IExternalHold hold, IEncodeSchedule schedule, IRunLogger logger) =>
+        {
+            var reason = request?.Reason?.Trim();
+            if (reason is { Length: > MaxHoldReason }) return ApiErrors.Result(StatusCodes.Status400BadRequest, "bad_request", $"reason can be at most {MaxHoldReason} characters.");
+
+            DateTimeOffset? until = null;
+            if (!string.IsNullOrWhiteSpace(request?.Until))
+            {
+                if (!DateTimeOffset.TryParse(request.Until, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var parsed))
+                    return ApiErrors.Result(StatusCodes.Status400BadRequest, "bad_request", "until must be a date and time such as 2026-10-25T23:00:00-04:00 (no offset means the server's local time).");
+                if (parsed <= DateTimeOffset.UtcNow) return ApiErrors.Result(StatusCodes.Status400BadRequest, "bad_request", "until is in the past.");
+                if (parsed > DateTimeOffset.UtcNow.AddYears(1)) return ApiErrors.Result(StatusCodes.Status400BadRequest, "bad_request", "until is more than a year away; leave it out to hold until released.");
+                until = parsed;
+            }
+
+            var placed = hold.Set(reason, until, request?.SuspendCurrent ?? false, KeyName(http));
+            logger.Log($"API: the queue is held by '{placed.SetBy}'{(placed.Reason is null ? "" : $" ({placed.Reason})")}{(placed.Until is { } end ? $" until {end.ToLocalTime():g}" : "")}{(placed.SuspendCurrent ? "; the file in flight is suspended" : "")}.");
+            schedule.Tick();   // freezes the file in flight now, if that was asked for
+            return Results.Json(new { hold = HoldOf(placed) });
+        }).RequireApiScope(ApiKeyScope.Control);
+
+        v1.MapDelete("/hold", (HttpContext http, IExternalHold hold, IEncodeSchedule schedule, IRunLoopController loopController, IRunLogger logger) =>
+        {
+            var released = hold.Release();
+            if (released)
+            {
+                logger.Log($"API: the hold was released by '{KeyName(http)}'.");
+                schedule.Tick();             // thaws a file the hold froze
+                loopController.TriggerNow(); // with monitoring on, start the next pass now instead of waiting out the countdown
+            }
+
+            return Results.Json(new { released, hold = (object?)null });
+        }).RequireApiScope(ApiKeyScope.Control);
+
+        // Runs one pass now: with monitoring on and idle it skips the countdown; with monitoring off it runs one pass without starting monitoring.
+        v1.MapPost("/run", (HttpContext http, IRunLoopController loopController, IConfigStore configStore, IExternalHold hold, IRunLogger logger) =>
+        {
+            logger.Log($"API: run now, asked by '{KeyName(http)}'.");
+            var held = hold.Current() is not null;
+            if (loopController.TriggerNow()) return Results.Json(new { started = true, mode = "countdown", held }, statusCode: StatusCodes.Status202Accepted);
+            if (loopController.IsRunning) return Results.Json(new { started = false, mode = "busy", held });
+
+            var started = loopController.RunOnceInBackground(configStore.Load(AppPaths.GetConfigFilePath()));
+            return Results.Json(new { started, mode = started ? "single-pass" : "busy", held }, statusCode: started ? StatusCodes.Status202Accepted : StatusCodes.Status200OK);
+        }).RequireApiScope(ApiKeyScope.Control);
+
+        v1.MapPost("/monitoring/start", (HttpContext http, IRunLoopController loopController, IConfigStore configStore, IRunLogger logger) =>
+        {
+            var config = configStore.Load(AppPaths.GetConfigFilePath());
+            loopController.Start(config, TimeSpan.FromSeconds(Math.Max(5, config.Repeat.PollIntervalSeconds)));
+            logger.Log($"API: monitoring started by '{KeyName(http)}'.");
+            return Results.Json(new { monitoring = loopController.IsRunning });
+        }).RequireApiScope(ApiKeyScope.Control);
+
+        // Stopping waits for the file in flight to finish, which can take a long time, so the call answers at once (202) and status shows "stopping".
+        v1.MapPost("/monitoring/stop", (HttpContext http, IRunLoopController loopController, IRunLogger logger) =>
+        {
+            if (!loopController.IsRunning) return Results.Json(new { monitoring = false, stopping = false });
+
+            logger.Log($"API: monitoring stop asked by '{KeyName(http)}'.");
+            _ = Task.Run(async () => { try { await loopController.StopAsync(); } catch { /* the loop reports its own problems */ } });
+            return Results.Json(new { monitoring = true, stopping = true }, statusCode: StatusCodes.Status202Accepted);
+        }).RequireApiScope(ApiKeyScope.Control);
+
+        v1.MapPost("/pause", (HttpContext http, IActiveEncodeProcess activeProcess, IRunLogger logger) =>
+        {
+            if (!activeProcess.IsRunning) return ApiErrors.Result(StatusCodes.Status409Conflict, "not_running", "No encode is running, so there is nothing to pause.");
+
+            activeProcess.Pause();
+            logger.Log($"API: the encode was paused by '{KeyName(http)}'.");
+            return Results.Json(new { paused = activeProcess.IsPaused });
+        }).RequireApiScope(ApiKeyScope.Control);
+
+        v1.MapPost("/resume", (HttpContext http, IActiveEncodeProcess activeProcess, IEncodeSchedule schedule, IRunLogger logger) =>
+        {
+            // Resuming by hand while a hold has the encode frozen would just be frozen again on the next tick, so it counts as letting the file finish.
+            if (schedule.GetStatus().IsHeld) schedule.RunAnyway();
+            activeProcess.Resume();
+            logger.Log($"API: the encode was resumed by '{KeyName(http)}'.");
+            return Results.Json(new { paused = activeProcess.IsPaused });
+        }).RequireApiScope(ApiKeyScope.Control);
+
+        // Lifts the schedule's off-hours hold for the rest of this daytime window (it does not lift an external hold: release that).
+        v1.MapPost("/schedule/run-anyway", (HttpContext http, IEncodeSchedule schedule, IConfigStore configStore, IRunLogger logger) =>
+        {
+            schedule.RunAnyway();
+            logger.Log($"API: run anyway, asked by '{KeyName(http)}'.");
+            return Results.Json(new { state = ScheduleStateOf(schedule.GetStatus(configStore.Load(AppPaths.GetConfigFilePath()))) });
+        }).RequireApiScope(ApiKeyScope.Control);
+
+        // Changes the schedule settings - the same ones the Scheduler page edits, so this changes what you see there. Only the fields you send change;
+        // the result must be a valid schedule or nothing is saved.
+        v1.MapPatch("/schedule", (HttpContext http, JsonObject? patchBody, IConfigStore configStore, IEncodeSchedule schedule, IRunLogger logger) =>
+        {
+            if (patchBody is null || patchBody.Count == 0) return ApiErrors.Result(StatusCodes.Status400BadRequest, "bad_request", "Send a JSON object with the schedule fields to change.");
+
+            var unknown = patchBody.Select(kv => kv.Key).Where(k => !SchedulePatchFields.Contains(k, StringComparer.OrdinalIgnoreCase)).ToList();
+            if (unknown.Count > 0) return ApiErrors.Result(StatusCodes.Status400BadRequest, "bad_request", $"Unknown field(s): {string.Join(", ", unknown)}. Allowed: {string.Join(", ", SchedulePatchFields)}.");
+
+            var config = configStore.Load(AppPaths.GetConfigFilePath());
+            ScheduleDto merged;
+            try { merged = MergeSchedule(ScheduleEndpoints.ToDto(config.Schedule), patchBody); }
+            catch (FormatException ex) { return ApiErrors.Result(StatusCodes.Status400BadRequest, "bad_request", ex.Message); }
+
+            var candidate = new ScheduleSettings();
+            ScheduleEndpoints.Apply(candidate, merged);
+            candidate.Enabled = true;   // checked as if it were on: a schedule that would be invalid the moment it is switched on is not saved either
+            var issues = ScheduleValidator.Validate(candidate);
+            if (issues.Count > 0)
+                return Results.Json(new { error = new { code = "invalid_schedule", message = "That schedule is not valid, so nothing was changed.", issues = issues.Select(i => new { field = i.Field, message = i.Message }).ToList() } },
+                    statusCode: StatusCodes.Status400BadRequest);
+
+            configStore.Update(AppPaths.GetConfigFilePath(), c => { ScheduleEndpoints.Apply(c.Schedule, merged); return true; });
+            logger.Log($"API: the schedule was changed by '{KeyName(http)}' ({string.Join(", ", patchBody.Select(kv => kv.Key))}).");
+            schedule.Tick();
+            var saved = configStore.Load(AppPaths.GetConfigFilePath());
+            return Results.Json(ScheduleBody(saved.Schedule, schedule.GetStatus(saved)));
+        }).RequireApiScope(ApiKeyScope.Control);
+    }
+
+    private const int MaxHoldReason = 200;
+
+    private static readonly string[] SchedulePatchFields =
+    {
+        "enabled", "mode", "dayStart", "dayEnd", "weekendDayStart", "weekendDayEnd", "days", "dayPriority", "nightPriority", "onlyEncodeOffHours", "whenDayStarts"
+    };
+
+    public sealed record HoldRequest(string? Reason, string? Until, bool? SuspendCurrent);
+
+    private static string KeyName(HttpContext http) => (http.Items[ApiKeyFilter.ItemKey] as ApiKeyInfo)?.Name ?? "api";
+
+    /// <summary>The current schedule with the fields of a PATCH body laid over it. Throws <see cref="FormatException"/> with a plain message for a value of the wrong kind.</summary>
+    internal static ScheduleDto MergeSchedule(ScheduleDto current, JsonObject patch)
+    {
+        JsonNode? Field(string name) => patch.FirstOrDefault(kv => string.Equals(kv.Key, name, StringComparison.OrdinalIgnoreCase)).Value;
+
+        bool Flag(string name, bool fallback) => Field(name) switch
+        {
+            null => fallback,
+            JsonValue v when v.TryGetValue<bool>(out var b) => b,
+            _ => throw new FormatException($"{name} must be true or false.")
+        };
+
+        string Text(string name, string fallback) => Field(name) switch
+        {
+            null => fallback,
+            JsonValue v when v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s) => s.Trim(),
+            _ => throw new FormatException($"{name} must be text.")
+        };
+
+        string Choice<TEnum>(string name, string fallback) where TEnum : struct, Enum
+        {
+            var text = Text(name, fallback);
+            return Enum.TryParse<TEnum>(text, ignoreCase: true, out var parsed) && Enum.IsDefined(parsed)
+                ? parsed.ToString()
+                : throw new FormatException($"{name} must be one of: {string.Join(", ", Enum.GetNames<TEnum>())}.");
+        }
+
+        var days = current.Days;
+        if (Field("days") is { } daysNode)
+        {
+            if (daysNode is not JsonArray array || array.Count != 7) throw new FormatException("days must be a list of seven {start, end} entries, Sunday first.");
+            days = array.Select((d, i) => d is JsonObject o && o["start"] is JsonValue s && o["end"] is JsonValue e
+                    && s.TryGetValue<string>(out var start) && e.TryGetValue<string>(out var end)
+                ? new ScheduleDayDto(current.Days[i].Day, start, end)
+                : throw new FormatException("each entry of days needs a start and an end (HH:mm).")).ToList();
+        }
+
+        return current with
+        {
+            Enabled = Flag("enabled", current.Enabled),
+            Mode = Choice<ScheduleMode>("mode", current.Mode),
+            DayStart = Text("dayStart", current.DayStart),
+            DayEnd = Text("dayEnd", current.DayEnd),
+            WeekendDayStart = Text("weekendDayStart", current.WeekendDayStart),
+            WeekendDayEnd = Text("weekendDayEnd", current.WeekendDayEnd),
+            Days = days,
+            DayPriority = Choice<EncodePriority>("dayPriority", current.DayPriority),
+            NightPriority = Choice<EncodePriority>("nightPriority", current.NightPriority),
+            OnlyEncodeOffHours = Flag("onlyEncodeOffHours", current.OnlyEncodeOffHours),
+            WhenDayStarts = Choice<DayHoldBehavior>("whenDayStarts", current.WhenDayStarts)
+        };
     }
 
     // ---- shared shapes -------------------------------------------------------------------------------------------------------------------
 
+    private static object? HoldOf(HoldInfo? hold) => hold is null ? null : new
+    {
+        reason = hold.Reason,
+        since = hold.Since.ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture),
+        until = hold.Until is { } end ? end.ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture) : null,
+        suspendCurrent = hold.SuspendCurrent,
+        setBy = hold.SetBy
+    };
+
     private static IResult HistoryUnavailable() =>
         ApiErrors.Result(StatusCodes.Status503ServiceUnavailable, "history_unavailable", "The run history database could not be opened, so history is not available right now.");
+
+    private static object ScheduleBody(ScheduleSettings settings, ScheduleStatus status)
+    {
+        var s = ScheduleEndpoints.ToDto(settings);
+        return new
+        {
+            settings = new
+            {
+                enabled = s.Enabled,
+                mode = s.Mode,
+                dayStart = s.DayStart,
+                dayEnd = s.DayEnd,
+                weekendDayStart = s.WeekendDayStart,
+                weekendDayEnd = s.WeekendDayEnd,
+                days = s.Days.Select(d => new { day = d.Day, start = d.Start, end = d.End }).ToList(),
+                dayPriority = s.DayPriority,
+                nightPriority = s.NightPriority,
+                onlyEncodeOffHours = s.OnlyEncodeOffHours,
+                whenDayStarts = s.WhenDayStarts
+            },
+            state = ScheduleStateOf(status)
+        };
+    }
 
     private static object ScheduleStateOf(ScheduleStatus s) => new
     {

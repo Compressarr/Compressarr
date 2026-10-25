@@ -434,7 +434,20 @@ function schedulePriorityWords(priority, isDaytime) {
 // The informational tag for the optional day/night schedule: what mode the PC is in right now, or
 // that the queue is held (and until when). Null when the schedule is off, so the tag stays hidden
 // and a default install looks exactly as it did before the feature existed.
+// An external hold (Home Assistant or another automation holding the queue) shows the same way whether or not the schedule is on.
+function describeHold(hold) {
+  const when = iso => formatScheduleMoment(iso);
+  let text = `Held by automation since ${when(hold.since)}`;
+  if (hold.reason) text += ` - ${hold.reason}`;
+  text += hold.until ? `. It lifts itself at ${when(hold.until)}.` : '. It stays until released.';
+  if (hold.suspendCurrent) text += ' The file in progress is suspended.';
+  return text;
+}
+
 function scheduleTagInfo(schedule) {
+  if (schedule && schedule.hold) {
+    return { text: 'Held by automation', kind: 'held', title: describeHold(schedule.hold) + ' Release it on the Monitor page.' };
+  }
   if (!schedule || !schedule.enabled) return null;
   const until = schedule.nextChange ? formatScheduleMoment(schedule.nextChange) : null;
   if (schedule.isHeld) {

@@ -243,7 +243,7 @@ public class RunOrchestratorTests : IDisposable
         // from deep inside ConversionOrchestrator too, the same as it does in production.
         var effectiveLogger = logger ?? new NoOpRunLogger();
         var effectiveHistory = historyStore ?? new NoOpHistoryStore();
-        var effectiveSchedule = schedule ?? new EncodeSchedule(new StaticConfigStore(config), new ActiveEncodeProcess());
+        var effectiveSchedule = schedule ?? new EncodeSchedule(new StaticConfigStore(config), new ActiveEncodeProcess(), new Compressarr.Core.Tests.Scheduling.InMemoryExternalHold());
 
         var conversionOrchestrator = new ConversionOrchestrator(
             new PassThroughPathExpander(), new RealFolderScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), new MetadataService(),
@@ -370,6 +370,24 @@ public class RunOrchestratorTests : IDisposable
         Assert.Equal(2, tracked.Count);
         Assert.All(tracked, e => Assert.Equal(ResumeStatus.Pending, e.Status));
         Assert.Equal(new[] { "a.mkv", "b.mkv" }, tracked.OrderBy(e => e.Order).Select(e => Path.GetFileName(e.FullName)).ToArray());
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_HeldByAnAutomation_StartsNothing_SaysWhy_AndStillTracksTheFiles()
+    {
+        var (config, _) = MakeSingleLaneConfig("b.mkv", "a.mkv");
+        var processRunner = new RecordingProcessRunner();
+        var logger = new NoOpRunLogger();
+        var hold = new HoldInfo("TV on", DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddHours(2), false, "Home Assistant");
+        var schedule = new ScriptedSchedule { Status = new ScheduleStatus(false, false, null, false, true, false, null, hold) };
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, processRunner, logger: logger, schedule: schedule);
+
+        var result = await orchestrator.RunOnceAsync(config);
+
+        Assert.Empty(processRunner.ProcessedInOrder);
+        Assert.Equal(0, result!.TotalFiles);
+        Assert.Equal(2, new JsonResumeStateStore().Load(resumeFilePath).Count);
+        Assert.Contains(logger.Messages, m => m.Message.Contains("held by automation") && m.Message.Contains("TV on"));
     }
 
     [Fact]

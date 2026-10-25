@@ -121,6 +121,16 @@ runAnywayBtn.addEventListener('click', async () => {
   poll();
 });
 
+// Only shown while an automation (the Automation API) holds the queue: lifts that hold, then nudges an idle monitor to start its next pass at once.
+const releaseHoldBtn = document.getElementById('releaseHoldBtn');
+const holdNote = document.getElementById('holdNote');
+releaseHoldBtn.addEventListener('click', async () => {
+  releaseHoldBtn.disabled = true;
+  await fetch('/api/run/release-hold', { method: 'POST' });
+  releaseHoldBtn.disabled = false;
+  poll();
+});
+
 abortBtn.addEventListener('click', async () => {
   if (!confirm(toggleIsMonitoring ? 'Abort the current conversion immediately and stop monitoring?' : 'Abort the current conversion immediately?')) return;
   await fetch('/api/run/abort', { method: 'POST' });
@@ -700,11 +710,17 @@ async function poll() {
 
   // "Held" only means something when there is something being held back - a queued file, or an encode
   // the schedule has frozen - not merely because it happens to be daytime with an empty queue.
-  const scheduleHeld = !!(s.schedule && s.schedule.isHeld) && ((s.upNext && s.upNext.length > 0) || s.isPaused);
+  const hold = s.schedule && s.schedule.hold;
+  const somethingToHold = (s.upNext && s.upNext.length > 0) || s.isPaused;
+  const scheduleHeld = !!(s.schedule && s.schedule.isHeld && !hold) && somethingToHold;
+  const heldAny = scheduleHeld || (!!hold && somethingToHold);
   runAnywayBtn.classList.toggle('hidden', !scheduleHeld);
+  holdNote.classList.toggle('hidden', !hold);
+  holdNote.textContent = hold ? describeHold(hold) : '';
+  releaseHoldBtn.classList.toggle('hidden', !hold);
 
   const stateValueEl = document.getElementById('stateValue');
-  stateValueEl.textContent = s.isRenaming ? 'Renaming' : (s.isRunning ? 'Running' : (scheduleHeld ? 'Held' : (s.isMonitoring ? 'Watching' : 'Idle')));
+  stateValueEl.textContent = s.isRenaming ? 'Renaming' : (s.isRunning ? 'Running' : (heldAny ? 'Held' : (s.isMonitoring ? 'Watching' : 'Idle')));
   stateValueEl.classList.toggle('running', s.isRunning);
   document.getElementById('fileLabel').textContent = s.isRenaming
     ? `Renaming files with FileBot in Lane ${s.laneDisplayName}`

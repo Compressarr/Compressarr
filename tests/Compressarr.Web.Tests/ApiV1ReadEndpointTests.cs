@@ -97,7 +97,8 @@ public class ApiV1ReadEndpointTests
         var (status, body, _) = await Get(host, key, "/api/v1/status");
 
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal(Sorted("version", "monitoring", "stopping", "running", "paused", "runStartedAt", "current", "secondsUntilNextRun", "cpuPercent", "schedule", "queue"), Keys(body));
+        Assert.Equal(Sorted("version", "monitoring", "stopping", "running", "paused", "runStartedAt", "current", "secondsUntilNextRun", "cpuPercent", "schedule", "hold", "queue"), Keys(body));
+        Assert.Null(body!["hold"]);
         Assert.Equal(Sorted("enabled", "isDaytime", "priority", "onlyOffHours", "isHeld", "overrideActive", "nextChange"), Keys(body!["schedule"]));
         Assert.Equal(Sorted("pending", "skipped", "errors", "etaState", "eta"), Keys(body["queue"]));
         Assert.False(body["running"]!.GetValue<bool>());

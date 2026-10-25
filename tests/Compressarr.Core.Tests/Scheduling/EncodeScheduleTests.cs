@@ -298,7 +298,7 @@ public class EncodeScheduleTests
     public EncodeScheduleTests()
     {
         _store.Config.Schedule.Enabled = true; // 08:00-22:00, below normal by day / normal at night
-        _schedule = new EncodeSchedule(_store, _process, _clock);
+        _schedule = new EncodeSchedule(_store, _process, new InMemoryExternalHold(_clock), _clock);
     }
 
     private void At(int hour, int minute = 0, int day = 5) => _clock.Set(new DateTime(2026, 10, day, hour, minute, 0));

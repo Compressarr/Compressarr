@@ -114,6 +114,15 @@ through `PATCH /api/v1/schedule`. A custom HACS integration is parked: REST sens
    produced files, as the History page does, while `runs` also lists all-failed runs with `counted: false`; a CSV-fallback history answers 503 `history_unavailable`; the status queue ETA is `etaState`
    (`none`, `estimating`, `projected`) plus `eta`. The `hold` field joins `status` and `schedule` in stage 3. `ApiV1ReadEndpointTests` lists every field name of every response.
 3. **Control endpoints,** the external hold in the engine and `EncodeSchedule` (including with the schedule disabled), the Monitor banner and Release button, schedule `PATCH`.
+   **BUILT 2026-10-25 (uncommitted).** State database v4 adds `holds` (one row, id 1). `IExternalHold` / `SqliteExternalHold` (Core/Scheduling; in-memory if the database cannot be opened; expiry is
+   checked on every read; placing it again keeps `since`). `ScheduleStatus` gains `Hold`; `IsHeld` is "scheduled hold or external hold", computed even when the schedule is off. `RunAnyway` lifts only the
+   schedule's hold, but also thaws a file an external hold froze for as long as that hold stands (so a manual Resume and a Stop Monitoring request, which both call it, cannot be defeated by the next
+   tick or leave Stop waiting on a frozen file). `RunOrchestrator` logs "held by automation (reason) since ... until ..." once per hold. `status.hold` and `GET /hold`; `status.queue.etaState` is
+   `held` (eta null) while a hold stands. Control calls (`run`, `monitoring/start|stop`, `pause`, `resume`, `hold` POST/DELETE, `schedule/run-anyway`, `PATCH schedule`) need the control scope and
+   write one run-log line naming the key. `run` answers 202 when a pass started (with `held` so the caller knows), `monitoring/stop` answers at once (202; status shows `stopping`), `pause` with no encode is
+   409 `not_running`. `until`: ISO 8601, no offset means the server's local time, must be in the future and within a year; `reason` at most 200 characters. `PATCH schedule` takes only the schedule's
+   own fields, merges over the saved ones, validates the result as if the schedule were on (a time like 25:00 is refused even while it is off) and saves nothing on any problem. The web UI's own
+   `POST /api/run/release-hold` backs the Monitor's Release hold button; nav.js, monitor.js and scheduler.js show the hold.
 3b. **Protect the web interface** (decided 2026-10-25, in rc.3): optional username and password (off by default so nothing changes for an existing install), a login page and session cookie for the browser, the
    tray app's own browser window and the notification links still working, `/api/v1` unaffected (it uses keys), the legacy open `/api/run/status` either kept open or covered by a switch (to decide when
    designing this stage). **Secrets leave the open endpoints in this stage (decided 2026-10-25):** the Sonarr/Radarr/TMDb/OMDb keys and the notification channels' secret fields (the ones their

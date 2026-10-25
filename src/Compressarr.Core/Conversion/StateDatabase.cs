@@ -8,7 +8,7 @@ namespace Compressarr.Core.Conversion;
 /// statements are shared with <see cref="HistoryDatabase"/>.</summary>
 internal static class StateDatabase
 {
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
     public const string FileName = "compressarr.state.db";
 
     /// <summary>The database that goes with a resume-file path: the app's own <c>compressarr.resume.json</c> maps to <c>compressarr.state.db</c> in the
@@ -72,7 +72,27 @@ internal static class StateDatabase
             HistoryDatabase.Execute(connection, "PRAGMA user_version = 3;", transaction);
             transaction.Commit();
         }
+
+        if (version < 4)
+        {
+            using var transaction = connection.BeginTransaction();
+            HistoryDatabase.Execute(connection, SchemaV4, transaction);
+            HistoryDatabase.Execute(connection, "PRAGMA user_version = 4;", transaction);
+            transaction.Commit();
+        }
     }
+
+    // v4: the external hold (the Automation API holding the queue); one row at most, always id 1, so it survives a restart.
+    private const string SchemaV4 = """
+        CREATE TABLE holds (
+            id              INTEGER PRIMARY KEY CHECK (id = 1),
+            reason          TEXT NULL,
+            since           TEXT NOT NULL,
+            until           TEXT NULL,                -- when it lapses by itself; NULL = until released
+            suspend_current INTEGER NOT NULL DEFAULT 0,
+            set_by          TEXT NULL                 -- the name of the API key that placed it
+        );
+        """;
 
     // v3: the keys of the Automation API (/api/v1). Only a hash of each key is stored; the key itself is shown once, when it is made.
     private const string SchemaV3 = """

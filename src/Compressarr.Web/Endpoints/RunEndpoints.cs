@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Compressarr.Core.Config;
 using Compressarr.Core.Conversion;
 using Compressarr.Core.Diagnostics;
+using Compressarr.Core.Logging;
 using Compressarr.Core.Orchestration;
 using Compressarr.Core.Posters;
 using Compressarr.Core.Queue;
@@ -144,6 +145,21 @@ public static class RunEndpoints
             return Results.Ok();
         });
 
+        // The Monitor page's Release button for an external hold (the Automation API holding the queue). Thaws a file the hold froze and, with monitoring
+        // on, nudges the loop to start its next pass at once.
+        app.MapPost("/api/run/release-hold", (IExternalHold hold, IEncodeSchedule schedule, IRunLoopController loopController, IRunLogger logger) =>
+        {
+            var released = hold.Release();
+            if (released)
+            {
+                logger.Log("The automation hold was released from the Monitor page.");
+                schedule.Tick();
+                loopController.TriggerNow();
+            }
+
+            return Results.Json(new { released });
+        });
+
         app.MapGet("/api/run/status", async (
             IRunLoopController loopController,
             CurrentRunStateService runState,
@@ -219,7 +235,8 @@ public static class RunEndpoints
                     onlyOffHours = scheduleStatus.OnlyOffHours,
                     isHeld = scheduleStatus.IsHeld,
                     overrideActive = scheduleStatus.OverrideActive,
-                    nextChange = scheduleStatus.NextChange
+                    nextChange = scheduleStatus.NextChange,
+                    hold = scheduleStatus.Hold is { } hold ? new { reason = hold.Reason, since = hold.Since, until = hold.Until, suspendCurrent = hold.SuspendCurrent, setBy = hold.SetBy } : null
                 },
                 upNext = upNextShown,
                 queueEtaText,

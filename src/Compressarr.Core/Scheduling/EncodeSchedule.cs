@@ -11,9 +11,10 @@ namespace Compressarr.Core.Scheduling;
 /// <param name="Priority">The priority encodes should run at right now; null when disabled.</param>
 /// <param name="OnlyOffHours">The "only encode during off hours" option is on.</param>
 /// <param name="IsHeld">New files must not start: off-hours-only is on, it's daytime, and the user
-/// hasn't chosen "run anyway".</param>
+/// hasn't chosen "run anyway" - or an external hold (<paramref name="Hold"/>) is in force, which "run anyway" does not lift.</param>
 /// <param name="OverrideActive">"Run anyway" is in force (it lapses at the next window change).</param>
 /// <param name="NextChange">When the window next flips (day to night or back), local time.</param>
+/// <param name="Hold">The external hold in force (Automation API), or null. Works with the schedule switched off.</param>
 public sealed record ScheduleStatus(
     bool Enabled,
     bool IsDaytime,
@@ -21,7 +22,8 @@ public sealed record ScheduleStatus(
     bool OnlyOffHours,
     bool IsHeld,
     bool OverrideActive,
-    DateTimeOffset? NextChange);
+    DateTimeOffset? NextChange,
+    HoldInfo? Hold = null);
 
 /// <summary>
 /// The optional day/night encoding schedule: tells the engine whether a new file may start, keeps
@@ -67,26 +69,30 @@ public sealed class EncodeSchedule : IEncodeSchedule, IDisposable
 
     private readonly IConfigStore _configStore;
     private readonly IActiveEncodeProcess _activeProcess;
+    private readonly IExternalHold _hold;
     private readonly TimeProvider _time;
 
     private readonly object _lock = new();
     private DateTimeOffset? _overrideUntil;
     private DateTimeOffset? _lastNoticedHoldEnd;
+    private DateTimeOffset? _lastNoticedExternalHold;
+    private DateTimeOffset? _thawedHoldSince;   // the external hold (by its start) whose frozen encode was released by hand or by a stop request
     private bool _pausedBySchedule;
 
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
     private IRunLoopController? _runLoop;
 
-    public EncodeSchedule(IConfigStore configStore, IActiveEncodeProcess activeProcess)
-        : this(configStore, activeProcess, TimeProvider.System)
+    public EncodeSchedule(IConfigStore configStore, IActiveEncodeProcess activeProcess, IExternalHold hold)
+        : this(configStore, activeProcess, hold, TimeProvider.System)
     {
     }
 
-    internal EncodeSchedule(IConfigStore configStore, IActiveEncodeProcess activeProcess, TimeProvider time)
+    internal EncodeSchedule(IConfigStore configStore, IActiveEncodeProcess activeProcess, IExternalHold hold, TimeProvider time)
     {
         _configStore = configStore;
         _activeProcess = activeProcess;
+        _hold = hold;
         _time = time;
     }
 
@@ -95,9 +101,10 @@ public sealed class EncodeSchedule : IEncodeSchedule, IDisposable
     public ScheduleStatus GetStatus(CompressarrConfig config)
     {
         var settings = config.Schedule;
+        var hold = _hold.Current();
         if (!settings.Enabled)
         {
-            return new ScheduleStatus(false, false, null, false, false, false, null);
+            return new ScheduleStatus(false, false, null, false, hold is not null, false, null, hold);
         }
 
         var now = _time.GetUtcNow();
@@ -111,17 +118,20 @@ public sealed class EncodeSchedule : IEncodeSchedule, IDisposable
             overrideActive = state.IsDaytime && _overrideUntil is not null;
         }
 
-        var held = settings.OnlyEncodeOffHours && state.IsDaytime && !overrideActive;
+        var held = (settings.OnlyEncodeOffHours && state.IsDaytime && !overrideActive) || hold is not null;
         var priority = state.IsDaytime ? settings.DayPriority : settings.NightPriority;
-        return new ScheduleStatus(true, state.IsDaytime, priority, settings.OnlyEncodeOffHours, held, overrideActive, nextChange);
+        return new ScheduleStatus(true, state.IsDaytime, priority, settings.OnlyEncodeOffHours, held, overrideActive, nextChange, hold);
     }
 
     public void RunAnyway()
     {
         var status = GetStatus();
-        if (!status.Enabled || !status.IsDaytime || status.NextChange is null) return;
 
-        lock (_lock) { _overrideUntil = status.NextChange; }
+        // An external hold is not lifted (that is the automation's to release), but an encode it froze is thawed for as long as that hold stands: Run anyway,
+        // a manual Resume and Stop Monitoring all mean "let the file in flight finish".
+        if (status.Hold is { SuspendCurrent: true } hold) lock (_lock) { _thawedHoldSince = hold.Since; }
+
+        if (status.Enabled && status.IsDaytime && status.NextChange is not null) lock (_lock) { _overrideUntil = status.NextChange; }
         Tick(); // thaw a suspended encode right away rather than on the next 10-second tick
     }
 
@@ -140,6 +150,16 @@ public sealed class EncodeSchedule : IEncodeSchedule, IDisposable
 
     public bool TryMarkHoldNoticed(ScheduleStatus status)
     {
+        if (status.Hold is { } hold)
+        {
+            lock (_lock)
+            {
+                if (_lastNoticedExternalHold == hold.Since) return false;
+                _lastNoticedExternalHold = hold.Since;
+                return true;
+            }
+        }
+
         if (!status.IsHeld || status.NextChange is null) return false;
         lock (_lock)
         {
@@ -167,9 +187,15 @@ public sealed class EncodeSchedule : IEncodeSchedule, IDisposable
         // and is still running when night begins, which is the whole point of changing it live.
         _activeProcess.SetPriority(status.Priority);
 
-        var shouldSuspend = status.IsHeld && config.Schedule.WhenDayStarts == DayHoldBehavior.SuspendEncode;
+        // Two reasons to freeze the file in flight: the daytime hold of the schedule (when it is set to suspend), and an external hold that asked for it.
+        var scheduledHold = status.Enabled && status.OnlyOffHours && status.IsDaytime && !status.OverrideActive;
+        bool shouldSuspend;
         lock (_lock)
         {
+            var holdSuspends = status.Hold is { SuspendCurrent: true } held && _thawedHoldSince != held.Since;
+            shouldSuspend = (scheduledHold && config.Schedule.WhenDayStarts == DayHoldBehavior.SuspendEncode) || holdSuspends;
+            if (status.Hold is null) _thawedHoldSince = null;
+
             if (shouldSuspend)
             {
                 if (_activeProcess.IsRunning && !_activeProcess.IsPaused)

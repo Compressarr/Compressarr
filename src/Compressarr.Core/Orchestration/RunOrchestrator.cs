@@ -385,8 +385,17 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 {
                     if (_schedule.TryMarkHoldNoticed(scheduleStatus))
                     {
-                        var resumeAt = scheduleStatus.NextChange?.ToString("t") ?? "off-hours";
-                        _logger.Log($"\nOff-hours only is on - encoding is held for the daytime window and resumes at {resumeAt}. Use \"Run anyway\" on the Monitor page to start now.");
+                        if (scheduleStatus.Hold is { } hold)
+                        {
+                            var why = string.IsNullOrWhiteSpace(hold.Reason) ? "" : $" ({hold.Reason})";
+                            var until = hold.Until is { } end ? $" until {end.ToLocalTime():t}" : "";
+                            _logger.Log($"\nEncoding is held by automation{why} since {hold.Since.ToLocalTime():t}{until}. Release it on the Monitor page or from your automation.");
+                        }
+                        else
+                        {
+                            var resumeAt = scheduleStatus.NextChange?.ToString("t") ?? "off-hours";
+                            _logger.Log($"\nOff-hours only is on - encoding is held for the daytime window and resumes at {resumeAt}. Use \"Run anyway\" on the Monitor page to start now.");
+                        }
                     }
                     break;
                 }

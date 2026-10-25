@@ -292,6 +292,14 @@ function renderNow(s) {
   modeEl.textContent = info.text;
   modeEl.className = `sched-now-mode ${info.kind}`;
 
+  // An automation holding the queue takes over the whole picture, whether or not the schedule itself is on.
+  if (schedule.hold) {
+    changeEl.textContent = schedule.enabled ? 'The schedule below still sets the priority.' : 'The schedule is off.';
+    queueEl.textContent = describeHold(schedule.hold);
+    runAnywayBtn.classList.add('hidden');
+    return;
+  }
+
   const until = schedule.nextChange ? formatScheduleMoment(schedule.nextChange) : null;
   if (schedule.isDaytime) {
     changeEl.textContent = until ? `Daytime window until ${until}. Encodes run at ${schedulePriorityName(schedule.priority)} priority.` : `Daytime. Encodes run at ${schedulePriorityName(schedule.priority)} priority.`;

@@ -37,6 +37,8 @@
         <div class="stat-sub" id="queueEtaLabel"></div>
         <div class="stat-sub" id="queueEtaValue"></div>
         <button id="runAnywayBtn" class="hidden" style="margin-top: 8px" title="Off-hours only is holding the queue for the daytime window. Start encoding now; the hold returns when the window changes.">Run anyway</button>
+        <div class="stat-sub hidden" id="holdNote" style="margin-top: 8px"></div>
+        <button id="releaseHoldBtn" class="hidden" style="margin-top: 8px" title="An automation (such as Home Assistant) is holding the queue. Release it so encoding carries on.">Release hold</button>
       </div>
       <div class="stat stat-file" id="statFile">
         <span class="job-poster hidden" id="jobPoster"></span>
