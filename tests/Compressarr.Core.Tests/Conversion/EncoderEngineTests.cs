@@ -57,11 +57,16 @@ internal sealed class EngResume : IResumeStateStore
 internal sealed class EngProgress : IRunProgressReporter
 {
     public List<string?> Presets { get; } = new();
+    public List<(int Index, int Total)> Positions { get; } = new();
     public void RunStarted(string timestamp) { }
     public void LaneStarted(string laneId, string laneDisplayName, bool isResumed) { }
     public void FileBotStarted(string laneId) { }
     public void FileBotCompleted(string laneId) { }
-    public void FileStarted(string laneId, int index, int total, string fileName, string fullName, string? presetName, double sizeGb) => Presets.Add(presetName);
+    public void FileStarted(string laneId, int index, int total, string fileName, string fullName, string? presetName, double sizeGb)
+    {
+        Presets.Add(presetName);
+        Positions.Add((index, total));
+    }
     public void FileProgress(string laneId, double percent, double? fps, string? eta) { }
     public void FileCompleted(string laneId, string fileName, bool success) { }
     public void FileThroughputSample(string? presetName, double gb, TimeSpan duration) { }
@@ -204,6 +209,26 @@ public class EncoderEngineTests : IDisposable
     }
 
     private static MediaProbeResult Probe(string json) => FFprobeParser.Parse(json);
+
+    [Fact]
+    public async Task AFilePosition_NeverReadsAsMoreFilesStartedThanTheTotal_WhenFilesReachTheLaneAfterItWasPrepared()
+    {
+        // A lane prepared with nothing waiting (total 0) still processes files that were tracked afterwards; the Monitor and Home Assistant used to show "65 of 0".
+        var rig = BuildRig(EncoderEngine.HandBrake, "Compressarr SD-HD");
+        var resume = new List<ResumeEntry>();
+        var context = await rig.Orchestrator.PrepareLaneAsync(rig.Lane, rig.Config, resume, rig.ResumePath);
+        context!.FileTotal = 0;
+        var second = Path.Combine(Path.GetDirectoryName(rig.Source)!, "Another Movie (2021).mkv");
+        var third = Path.Combine(Path.GetDirectoryName(rig.Source)!, "Third Movie (2022).mkv");
+        File.WriteAllText(second, "source bytes");
+        File.WriteAllText(third, "source bytes");
+        resume.Add(new ResumeEntry { LaneId = rig.Lane.Id, FullName = second, Status = ResumeStatus.Pending });
+        resume.Add(new ResumeEntry { LaneId = rig.Lane.Id, FullName = third, Status = ResumeStatus.Pending });
+
+        await rig.Orchestrator.ProcessOneFileAsync(context, resume.First(e => e.FullName == rig.Source), rig.ResumePath.Replace("resume.json", ""), "20260101_000000", resume, rig.ResumePath, CancellationToken.None);
+
+        Assert.Equal((1, 3), rig.Progress.Positions.Last());   // the one starting plus the two still waiting
+    }
 
     // ---- which encoder runs ---------------------------------------------------------------------
 

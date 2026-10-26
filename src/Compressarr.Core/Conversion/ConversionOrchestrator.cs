@@ -365,6 +365,10 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
     {
         context.FileIndex++;
         var i = context.FileIndex;
+        // The total was counted when the lane was prepared; files that reached the lane after that (a lane that started empty, imports during a long pass)
+        // are still processed, so the total grows to cover what has been started plus what is still waiting - never "65 of 0".
+        var waiting = QueueRules.WaitingEntriesInOrder(resumeState, context.Lane.Id);
+        context.FileTotal = Math.Max(context.FileTotal, i - 1 + waiting.Count + (waiting.Contains(resumeEntry) ? 0 : 1));
         var fileCount = context.FileTotal;
         var padSize = context.PadSize;
         var lane = context.Lane;
