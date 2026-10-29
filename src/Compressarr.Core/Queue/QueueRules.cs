@@ -15,6 +15,9 @@ public sealed record UpNextItem(string LaneId, string LaneDisplayName, string Fi
 {
     /// <summary>True when this file's preset is Passthrough (it will be copied, not re-encoded); the Monitor page shows a badge.</summary>
     public bool IsPassthrough => PassthroughPreset.Is(Preset);
+
+    /// <summary>"tv", "movie" or "video" (see ContentClassifier.KindOf): the Monitor page shows it as an icon. A "video" is handled like a movie (same preset choice).</summary>
+    public string Kind => ContentClassifier.KindOf(FileName);
 }
 
 /// <summary>What the queue display needs to know about the run currently in progress: the full path

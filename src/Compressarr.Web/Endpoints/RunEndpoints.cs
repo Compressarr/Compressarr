@@ -216,6 +216,7 @@ public static class RunEndpoints
                 laneDisplayName = snapshot.LaneDisplayName,
                 engine = (config.Lanes.FirstOrDefault(l => l.DisplayName == snapshot.LaneDisplayName)?.Engine ?? EncoderEngine.HandBrake).ToString(),
                 fileName = snapshot.FileName,
+                kind = snapshot.FileName is null ? null : ContentClassifier.KindOf(snapshot.FileName),
                 presetName = snapshot.PresetName,
                 isPassthrough = PassthroughPreset.Is(snapshot.PresetName),
                 landsInLaneName,

@@ -133,8 +133,8 @@ public class ApiV1ReadEndpointTests
         var (host, key) = await StartWithKey(Lane1, Lane2);
         await using var _ = host;
         var a = host.Drop("hdsd", "a.mkv");
-        host.Drop("hdsd", "b.mkv");
-        host.Drop("kids", "k.mkv");
+        host.Drop("hdsd", "Inception (2010).mkv");
+        host.Drop("kids", "Bluey - S01E01 - Magic Xylophone.mkv");
         await host.PollAsync();
         await host.SkipAsync("hdsd", a);
 
@@ -143,11 +143,12 @@ public class ApiV1ReadEndpointTests
         Assert.Equal(Sorted("total", "page", "pageSize", "items"), Keys(all));
         Assert.Equal(3, all!["total"]!.GetValue<int>());
         var items = all["items"]!.AsArray();
-        Assert.Equal(Sorted("position", "laneId", "lane", "file", "status", "preset", "engine", "sizeGb", "passthrough", "resumed", "unmatched", "landsInLane"), Keys(items[0]));
+        Assert.Equal(Sorted("position", "laneId", "lane", "file", "type", "status", "preset", "engine", "sizeGb", "passthrough", "resumed", "unmatched", "landsInLane"), Keys(items[0]));
+        Assert.Equal(new[] { "video", "movie", "tv" }, items.Select(i => i!["type"]!.GetValue<string>()).ToArray());
         Assert.Equal(new[] { 1, 2, 3 }, items.Select(i => i!["position"]!.GetValue<int>()).ToArray());
 
         var (_, kids, _) = await Get(host, key, "/api/v1/queue?lane=Kids");
-        Assert.Equal("k.mkv", Assert.Single(kids!["items"]!.AsArray())!["file"]!.GetValue<string>());
+        Assert.Equal("Bluey - S01E01 - Magic Xylophone.mkv", Assert.Single(kids!["items"]!.AsArray())!["file"]!.GetValue<string>());
         Assert.Equal(3, kids["items"]![0]!["position"]!.GetValue<int>());   // its place in the whole queue, not in the filter
 
         var (_, byId, _) = await Get(host, key, "/api/v1/queue?lane=hdsd&status=skipped");

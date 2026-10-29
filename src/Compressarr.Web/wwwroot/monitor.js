@@ -234,6 +234,13 @@ const PRESET_DEFAULT_VALUE = '__lane_default__';
 const QUEUE_ICON_GRIP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"></circle><circle cx="16" cy="6" r="1.6"></circle><circle cx="8" cy="12" r="1.6"></circle><circle cx="16" cy="12" r="1.6"></circle><circle cx="8" cy="18" r="1.6"></circle><circle cx="16" cy="18" r="1.6"></circle></svg>';
 const QUEUE_ICON_DOTS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="12" cy="19" r="1.8"></circle></svg>';
 
+// A film strip for a movie, a TV for a show, a camera for any other video (no season and episode and no (year) in the name; handled like a movie):
+// how Compressarr classified the file, drawn beside the name on a queue row and in the corner of the Current status card.
+const KIND_ICON_MOVIE = '<svg class="kind-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Movie"><title>Movie</title><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M7 3v18M17 3v18M3 8h4M3 12h4M3 16h4M17 8h4M17 12h4M17 16h4"></path></svg>';
+const KIND_ICON_TV = '<svg class="kind-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="TV show"><title>TV show</title><rect x="2" y="7" width="20" height="15" rx="2"></rect><polyline points="17 2 12 7 7 2"></polyline></svg>';
+const KIND_ICON_VIDEO = '<svg class="kind-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Video"><title>Video: no season and episode and no (year) in the name, handled like a movie</title><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"></path><rect x="2" y="6" width="14" height="12" rx="2"></rect></svg>';
+function kindIconHtml(kind) { return kind === 'tv' ? KIND_ICON_TV : kind === 'video' ? KIND_ICON_VIDEO : KIND_ICON_MOVIE; }
+
 async function loadQueuePresetNames() {
   try {
     const settingsRes = await fetch('/api/settings');
@@ -406,7 +413,7 @@ function renderQueueList() {
       ${item.isFileBotUnmatched ? '<span class="queue-badge unmatched">Unmatched</span>' : ''}
       <div class="queue-lane">${escapeHtml(item.laneDisplayName)}${queueEngineChip(item)}${queueDestinationMarker(item)}</div>
 
-      <div class="queue-file">${escapeHtml(item.fileName)}</div>
+      <div class="queue-file">${kindIconHtml(item.kind)}${escapeHtml(item.fileName)}</div>
       <div class="queue-meta">${item.sizeGb.toFixed(2)} GB</div>
       ${item.isError
         ? `<span class="queue-preset-static">${escapeHtml(item.preset || '-')}</span>`
@@ -775,6 +782,13 @@ async function poll() {
     jobPoster.innerHTML = '';
   }
   document.getElementById('statFile').classList.toggle('with-poster', !!jobKey);
+
+  // The same TV / movie icon in the card's top right corner while a file is being worked on; nothing when idle or renaming.
+  const jobKind = document.getElementById('jobKind');
+  const showKind = s.isRunning && !s.isRenaming && !!s.fileName;
+  jobKind.innerHTML = showKind ? kindIconHtml(s.kind) : '';
+  jobKind.classList.toggle('hidden', !showKind);
+  document.getElementById('statFile').classList.toggle('with-kind', showKind);
 
   renderQueue(s.upNext);
   renderLog(s.recentLogLines);

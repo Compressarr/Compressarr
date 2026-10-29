@@ -1928,6 +1928,15 @@ pre.ed-cmd { margin: 0; padding: 12px 14px; background: #1d2130; color: #d6dcf0;
 }
 .job-poster.hidden { display: none; }
 .stat-file.with-poster { display: flex; gap: 14px; align-items: flex-start; }
+
+/* TV / movie icon: the size of the text beside it on a queue row, and in the top right corner of the Current status card. */
+.kind-icon { width: 1em; height: 1em; flex: 0 0 auto; vertical-align: -0.14em; margin-right: 7px; color: var(--text-dim); }
+.queue-item.skipped .kind-icon { opacity: .5; }
+.stat-file { position: relative; }
+.job-kind { position: absolute; top: 12px; right: 14px; width: 20px; height: 20px; color: var(--text-dim); }
+.job-kind.hidden { display: none; }
+.job-kind .kind-icon { width: 100%; height: 100%; margin: 0; vertical-align: top; }
+.stat-file.with-kind .label { padding-right: 28px; }
 .stat-file .job-body { flex: 1; min-width: 0; }
 
 .queue-handle-spacer { flex: 0 0 14px; width: 14px; }

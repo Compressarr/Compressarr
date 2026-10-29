@@ -71,6 +71,13 @@ public static partial class ContentClassifier
 
     public static bool IsTvFile(string fileName) => GetEpisodeInfo(fileName).HasSeasonAndEpisode;
 
+    /// <summary>What the Monitor page calls a file: "tv" (a season and episode in the name), "movie" (no episode, but a "(YYYY)" year tag) or "video" (neither: a home
+    /// video, a clip, anything that is not a standard film or show). Display only - a "video" is still handled as a movie everywhere else (IsTvFile is false).</summary>
+    public static string KindOf(string fileName) =>
+        IsTvFile(fileName) ? "tv"
+        : MovieYearTagPattern().IsMatch(Path.GetFileNameWithoutExtension(fileName)) ? "movie"
+        : "video";
+
     /// <summary>The per-movie subfolder name a converted movie is filed under: the base filename
     /// up through and including its "(YYYY)" year tag, with anything after that discarded -
     /// "Caddyshack (1980) {edition-Director's Cut}.mkv" becomes "Caddyshack (1980)". Filenames

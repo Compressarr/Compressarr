@@ -58,6 +58,21 @@ public class ContentClassifierTests
     }
 
     [Theory]
+    [InlineData("Show.Name.S01E01.mkv", "tv")]
+    [InlineData("Show Name - 2x07 - Title.mkv", "tv")]
+    [InlineData("Dora and Friends Into the City! S02E07 - A Swiper Emergency.mkv", "tv")]
+    [InlineData("Caddyshack (1980).mkv", "movie")]
+    [InlineData("Caddyshack (1980) {edition-Director's Cut}.mkv", "movie")]
+    [InlineData("Beach Day 2019.mkv", "video")]                  // no (year) tag and no episode: a home video or clip, handled like a movie
+    [InlineData("Holiday 1920x1080.mkv", "video")]               // a resolution is not an episode
+    [InlineData("Show S01E01 (2020).mkv", "tv")]                 // an episode wins over a year
+    public void KindOf_SaysTvMovieOrVideo(string fileName, string expected)
+    {
+        Assert.Equal(expected, ContentClassifier.KindOf(fileName));
+        Assert.Equal(expected == "tv", ContentClassifier.IsTvFile(fileName));   // a video is still handled as a movie everywhere else
+    }
+
+    [Theory]
     [InlineData("Caddyshack (1980) {edition-Director's Cut}.mkv", "Caddyshack (1980)")]
     [InlineData("Caddyshack (1980).mkv", "Caddyshack (1980)")]
     [InlineData("No Year Tag At All.mkv", "No Year Tag At All")]
