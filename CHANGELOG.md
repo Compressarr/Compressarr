@@ -9,6 +9,76 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
+## [3.0.0] - Unreleased
+
+> [!TIP]
+> **What's new in 3.0, compared with 2.1.10 (the last 2.x release):** a second encoder (ffmpeg) and a profile editor, Passthrough (all of Compressarr's filing without a re-encode),
+> a day/night Scheduler, lane assignment, a run history and queue that live in databases, a redesigned History page with stat cards and charts, a web sign-in and an
+> Automation API for Home Assistant and scripts, posters and Plex editions, and a TV / movie / video icon on every queued file. The pre-release entries below (3.0.0-rc.3 and the
+> 2.2 betas and release candidates) hold the full detail of each change.
+
+> [!IMPORTANT]
+> **Behaviour change: anyone outside your own network now needs a login.** Until now the web interface - which can change every setting, including the command run after each pass - answered
+> any device that could reach its port. From 3.0 it works the way Sonarr and Radarr do: **on your own network and on the computer Compressarr runs on nothing changes, you are never asked for a
+> password**; a request from outside is refused until you set a username and password in **Settings > Security** (the refusal says so). If you reach Compressarr from outside your home - a forwarded port,
+> a reverse proxy, Home Assistant on another site - set them now. Over Tailscale (or any `100.64.0.0/10` address) tick the box in Settings > Security to count it as local. A request that carries proxy
+> headers (`X-Forwarded-For` and similar) always counts as outside, so behind a reverse proxy choose **Authentication Required: Enabled**. Home Assistant and scripts use the API keys, which are
+> separate from the login.
+
+> [!NOTE]
+> **Upgrading from 2.1:** install over it. Your settings, lanes and queue carry over, and **the first start of 3.0 moves your run history into a database by itself** (every run is imported and checked
+> against the old file, which is kept as `Compressarr_History.csv.imported`). 3.0 cannot be undone by installing 2.1 again: 2.1 cannot read the new databases, so runs recorded by 3.0 would not be
+> in the old file. Take a backup (Settings > Backup & Restore) before upgrading if you want a way back.
+
+### Encoding
+- **ffmpeg as a second encoder (experimental), per lane.** A lane's **Encoder** is HandBrake (the default) or ffmpeg, with its own built-in profiles (including AV1, HEVC and NVIDIA hardware encoders). After an ffmpeg encode the finished file's length is verified (ERROR 111), Dolby Vision / HDR10+ files are never silently flattened (ERROR 112), and a lane whose encoder is not installed is skipped with a clear report entry (ERROR 113). Compressarr can download ffmpeg for you (Stable or Latest channel) and checks what the machine can do, including AV1 on an NVIDIA RTX 40-series GPU.
+- **An Encoder page and a Profiles page.** The HandBrake settings moved to **Encoder** (HandBrakeCLI and ffmpeg paths, Check / Install, extra options, Browse buttons). **Profiles** lists every profile for both encoders, with built-in profiles locked and your own marked "user", and a **profile editor** (container, encoder, quality, speed, tune, frame rate, deinterlace, crop, audio rules, subtitles and chapters, with the exact HandBrake command shown beside it; anything the editor does not show is kept exactly as stored). Duplicate, rename and delete follow clear rules, and profiles travel in backups and exports. Compressarr now always encodes with its own profiles; the first start copies the ones your lanes and queue used from HandBrake's `presets.json`.
+- **A preset catalog.** **Profiles > Import > From Catalog** installs additional profiles published at github.com/Compressarr/Compressarr-Presets without waiting for a new Compressarr release.
+- **Passthrough (no re-encode).** The first choice in every profile dropdown (a lane's, or a single queued file's): the file is copied instead of encoded, and everything else still happens - filing into your TV / Movie folders, FileBot renaming, source deleted, recycled or kept, companion files, Sonarr / Radarr told, title tag cleared. It needs no encoder at all, shows a teal badge, and is counted in History without its bytes so the savings figures stay true.
+- **HDR is protected.** A HandBrake profile that would lose a file's HDR (H.264, or an encoder that cannot carry it) no longer re-encodes it, an ffmpeg profile can be told to refuse, hand the file to a HandBrake profile, or encode it anyway without Dolby Vision / HDR10+, and the check looks at which kind of HDR a profile keeps.
+
+### Lanes, queue and scheduling
+- **Scheduler (off by default).** An optional day/night schedule: choose when daytime is (every day the same, weekdays and weekends, or each day separately), what priority the encode runs at in the day and at night, whether to encode only off-hours, and what happens when the day starts. **Run anyway** overrides it for now.
+- **Lane assignment.** Every queued file has a **Lands in** choice: finish the file normally but file it in another lane's library. The Monitor says where the file will land and the report flags redirected files.
+- **Lanes:** a **Duplicate** button on every lane card; a new lane starts with a working profile (Compressarr SD-HD); two enabled lanes cannot watch the same Input folder; the library folders are checked like Input and are never created for you (a renamed or missing library is reported, not quietly recreated); a file that FileBot renames keeps its place in the queue.
+- **The queue is a database.** What Compressarr remembers between passes (order, skips, per-file profiles, held failures, kept sources, moves waiting to be retried) is stored in `compressarr.state.db` with one transaction per change, so a crash or two simultaneous edits cannot damage it, and a damaged file no longer stops the Monitor. A failed or HDR-refused file stays held in the queue instead of being retried on every pass.
+- **Monitor:** **Run Now** works with monitoring on or off; **View Log** opens a copyable snapshot of the live log; the status line says where the file will land; every queued file shows a **TV**, **film strip** or **camera** icon (a camera for a video that is neither an episode nor a movie with a year; such a file is handled as a movie and recorded as "Video" in reports); the Home Assistant file count can no longer read "65 of 0".
+
+### History and reports
+- **The run history is a database and reports are built when you open them.** Every run and every file in it is kept in `compressarr.history.db`, with daily totals updated in the same step, so History loads fast however long it has run, and a backup carries every report. A report's link never goes dead, and **Export CSV** gives the history back in the old layout. A copy of each report as a file is optional.
+- **A redesigned History page.** The Overview has a period selector (All time, Last year, Last 30 days, Last 7 days, Today), stat cards you can choose and rearrange (Total Runs, Files Compressed with a movie / TV split, Best Month, Time Spent Encoding, Clean Runs, Space Saved, Average Speed, Busiest Lane, HandBrake vs ffmpeg, Passed Through, Most Used Profile and more), charts, and **History at a glance** (a space-saved ring, space saved per week, the last 48 runs). The Reports card has period buttons, pages, and a table of runs with errors or warnings you have not seen yet.
+- **More is recorded:** each run's movie and TV counts, each file's lane, tool, profile and average speed, numbered warnings (WARN 201-205) next to the numbered errors, and a machine name for notifications from more than one computer. Failed encodes no longer count toward the totals.
+- **Settings > Logs and Reports** are separate cards, each saying what it does; Purge Logs & Reports no longer deletes the history.
+
+### Security and automation
+- **A web sign-in (Settings > Security).** Forms (a sign-in page) or Basic, with **Authentication Required** set to Enabled, Disabled for Local Addresses (the default) or Disabled for Localhost, an optional **Allowed Hosts** list, a lock-out after repeated wrong passwords, and a way back from a forgotten password (a tray menu entry, or `COMPRESSARR_RESET_LOGIN=1`).
+- **Keys, tokens and passwords stay out of the browser and out of the settings file.** Saved keys show as dots and are never sent back; they live in the state database; **Export config** leaves them out unless you tick **Include API keys and passwords**; backups carry everything so a restore brings every integration back.
+- **The Automation API (`/api/v1`).** Two keys on Settings > Security (an **API Key** that can act and a **Read-only API Key**), with calls for status, the queue, lanes, the schedule, runs, statistics and reports, and control calls to run a pass, start or stop monitoring, pause, resume, change the schedule and **hold the queue** (optionally freezing the current file) - made for Home Assistant. Field names are fixed by tests, so an update cannot rename one under your automation. The wiki has an API and Automation reference and a rewritten Home Assistant page.
+- **The settings file stays still:** values the app itself records (last backup, digest dates, how far you viewed History) moved to the state database, so Compressarr no longer rewrites your settings file as it works.
+
+### Integrations, notifications and posters
+- **Posters on the Monitor queue** (optional, off by default) from TMDb or OMDb with your own free key, one source tried first and the other as a backup if you give both keys. Only the title and year are ever sent.
+- **Plex editions** (`{edition-Name}`): movies share one `Title (Year)` folder with the tag kept in the file name, TV editions get their own show folder as Plex expects, and tags are never searched for an episode number or sent to a poster source.
+- **Notifications:** `{error}`, `{warning}`, `{movie_count}`, `{tv_count}` and `{avg_fps}` tokens for Custom messages, `{report_path}` is now a web address that opens from a phone, and a channel card shows its own settings first. A note (and a one-click fix) for Radarr's "Delete empty folders" setting.
+- **Announcements:** a bell in the top bar for project news, from a public repository.
+
+### Settings, backups and installer
+- **Backups can be downloaded**; backups and exports include your own profiles and the databases; importing or restoring a wrong or damaged file is refused in plain words and changes nothing. `COMPRESSARR_DATA_DIR` points Compressarr at another data folder.
+- **The top bar:** icon-over-label buttons, readable and red-for-error messages, an **Advanced** button that hides the destructive Maintenance buttons, and on/off switches that look like the lane's Enabled toggle.
+- **A start-up window** appears at once while Compressarr gets ready, and **GitHub being unreachable** gives plain messages instead of system text.
+- **The installer:** the desktop shortcut is ticked by default and an upgrade keeps your choice; Windows' "run at login" entry follows restores and is removed on uninstall; uninstalling or upgrading while Compressarr runs closes it first; the license ships with the program; and **every program file and the uninstaller are signed**, so Windows 11 Smart App Control no longer blocks Compressarr itself (the HandBrakeCLI and ffmpeg it downloads are third-party and unsigned; a one-time notice about them may appear the first time Compressarr starts after an installation).
+
+### Fixed
+- A library folder that no longer exists is not recreated, and a lane's destination is checked like Input.
+- "Run at login" follows an imported or restored configuration; a Lanes field no longer stays red once it holds a valid value; the Extra CLI options example no longer suggests an option HandBrake rejects.
+- An ffmpeg Check / Install now says so when the file is not ffmpeg, and gives up after 8 seconds instead of 30; custom HandBrake presets a lane uses are never missed, even after a restore or import.
+- A queue change could be wiped by a retry or the start of a pass; a deleted lane's old entries are cleaned up quietly.
+- E-AC3 is reported honestly as 5.1; HDR10+ files are described as HDR10+; ffmpeg lanes give clearer messages for damaged files.
+
+### Compatibility
+- 3.0 reads a 2.1 history file (found in the Logs folder) and keeps it as `.imported`; a 2.1 install cannot read 3.0's databases (see the note at the top).
+- The 2.x line is retired with 2.1.10. The pre-releases 2.2.0-beta.1 to 2.2.0-rc.2 were never released as a final 2.2, and everything in them is in 3.0.
+
 ## [3.0.0-rc.3] - 2026-10-29
 
 > The first published 3.0 build. 3.0.0-rc.1 and rc.2 were local test builds that were never released; everything in them is in this entry.
