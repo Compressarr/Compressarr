@@ -103,6 +103,26 @@ public class NotificationMessageRendererTests
     };
 
     [Fact]
+    public void Render_AVideo_IsCountedWithTheMovies_SoMoviesAndTvStillAddUpToTheFiles()
+    {
+        ConversionResult File_(string type) => new()
+        {
+            LaneId = "lane1", FileName = "f.mkv", FullName = @"C:\f.mkv", ContentType = type, BeginSizeGb = 2, EndSizeGb = 1, Success = true,
+            StartTime = new DateTime(2026, 10, 24, 8, 0, 0), EndTime = new DateTime(2026, 10, 24, 8, 1, 0)
+        };
+        var report = new ReportModel
+        {
+            GeneratedAt = new DateTime(2026, 10, 24),
+            RunTime = TimeSpan.FromMinutes(10),
+            Lanes = new[] { new LaneReportSection { LaneDisplayName = "Mixed", Results = new[] { File_("Movie"), File_("Video"), File_("TV Show") } } }
+        };
+
+        var rendered = NotificationMessageRenderer.Render("{movie_count}+{tv_count}={files}", NotificationOutcome.Success, report, "");
+
+        Assert.Equal("2+1=3", rendered);
+    }
+
+    [Fact]
     public void Render_AvgFps_IsTheRunsRoughSpeed_WithAtMostOneDecimal()
     {
         var rendered = NotificationMessageRenderer.Render("Speed: {avg_fps} fps", NotificationOutcome.Success, ReportWithSpeeds(20, 27.46), "");

@@ -382,7 +382,8 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         var file = new FileInfo(resumeEntry.FullName);
 
         var isTv = ContentClassifier.IsTvFile(file.Name);
-        var contentType = isTv ? "TV Show" : "Movie";
+        // What the report, History and the run log call the file; a "Video" (no season and episode and no (year) in the name) is still handled and counted as a movie.
+        var contentType = ContentClassifier.KindOf(file.Name) switch { "tv" => "TV Show", "video" => "Video", _ => "Movie" };
         // A per-file preset override (set from the Monitor page's queue) wins over the lane's own
         // TvPreset/MoviePreset for this one entry only - looked up before presetName is used
         // anywhere (logging, the FileStarted progress event, the "no preset" check) so all of it
@@ -399,7 +400,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
 
         if (string.IsNullOrWhiteSpace(presetName))
         {
-            _logger.Log($"  No {contentType} preset configured for this lane - skipping.", LogSeverity.Error);
+            _logger.Log($"  No {(isTv ? "TV Show" : "Movie")} preset configured for this lane - skipping.", LogSeverity.Error);
             resumeEntry.Status = ResumeStatus.Error;
             SaveEntryResult(resumeEntry, resumeFilePath);
 

@@ -49,7 +49,7 @@ public static partial class HtmlReportParser
             var cells = Cells().Matches(block.Groups[3].Value).Select(m => m.Groups[1].Value).ToList();
             if (cells.Count < 8) continue;                                   // the History table has 6 columns; a header row has none
             var type = Text(cells[1]);
-            if (type != "Movie" && type != "TV Show") continue;
+            if (type is not ("Movie" or "TV Show" or "Video")) continue;
 
             var presetCell = cells[2];
             var passthrough = presetCell.Contains("class=\"pt-tag\"", StringComparison.Ordinal);

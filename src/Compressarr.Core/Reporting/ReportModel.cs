@@ -55,7 +55,7 @@ public sealed class ReportModel
     public int TotalFiles => Lanes.Sum(l => l.Results.Count);
 
     /// <summary>Every file in the run by kind, counted the same way as <see cref="TotalFiles"/>, so the two add up to it.</summary>
-    public int MovieCount => Lanes.Sum(l => l.Results.Count(r => r.ContentType == "Movie"));
+    public int MovieCount => Lanes.Sum(l => l.Results.Count(r => r.ContentType is "Movie" or "Video"));   // a Video is counted with the movies
     public int TvCount => Lanes.Sum(l => l.Results.Count(r => r.ContentType == "TV Show"));
     public int ErrorCount => Lanes.Sum(l => l.Results.Count(r => !r.Success));
 

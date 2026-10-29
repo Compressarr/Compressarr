@@ -230,6 +230,22 @@ public class EncoderEngineTests : IDisposable
         Assert.Equal((1, 3), rig.Progress.Positions.Last());   // the one starting plus the two still waiting
     }
 
+    [Theory]
+    [InlineData("Some Movie (2020).mkv", "Movie")]
+    [InlineData("Show - S01E02 - Title.mkv", "TV Show")]
+    [InlineData("Beach Day.mkv", "Video")]
+    public async Task TheRecordedContentType_FollowsTheKindTheMonitorShows(string fileName, string expected)
+    {
+        var rig = BuildRig(EncoderEngine.HandBrake, "Compressarr SD-HD");
+        File.Move(rig.Source, Path.Combine(Path.GetDirectoryName(rig.Source)!, fileName));
+        rig.Lane.TvPreset = "Compressarr SD-HD";
+
+        var result = await RunAsync(rig);
+
+        Assert.Equal(expected, result.ContentType);        // a Video is still handled as a movie (the movie preset ran), only its label differs
+        Assert.DoesNotContain(rig.Logger.Logs, l => l.Message.Contains("preset configured"));
+    }
+
     // ---- which encoder runs ---------------------------------------------------------------------
 
     [Fact]

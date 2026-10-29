@@ -478,7 +478,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 RunNumber: runNumber, ReportFileName: keepCopy ? reportFileName : "",
                 ErrorCount: errorCount, WarningCount: warningCount,
                 RedirectCount: allResults.Count(r => r.RedirectedToLaneId is not null),
-                MovieCount: counted.Count(r => r.ContentType == "Movie"),
+                MovieCount: counted.Count(r => r.ContentType is "Movie" or "Video"),     // a Video is counted with the movies, so movies + TV still add up to the files
                 TvCount: counted.Count(r => r.ContentType == "TV Show"),
                 AvgFps: breakdown.AvgFps,
                 HandBrakeCount: breakdown.HandBrake, FfmpegCount: breakdown.FFmpeg, PassthroughCount: breakdown.Passthrough,

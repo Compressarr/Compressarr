@@ -214,7 +214,7 @@ public sealed partial class SqliteRunHistoryStore : IRunHistoryStore, IRunArchiv
 
         var result = row;
         if (row.MovieCount is null || row.TvCount is null)
-            result = result with { MovieCount = use.Count(f => f.ContentType == "Movie"), TvCount = use.Count(f => f.ContentType == "TV Show") };
+            result = result with { MovieCount = use.Count(f => f.ContentType is "Movie" or "Video"), TvCount = use.Count(f => f.ContentType == "TV Show") };
 
         if (row.HandBrakeCount is null)
         {
