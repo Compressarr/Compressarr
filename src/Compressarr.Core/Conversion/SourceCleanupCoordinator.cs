@@ -72,8 +72,8 @@ internal sealed class SourceCleanupCoordinator
     /// is null, in which case the caller logs it itself.
     /// <paramref name="videoPath"/> is the converted video's original path (the file itself may be gone by now): a wanted companion of it that is still in the folder was
     /// not moved (the destination already had one and the collision setting is Skip, or the video was not filed anywhere) and is not an "unmatched leftover" - the folder is
-    /// then kept as it is, which is reported as done. With the collision setting on Skip the same holds for a wanted companion of any video, since the one left behind may be a
-    /// video that finished earlier. Not with Maintain, which never removes anything and copies companions, so they always remain.</summary>
+    /// then kept as it is, which is reported as done. With the collision setting on Skip the same holds for a wanted companion of any video at any depth of the folder, since the one left behind may be a
+    /// video that finished earlier (in a folder below that has no video any more). Not with Maintain, which never removes anything and copies companions, so they always remain.</summary>
     public string? TryCleanUpSourceFolder(CompressarrConfig config, string directory, string inputPath, string? context, string? videoPath = null)
     {
         try
@@ -81,8 +81,9 @@ internal sealed class SourceCleanupCoordinator
             if (config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain)
             {
                 // The collision setting is Skip: a companion whose name the destination already had stays where it is, and it may belong to ANY video that was in this
-                // folder (one that finished earlier, or a different one finishing now) - so no wanted companion in a Skip folder is swept. Otherwise only this video's own.
-                var skipKeepsAll = config.Processing.OnDestinationCollision == DestinationCollisionMode.Skip && CompanionFileService.AnyWantedCompanionIn(directory, config.Processing.CompanionExtensions);
+                // folder or below it (one that finished earlier, or a different one finishing now) - so no wanted companion at any depth of a Skip folder is swept, and the
+                // folder is not removed around it. Otherwise only this video's own.
+                var skipKeepsAll = config.Processing.OnDestinationCollision == DestinationCollisionMode.Skip && CompanionFileService.AnyWantedCompanionAtOrBelow(directory, config.Processing.CompanionExtensions);
                 if (skipKeepsAll || (videoPath is not null && CompanionFileService.WantedCompanionRemains(directory, videoPath, config.Processing.CompanionExtensions)))
                 {
                     _logger.Log($"  Source folder kept: a companion file in it was not moved (for example the destination already had one and the collision setting is Skip), so it was left where it is.");

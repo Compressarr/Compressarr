@@ -199,9 +199,11 @@ public sealed class CompanionFileService : ICompanionFileService
             .Any(f => Path.GetFileName(f).StartsWith(stemPrefix, StringComparison.OrdinalIgnoreCase) && wanted.Contains(Path.GetExtension(f)));
     }
 
-    /// <summary>True when <paramref name="directory"/> holds any file with an extension on the wanted list, whatever video it belongs to. With the collision setting on Skip such a file
-    /// may be one that was deliberately left behind for a video that is already gone, and a folder can hold the leftovers of several videos: nothing in it says whose, so none is swept.</summary>
-    internal static bool AnyWantedCompanionIn(string directory, IReadOnlyList<string> companionExtensions)
+    /// <summary>True when <paramref name="directory"/>, or a folder at any depth below it, holds a file with an extension on the wanted list, whatever video it belongs to. With the
+    /// collision setting on Skip such a file may be one that was deliberately left behind for a video that is already gone (in a folder that has no video any more, below the one being
+    /// cleaned up now), and a folder can hold the leftovers of several videos: nothing says whose, so none is swept, and no folder above one is removed. A link or a folder that cannot
+    /// be listed cannot be vouched for either, so it counts as holding one.</summary>
+    internal static bool AnyWantedCompanionAtOrBelow(string directory, IReadOnlyList<string> companionExtensions)
     {
         if (!Directory.Exists(directory)) return false;
 
@@ -209,7 +211,33 @@ public sealed class CompanionFileService : ICompanionFileService
             .Where(t => !string.IsNullOrWhiteSpace(t))
             .Select(t => "." + t.Trim().TrimStart('.'))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return Directory.EnumerateFiles(directory).Any(f => wanted.Contains(Path.GetExtension(f)));
+        return AnyWantedCompanion(directory, wanted);
+    }
+
+    private static bool AnyWantedCompanion(string directory, HashSet<string> wanted)
+    {
+        try
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory, "*", new EnumerationOptions { AttributesToSkip = 0, IgnoreInaccessible = false }))
+            {
+                var attributes = File.GetAttributes(entry);
+                if (attributes.HasFlag(FileAttributes.ReparsePoint)) return true;
+                if (attributes.HasFlag(FileAttributes.Directory))
+                {
+                    if (AnyWantedCompanion(entry, wanted)) return true;
+                }
+                else if (wanted.Contains(Path.GetExtension(entry)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (Exception)
+        {
+            return true;
+        }
     }
 
     public void CleanUpEmptySourceFolder(

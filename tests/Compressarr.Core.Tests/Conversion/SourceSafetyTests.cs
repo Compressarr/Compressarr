@@ -99,12 +99,12 @@ public class SourceSafetyTests : IDisposable
     // ---- source still the file that was encoded ----------------------------------------------------------------------------------------------
 
     [Fact]
-    public void SourceUnchangedSinceEncode_MatchesOnSizeAndTime_AndAnOldEntryWithNoStampIsGivenTheBenefitOfTheDoubt()
+    public void SourceUnchangedSinceEncode_MatchesOnSizeAndTime_AndAnEntryWithNoStampIsNeverTakenAsUnchanged()
     {
         var path = Touch(Folder("Input"), "a.mkv", "twelve bytes");
         var entry = new ResumeEntry { LaneId = "lane1", FullName = path };
 
-        Assert.True(ResumeKeeping.SourceUnchangedSinceEncode(entry));        // no stamp: nothing to compare against, as before this existed
+        Assert.False(ResumeKeeping.SourceUnchangedSinceEncode(entry));       // no stamp: nothing to compare against is not the same as nothing having changed
 
         ResumeKeeping.NoteEncodeStart(entry);
         Assert.Equal(12, entry.EncodedFromSize);
@@ -170,7 +170,7 @@ public class SourceSafetyTests : IDisposable
     }
 
     [Fact]
-    public void SourceUnchangedSinceEncode_WithNoStamp_AsksTheEncodedFile_ASourceNewerThanItsEncodeCannotHaveMadeIt()
+    public void CheckSource_WithNoStamp_OnlyASourceNewerThanItsEncodeIsKnownToDiffer_AnOlderOneIsUnknown_NeverUnchanged()
     {
         var folder = Folder("Input");
         var source = Touch(folder, "a.mkv");
@@ -180,12 +180,54 @@ public class SourceSafetyTests : IDisposable
         File.SetLastWriteTimeUtc(source, DateTime.UtcNow.AddDays(-5));
         File.SetCreationTimeUtc(source, DateTime.UtcNow.AddDays(-5));
         File.SetLastWriteTimeUtc(staged, DateTime.UtcNow.AddDays(-1));
-        Assert.True(ResumeKeeping.SourceUnchangedSinceEncode(entry, staged));        // older than the encode: plausibly its input
+        Assert.Equal(ResumeKeeping.SourceCheck.Unknown, ResumeKeeping.CheckSource(entry, staged));        // older than the encode proves nothing: a different file can carry an old date
+        Assert.False(ResumeKeeping.SourceUnchangedSinceEncode(entry, staged));
 
         File.SetLastWriteTimeUtc(source, DateTime.UtcNow);
-        Assert.False(ResumeKeeping.SourceUnchangedSinceEncode(entry, staged));       // written after it finished: not
-        Assert.True(ResumeKeeping.SourceUnchangedSinceEncode(entry));                // nothing to compare with: as before
-        Assert.True(ResumeKeeping.SourceUnchangedSinceEncode(entry, Path.Combine(folder, "gone.mkv")));
+        Assert.Equal(ResumeKeeping.SourceCheck.Changed, ResumeKeeping.CheckSource(entry, staged));        // written after it finished: another file
+        Assert.Equal(ResumeKeeping.SourceCheck.Unknown, ResumeKeeping.CheckSource(entry));                // nothing to compare with: unknown, not "fine"
+        Assert.Equal(ResumeKeeping.SourceCheck.Unknown, ResumeKeeping.CheckSource(entry, Path.Combine(folder, "gone.mkv")));
+
+        File.Delete(source);
+        Assert.Equal(ResumeKeeping.SourceCheck.Unchanged, ResumeKeeping.CheckSource(entry, staged));      // nothing there to delete or overwrite
+    }
+
+    [Fact]
+    public void CheckSource_AV7StampWithNoFingerprint_IsUnknownWhenSizeAndTimeMatch_AndChangedWhenTheyDoNot()
+    {
+        var path = Touch(Folder("Input"), "a.mkv", new string('a', 4096));
+        var info = new FileInfo(path);
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = path, EncodedFromSize = info.Length, EncodedFromModifiedUtc = info.LastWriteTimeUtc };    // what an earlier 3.0 build wrote
+
+        Assert.Equal(ResumeKeeping.SourceCheck.Unknown, ResumeKeeping.CheckSource(entry));      // same size and time say nothing about the bytes
+        File.WriteAllText(path, new string('z', 4096));
+        File.SetLastWriteTimeUtc(path, entry.EncodedFromModifiedUtc!.Value);
+        Assert.Equal(ResumeKeeping.SourceCheck.Unknown, ResumeKeeping.CheckSource(entry));      // different bytes, same length, time put back: still cannot be told, so never Unchanged
+        Assert.False(ResumeKeeping.SourceUnchangedSinceEncode(entry));
+
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(1));
+        Assert.Equal(ResumeKeeping.SourceCheck.Changed, ResumeKeeping.CheckSource(entry));
+    }
+
+    [Fact]
+    public void ARealCleanupAfterVideoB_UnderSkip_NeverRemovesTheCompanionAVideoFreeChildHoldsForA()
+    {
+        // Input/batch/A-source/A.en.srt (left by a Skip when A finished) and Input/batch/B.mkv, which finishes later: the real coordinator, companion service and a recursive delete.
+        var input = Folder("Input");
+        var batch = Folder("Input", "batch");
+        var aSource = Folder("Input", "batch", "A-source");
+        var subtitle = Touch(aSource, "A.en.srt", "unique subtitle");
+        var config = new CompressarrConfig();
+        config.Processing.DeleteAfterConvert = DeleteAfterConvertMode.Delete;
+        config.Processing.UnmatchedCompanionAction = DeleteAfterConvertMode.Delete;
+        config.Processing.OnDestinationCollision = DestinationCollisionMode.Skip;
+        var coordinator = new SourceCleanupCoordinator(new CoordinatorTestArr(), new CompanionFileService(new RemovingTrashService()), new CoordinatorTestLogger());
+
+        var error = coordinator.TryCleanUpSourceFolder(config, batch, input, "", Path.Combine(batch, "B.mkv"));
+
+        Assert.Null(error);
+        Assert.Equal("unique subtitle", File.ReadAllText(subtitle));
+        Assert.True(Directory.Exists(batch));
     }
 
     // ---- an output that lands on its own source ----------------------------------------------------------------------------------------------

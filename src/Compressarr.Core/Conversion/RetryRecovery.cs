@@ -201,9 +201,19 @@ internal sealed class RetryRecovery
                 }
 
                 // The move may have been waiting days for its destination: what is at the original path now is only "the source" if it is still the file that was encoded.
-                if (!ResumeKeeping.SourceUnchangedSinceEncode(entry, currentPath))
+                var check = ResumeKeeping.CheckSource(entry, currentPath);
+                if (check == ResumeKeeping.SourceCheck.Changed)
                 {
                     _logger.Log($"  The source '{Path.GetFileName(entry.FullName)}' is not the file that was converted (it changed since), so it was kept: it is queued again as new work.");
+                    return;
+                }
+
+                // A move queued by an earlier build has no note of what the source was when its encode started. A source older than the encode may be the original, or a different
+                // file with an old date: that cannot be told, so it is left for the user (and not converted a second time).
+                if (check == ResumeKeeping.SourceCheck.Unknown)
+                {
+                    ResumeKeeping.NoteSourceKept(entry);
+                    _logger.Log($"  The source '{Path.GetFileName(entry.FullName)}' could not be confirmed to be the file that was converted (this move was queued by an earlier version), so it was kept: delete it yourself if it is.");
                     return;
                 }
 

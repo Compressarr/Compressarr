@@ -4222,14 +4222,16 @@ public class ConversionOrchestratorTests : IDisposable
     }
 
     [Fact]
-    public async Task AnOldMoveFailedEntryWithNoStamp_StillDeletesASourceOlderThanItsEncode()
+    public async Task AnOldMoveFailedEntryWithNoStamp_KeepsASourceOlderThanItsEncode_BecauseItCannotBeConfirmed_AndDoesNotConvertItAgain()
     {
+        // Nothing was noted when this encode started, and a different file can carry an old date (a copy that kept its times): the original is not deleted on a guess.
         var movieBase = Path.Combine(_tempDir, "Movies");
         Directory.CreateDirectory(movieBase);
         var (lane, config, input, output) = SafetyLane(DeleteAfterConvertMode.Delete, moveFiles: true, outSameAsIn: false, movieBase: movieBase);
         var source = Path.Combine(input, "Movie (2020).mkv");
-        File.WriteAllText(source, "the original");
+        File.WriteAllText(source, "the original, or a different file with the same old dates");
         File.SetLastWriteTimeUtc(source, DateTime.UtcNow.AddDays(-30));
+        File.SetCreationTimeUtc(source, DateTime.UtcNow.AddDays(-30));
         var staged = Path.Combine(output, "Movie (2020).compressarr-abcd1234.mkv");
         File.WriteAllText(staged, "its encode");
         var resumeState = new List<ResumeEntry>
@@ -4240,7 +4242,41 @@ public class ConversionOrchestratorTests : IDisposable
 
         await orchestrator.PrepareLaneAsync(lane, config, resumeState, Path.Combine(_tempDir, "resume.json"));
 
-        Assert.False(File.Exists(source));                                    // the normal case is unchanged: filed, then the original removed
+        Assert.Equal("its encode", File.ReadAllText(Path.Combine(movieBase, "Movie (2020)", "Movie (2020).mkv")));     // filed
+        Assert.True(File.Exists(source));                                                                              // the original is left for the user
+        var entry = Assert.Single(resumeState);
+        Assert.Equal(ResumeStatus.Completed, entry.Status);
+        Assert.NotNull(entry.KeptSourceSize);                                                                          // noted as converted: the next scan does not encode it again
+    }
+
+    [Fact]
+    public async Task AMoveFailedEntryFromAV7Build_WithSizeAndTimeButNoFingerprint_KeepsAReplacementThatKeptItsMetadata()
+    {
+        var movieBase = Path.Combine(_tempDir, "Movies");
+        Directory.CreateDirectory(movieBase);
+        var (lane, config, input, output) = SafetyLane(DeleteAfterConvertMode.Delete, moveFiles: true, outSameAsIn: false, movieBase: movieBase);
+        var source = Path.Combine(input, "Movie (2020).mkv");
+        File.WriteAllText(source, "the original....");
+        var info = new FileInfo(source);
+        var stampedSize = info.Length;
+        var stampedModified = info.LastWriteTimeUtc;
+        File.WriteAllText(source, "A DIFFERENT FILE");                   // the same length
+        File.SetLastWriteTimeUtc(source, stampedModified);              // and the same modified time
+        Assert.Equal(stampedSize, new FileInfo(source).Length);
+        var staged = Path.Combine(output, "Movie (2020).compressarr-abcd1234.mkv");
+        File.WriteAllText(staged, "its encode");
+        File.SetLastWriteTimeUtc(staged, DateTime.UtcNow.AddHours(1));  // a source older than its encode: the old rule would have deleted it
+        var resumeState = new List<ResumeEntry>
+        {
+            new() { LaneId = "lane1", FullName = source, Status = ResumeStatus.MoveFailed, EncodedFilePath = staged, EncodedFileDesiredName = "Movie (2020).mkv", Order = 0,
+                    EncodedFromSize = stampedSize, EncodedFromModifiedUtc = stampedModified }
+        };
+        var orchestrator = Orchestrator(config, new FakeProcessRunner(), new DeletingTrashService());
+
+        await orchestrator.PrepareLaneAsync(lane, config, resumeState, Path.Combine(_tempDir, "resume.json"));
+
+        Assert.Equal("A DIFFERENT FILE", File.ReadAllText(source));
+        Assert.Equal("its encode", File.ReadAllText(Path.Combine(movieBase, "Movie (2020)", "Movie (2020).mkv")));
     }
 
     [Fact]

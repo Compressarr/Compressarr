@@ -184,6 +184,75 @@ public class SourceCleanupCoordinatorTests
         }
     }
 
+    [Theory]
+    [InlineData("A-source")]
+    [InlineData("A-source/extras")]
+    [InlineData("a/b/c")]
+    public void TryCleanUp_WithSkip_ACompanionInAVideoFreeFolderBelow_KeepsEverythingAbove(string childPath)
+    {
+        // Input/batch/<child>/A.en.srt was left by a Skip when A finished; B, directly in batch, finishes later and its cleanup must not recurse over it.
+        var folder = Directory.CreateTempSubdirectory("compressarr-coordinator-").FullName;
+        try
+        {
+            var child = Path.Combine(folder, childPath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(child);
+            File.WriteAllText(Path.Combine(child, "A.en.srt"), "left by a Skip for A");
+            _config.Processing.DeleteAfterConvert = DeleteAfterConvertMode.Delete;
+            _config.Processing.OnDestinationCollision = DestinationCollisionMode.Skip;
+
+            var error = Coordinator().TryCleanUpSourceFolder(_config, folder, Path.GetDirectoryName(folder)!, "", Path.Combine(folder, "B.mkv"));
+
+            Assert.Null(error);
+            Assert.Empty(_companions.Cleanups);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryCleanUp_WithSkip_AFolderBelowWithNoCompanionAtAnyDepth_DoesNotStopTheSweep()
+    {
+        var folder = Directory.CreateTempSubdirectory("compressarr-coordinator-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(folder, "old", "deeper"));
+            File.WriteAllText(Path.Combine(folder, "old", "deeper", "readme.txt"), "not a wanted companion");
+            _config.Processing.DeleteAfterConvert = DeleteAfterConvertMode.Delete;
+            _config.Processing.OnDestinationCollision = DestinationCollisionMode.Skip;
+
+            Coordinator().TryCleanUpSourceFolder(_config, folder, Path.GetDirectoryName(folder)!, "", Path.Combine(folder, "B.mkv"));
+
+            Assert.Single(_companions.Cleanups);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryCleanUp_WithoutSkip_ACompanionInAFolderBelowIsStillAnOrphan()
+    {
+        var folder = Directory.CreateTempSubdirectory("compressarr-coordinator-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(folder, "A-source"));
+            File.WriteAllText(Path.Combine(folder, "A-source", "A.en.srt"), "an orphan");
+            _config.Processing.DeleteAfterConvert = DeleteAfterConvertMode.Delete;
+            _config.Processing.OnDestinationCollision = DestinationCollisionMode.Overwrite;
+
+            Coordinator().TryCleanUpSourceFolder(_config, folder, Path.GetDirectoryName(folder)!, "", Path.Combine(folder, "B.mkv"));
+
+            Assert.Single(_companions.Cleanups);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     [Fact]
     public void TryCleanUp_WithoutSkip_ALeftoverOfAnotherStemIsAnOrphanAndTheSweepRuns()
     {

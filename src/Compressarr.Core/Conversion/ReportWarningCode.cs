@@ -60,7 +60,7 @@ public static class ReportWarningCodeExtensions
         ReportWarningCode.CleanupDeferredFailed =>
             "The video was converted and filed, but the empty source folder could not be removed (a locked file, permissions, antivirus). It is retried on the next pass.",
         ReportWarningCode.SourceChangedKept =>
-            "The video was converted and filed, but the file at the source's path is no longer the one that was converted (Sonarr or Radarr replaced it, or a different file was copied in while it converted). It was kept instead of deleted, and is queued as new work on a later scan.",
+            "The video was converted and filed, but the file at the source's path is no longer the one that was converted (Sonarr or Radarr replaced it, or a different file was copied in while it converted), or could not be confirmed to be it. It was kept instead of deleted; a different file is queued as new work on a later scan.",
         ReportWarningCode.SourceOutsideInputKept =>
             "The video was converted and filed, but its original is not inside this lane's Input folder (the Input setting was changed while the work waited), and Compressarr only deletes or sweeps inside Input. The original and its companion files were left where they are.",
         _ => "An unspecified warning.",

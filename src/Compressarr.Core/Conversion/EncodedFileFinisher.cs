@@ -247,8 +247,11 @@ internal sealed class EncodedFileFinisher
         // later - see there for why) to eventually find this folder truly empty.
         // The path alone does not prove it is still the file that was encoded: an encode takes hours, and Sonarr/Radarr (an upgrade) or a person can put a different
         // file at the same path meanwhile. That one is new work - kept, and queued again on a later scan - never deleted as "the source".
-        var sourceReplaced = !moveFailed && !sameAsSource && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain
-            && !ResumeKeeping.SourceUnchangedSinceEncode(resumeEntry);
+        var sourceCheck = !moveFailed && !sameAsSource && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain
+            ? ResumeKeeping.CheckSource(resumeEntry)
+            : ResumeKeeping.SourceCheck.Unchanged;
+        var sourceReplaced = sourceCheck == ResumeKeeping.SourceCheck.Changed;
+        var sourceUnknown = sourceCheck == ResumeKeeping.SourceCheck.Unknown;
         var sourceKeptOutsideInput = !moveFailed && !sameAsSource && sourceOutsideInput && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain;
         if (sourceKeptOutsideInput)
         {
@@ -264,7 +267,16 @@ internal sealed class EncodedFileFinisher
             _logger.Log($"  {changed}");
         }
 
-        if (!moveFailed && !sameAsSource && !sourceReplaced && !sourceKeptOutsideInput && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain)
+        if (sourceUnknown)
+        {
+            // Nothing complete was noted when this encode started, so what is at the path cannot be shown to be what was converted: kept, and not converted a second time.
+            var unknown = $"The source '{file.Name}' could not be confirmed to be the file that was converted, so it was kept (delete it yourself if it is).";
+            ResumeKeeping.NoteSourceKept(resumeEntry);
+            AddWarning(ReportWarningCode.SourceChangedKept, unknown);
+            _logger.Log($"  {unknown}");
+        }
+
+        if (!moveFailed && !sameAsSource && !sourceReplaced && !sourceUnknown && !sourceKeptOutsideInput && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain)
         {
             FileOutcomeHelpers.DisposeSource(_trash, file.FullName, config.Processing.DeleteAfterConvert);
         }

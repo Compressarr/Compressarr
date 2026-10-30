@@ -53,7 +53,14 @@ public static class ResumeKeeping
     /// <summary>Notes the source's size and time on a Completed entry when the mode keeps the source. Does nothing otherwise.</summary>
     private static void NoteKeptSource(ResumeEntry entry, DeleteAfterConvertMode mode)
     {
-        if (mode != DeleteAfterConvertMode.Maintain || !File.Exists(entry.FullName)) return;
+        if (mode == DeleteAfterConvertMode.Maintain) NoteSourceKept(entry);
+    }
+
+    /// <summary>Notes the source as converted and left in place whatever the delete setting says, so the same file found again is not work to do. For a source that could not be shown to be
+    /// the file that was converted (<see cref="SourceCheck.Unknown"/>): it is left for the user rather than deleted, and not converted a second time.</summary>
+    public static void NoteSourceKept(ResumeEntry entry)
+    {
+        if (!File.Exists(entry.FullName)) return;
         var info = new FileInfo(entry.FullName);
         entry.KeptSourceSize = info.Length;
         entry.KeptSourceModifiedUtc = info.LastWriteTimeUtc;
@@ -110,26 +117,41 @@ public static class ResumeKeeping
         entry.EncodedFromFingerprint = ContentFingerprint(entry.FullName);
     }
 
-    /// <summary>False when what is at the entry's path cannot be shown to be the file that was encoded: another size, time or creation time, or other content. True when it matches or
-    /// the file is gone. Without a stamp (an entry written before one was recorded) the question is put to the encoded file instead - <paramref name="encodedFilePath"/>, where the result
-    /// is or was staged: a source written or created after that file was finished cannot be what it was made from, so it counts as replaced. With neither there is nothing to compare
-    /// and it counts as unchanged. This is change detection, not proof: a different file made to look the same in all of these ways would not be noticed.</summary>
-    public static bool SourceUnchangedSinceEncode(ResumeEntry entry, string? encodedFilePath = null)
+    /// <summary>What can be said about the file now at an entry's path, compared with the one that was encoded.</summary>
+    public enum SourceCheck
     {
-        if (!File.Exists(entry.FullName)) return true;
+        /// <summary>It matches what was noted when the encode started (or the file is gone).</summary>
+        Unchanged,
+        /// <summary>It is known not to be that file: another size, time or creation time, other content, or (with nothing noted) written or created after the encoded file was finished.</summary>
+        Changed,
+        /// <summary>Nothing complete was noted when the encode started (an entry written by an earlier build, or one whose content could not be read), so it cannot be told.</summary>
+        Unknown
+    }
+
+    /// <summary>Compares what is at the entry's path with what was noted as its encode started (size, last-write time, creation time, content fingerprint). A note missing any of those is
+    /// not accepted as identity: an older entry, or a v7 row with no fingerprint, answers <see cref="SourceCheck.Unknown"/> unless the file is already known to differ. With no note at all,
+    /// <paramref name="encodedFilePath"/> (where the result is or was staged) can still show a difference: a source written or created after that file was finished cannot be what it was
+    /// made from. Being older than the encode proves nothing. This is change detection, not proof: a different file made to look the same in all of these ways would not be noticed.</summary>
+    public static SourceCheck CheckSource(ResumeEntry entry, string? encodedFilePath = null)
+    {
+        if (!File.Exists(entry.FullName)) return SourceCheck.Unchanged;
         var info = new FileInfo(entry.FullName);
 
         if (entry.EncodedFromSize is not { } size || entry.EncodedFromModifiedUtc is not { } modified)
         {
-            if (encodedFilePath is null || !File.Exists(encodedFilePath)) return true;
+            if (encodedFilePath is null || !File.Exists(encodedFilePath)) return SourceCheck.Unknown;
             var finishedAt = File.GetLastWriteTimeUtc(encodedFilePath);
-            return info.LastWriteTimeUtc <= finishedAt + TimeTolerance && info.CreationTimeUtc <= finishedAt + TimeTolerance;
+            return info.LastWriteTimeUtc > finishedAt + TimeTolerance || info.CreationTimeUtc > finishedAt + TimeTolerance ? SourceCheck.Changed : SourceCheck.Unknown;
         }
 
-        if (info.Length != size || (info.LastWriteTimeUtc - modified).Duration() > TimeTolerance) return false;
-        if (entry.EncodedFromCreatedUtc is { } created && (info.CreationTimeUtc - created).Duration() > TimeTolerance) return false;
-        return entry.EncodedFromFingerprint is not { } fingerprint || string.Equals(ContentFingerprint(entry.FullName), fingerprint, StringComparison.Ordinal);
+        if (info.Length != size || (info.LastWriteTimeUtc - modified).Duration() > TimeTolerance) return SourceCheck.Changed;
+        if (entry.EncodedFromCreatedUtc is { } created && (info.CreationTimeUtc - created).Duration() > TimeTolerance) return SourceCheck.Changed;
+        if (entry.EncodedFromFingerprint is not { } fingerprint) return SourceCheck.Unknown;
+        return string.Equals(ContentFingerprint(entry.FullName), fingerprint, StringComparison.Ordinal) ? SourceCheck.Unchanged : SourceCheck.Changed;
     }
+
+    /// <summary>True only when <see cref="CheckSource"/> says it is the file that was encoded (or the file is gone): the one answer that allows deleting or overwriting the source.</summary>
+    public static bool SourceUnchangedSinceEncode(ResumeEntry entry, string? encodedFilePath = null) => CheckSource(entry, encodedFilePath) == SourceCheck.Unchanged;
 
     /// <summary>True when this Completed entry is the very file now found at its path: converted already, left in place, unchanged.</summary>
     public static bool IsConvertedAndUnchanged(ResumeEntry entry, FileInfo found) =>
