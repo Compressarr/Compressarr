@@ -25,6 +25,23 @@ public static class PathContainment
         }
     }
 
+    /// <summary>True when <paramref name="folder"/> is the root itself or below it: the folder a file lying directly in the root has.</summary>
+    public static bool IsInsideOrSame(string? folder, string? root)
+    {
+        if (IsStrictlyInside(folder, root)) return true;
+        if (string.IsNullOrWhiteSpace(folder) || string.IsNullOrWhiteSpace(root)) return false;
+
+        try
+        {
+            return string.Equals(Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>True when <paramref name="directory"/>, or any folder between it and <paramref name="root"/>, is a link (a junction or symlink) - or cannot be inspected. What
     /// lies behind a link is not known to be inside the root, so nothing is removed through one. Expects <paramref name="directory"/> to be inside the root.</summary>
     public static bool CrossesLink(string directory, string root)

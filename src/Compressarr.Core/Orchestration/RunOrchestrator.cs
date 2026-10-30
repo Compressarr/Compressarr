@@ -248,6 +248,17 @@ public sealed class RunOrchestrator : IRunOrchestrator
         _logger.ClearProblem("handbrake-cli-missing");
 
         var resumeFilePath = AppPaths.GetResumeFilePath();
+
+        // The queue's database cannot be opened right now: what is in it (skipped, removed and held files, sources kept after a conversion, the order) is not known, and a pass
+        // would scan the folders into an empty queue and start on files it had been told to leave alone. Nothing is scanned or encoded until it opens again (tried every 30 seconds).
+        if (_resumeStore is IQueueAvailability availability && availability.UnavailableReason(resumeFilePath) is { } unavailable)
+        {
+            _logger.LogProblem("queue-db-unavailable", $"The queue database cannot be opened ({unavailable}), so nothing is scanned or encoded until it can be. It is tried again every 30 seconds.");
+            _progress.RunCompleted(0);
+            return null;
+        }
+        _logger.ClearProblem("queue-db-unavailable");
+
         var resumeState = _resumeStore.Load(resumeFilePath);
 
         // Must run before the tracked-count log line below - an entry under a since-deleted lane

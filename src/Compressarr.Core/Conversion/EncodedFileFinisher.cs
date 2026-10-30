@@ -90,6 +90,8 @@ internal sealed class EncodedFileFinisher
         var tvShowBasePath = request.TvShowBasePath;
         var movieBasePath = request.MovieBasePath;
         var inputPath = request.InputPath;
+        // Deleting a source, or sweeping its folder, is only ever allowed inside the lane's Input. The queue refuses anything else, but the setting can change while an encode runs.
+        var sourceOutsideInput = !PathContainment.IsStrictlyInside(file.FullName, inputPath);
 
         double endSizeGb = 0;
         string? arrStatus = null;
@@ -130,7 +132,7 @@ internal sealed class EncodedFileFinisher
         {
             var desiredDestPath = Path.Combine(folder, desiredFileName);
             var collisionMode = FileOutcomeHelpers.OutputCollisionMode(desiredDestPath, file.FullName, config.Processing.OnDestinationCollision, config.Processing.DeleteAfterConvert,
-                ResumeKeeping.SourceUnchangedSinceEncode(resumeEntry), out var disposeSourceFirst);
+                ResumeKeeping.SourceUnchangedSinceEncode(resumeEntry) && !sourceOutsideInput, out var disposeSourceFirst);
             string resolvedDestPath;
             try
             {
@@ -155,7 +157,8 @@ internal sealed class EncodedFileFinisher
             var libraries = LaneDestination.Resolve(config, _pathExpander, resumeEntry, tvShowBasePath, movieBasePath);
             // A TV file whose own name carries no edition still lands in the edition's show folder when its source show folder had the tag.
             var showEdition = isTv ? PlexTags.EditionOfSourceShowFolder(file.FullName, inputPath, ContentClassifier.GetEpisodeInfo(desiredFileName).ShowName) : null;
-            routedDestPath = _fileRouter.RouteFile(tempFileName, desiredFileName, isTv, libraries.TvShowBasePath, libraries.MovieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision, showEdition);
+            routedDestPath = _fileRouter.RouteFile(tempFileName, desiredFileName, isTv, libraries.TvShowBasePath, libraries.MovieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision, showEdition,
+                new SourceProtection(file.FullName, config.Processing.DeleteAfterConvert, ResumeKeeping.SourceUnchangedSinceEncode(resumeEntry) && !sourceOutsideInput, _trash));
             // Only a file that really reached a library counts as redirected - one resting in Output
             // (MoveFiles off, a Skip) or stuck on a failed move landed nowhere yet.
             if (routedDestPath is not null) redirectedTo = libraries.RedirectedTo;
@@ -246,6 +249,14 @@ internal sealed class EncodedFileFinisher
         // file at the same path meanwhile. That one is new work - kept, and queued again on a later scan - never deleted as "the source".
         var sourceReplaced = !moveFailed && !sameAsSource && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain
             && !ResumeKeeping.SourceUnchangedSinceEncode(resumeEntry);
+        var sourceKeptOutsideInput = !moveFailed && !sameAsSource && sourceOutsideInput && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain;
+        if (sourceKeptOutsideInput)
+        {
+            var outside = $"The source '{file.Name}' is not inside this lane's Input folder, so it was left where it is (deleting is only done inside Input).";
+            AddWarning(ReportWarningCode.SourceOutsideInputKept, outside);
+            _logger.Log($"  {outside}");
+        }
+
         if (sourceReplaced)
         {
             var changed = $"The source '{file.Name}' is not the file that was converted (it changed while it was converting), so it was kept: it is queued again as new work.";
@@ -253,7 +264,7 @@ internal sealed class EncodedFileFinisher
             _logger.Log($"  {changed}");
         }
 
-        if (!moveFailed && !sameAsSource && !sourceReplaced && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain)
+        if (!moveFailed && !sameAsSource && !sourceReplaced && !sourceKeptOutsideInput && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain)
         {
             FileOutcomeHelpers.DisposeSource(_trash, file.FullName, config.Processing.DeleteAfterConvert);
         }
@@ -264,7 +275,7 @@ internal sealed class EncodedFileFinisher
         // alongside yet; they'll go together once a later retry (PrepareLaneAsync's MoveFailed
         // handling) actually succeeds.
         var companionMoveFailed = false;
-        if (routedDestPath is not null)
+        if (routedDestPath is not null && !sourceOutsideInput)
         {
             try
             {

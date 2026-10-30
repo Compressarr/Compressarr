@@ -175,7 +175,7 @@ public class AppStateTests : AppDataTestBase
         {
             connection.Open();
             using var command = connection.CreateCommand();
-            command.CommandText = "DROP TABLE kv; DROP TABLE holds; DROP TABLE api_secrets; DROP TABLE auth; DROP TABLE web_sessions; DROP TABLE secrets; ALTER TABLE queue DROP COLUMN encoded_from_size; ALTER TABLE queue DROP COLUMN encoded_from_modified_utc; PRAGMA user_version = 1;";
+            command.CommandText = "DROP TABLE kv; DROP TABLE holds; DROP TABLE api_secrets; DROP TABLE auth; DROP TABLE web_sessions; DROP TABLE secrets; ALTER TABLE queue DROP COLUMN encoded_from_size; ALTER TABLE queue DROP COLUMN encoded_from_modified_utc; ALTER TABLE queue DROP COLUMN encoded_from_created_utc; ALTER TABLE queue DROP COLUMN encoded_from_fingerprint; PRAGMA user_version = 1;";
             command.ExecuteNonQuery();
         }
 

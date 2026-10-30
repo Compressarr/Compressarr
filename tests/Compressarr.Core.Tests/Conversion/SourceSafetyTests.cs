@@ -124,6 +124,70 @@ public class SourceSafetyTests : IDisposable
         Assert.True(ResumeKeeping.SourceUnchangedSinceEncode(entry));        // nothing there to protect
     }
 
+    [Fact]
+    public void SourceUnchangedSinceEncode_ASameSizeReplacementWithTheTimeRestored_IsStillNoticed_ByCreationTimeAndByContent()
+    {
+        var path = Touch(Folder("Input"), "a.mkv", new string('a', 4096));
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = path };
+        ResumeKeeping.NoteEncodeStart(entry);
+        Assert.NotNull(entry.EncodedFromFingerprint);
+        Assert.NotNull(entry.EncodedFromCreatedUtc);
+        Assert.True(ResumeKeeping.SourceUnchangedSinceEncode(entry));
+
+        // Different bytes, the same length, the modified time put back: size and time alone cannot tell.
+        var modified = File.GetLastWriteTimeUtc(path);
+        File.WriteAllText(path, new string('b', 4096));
+        File.SetLastWriteTimeUtc(path, modified);
+        Assert.False(ResumeKeeping.SourceUnchangedSinceEncode(entry));       // the content fingerprint does
+
+        File.WriteAllText(path, new string('a', 4096));
+        File.SetLastWriteTimeUtc(path, modified);
+        Assert.True(ResumeKeeping.SourceUnchangedSinceEncode(entry));        // the same bytes again: the same file as far as can be told
+
+        File.SetCreationTimeUtc(path, entry.EncodedFromCreatedUtc!.Value.AddHours(2));
+        Assert.False(ResumeKeeping.SourceUnchangedSinceEncode(entry));       // a file created later (delete and copy in) is another file
+    }
+
+    [Fact]
+    public void ContentFingerprint_ReadsOnlyTheEnds_AndSeesAChangeInEither()
+    {
+        var folder = Folder("Input");
+        var bytes = new byte[3 * 1024 * 1024 + 123];
+        new Random(7).NextBytes(bytes);
+        var path = Path.Combine(folder, "big.mkv");
+        File.WriteAllBytes(path, bytes);
+        var original = ResumeKeeping.ContentFingerprint(path);
+
+        Assert.Equal(original, ResumeKeeping.ContentFingerprint(path));                       // stable
+        bytes[10] ^= 0xFF;
+        File.WriteAllBytes(path, bytes);
+        Assert.NotEqual(original, ResumeKeeping.ContentFingerprint(path));                    // the head changed
+        bytes[10] ^= 0xFF;
+        bytes[^10] ^= 0xFF;
+        File.WriteAllBytes(path, bytes);
+        Assert.NotEqual(original, ResumeKeeping.ContentFingerprint(path));                    // the tail changed
+        Assert.Null(ResumeKeeping.ContentFingerprint(Path.Combine(folder, "missing.mkv")));   // unreadable is not a fingerprint
+    }
+
+    [Fact]
+    public void SourceUnchangedSinceEncode_WithNoStamp_AsksTheEncodedFile_ASourceNewerThanItsEncodeCannotHaveMadeIt()
+    {
+        var folder = Folder("Input");
+        var source = Touch(folder, "a.mkv");
+        var staged = Touch(folder, "a.compressarr-1.mkv");
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = source };
+
+        File.SetLastWriteTimeUtc(source, DateTime.UtcNow.AddDays(-5));
+        File.SetCreationTimeUtc(source, DateTime.UtcNow.AddDays(-5));
+        File.SetLastWriteTimeUtc(staged, DateTime.UtcNow.AddDays(-1));
+        Assert.True(ResumeKeeping.SourceUnchangedSinceEncode(entry, staged));        // older than the encode: plausibly its input
+
+        File.SetLastWriteTimeUtc(source, DateTime.UtcNow);
+        Assert.False(ResumeKeeping.SourceUnchangedSinceEncode(entry, staged));       // written after it finished: not
+        Assert.True(ResumeKeeping.SourceUnchangedSinceEncode(entry));                // nothing to compare with: as before
+        Assert.True(ResumeKeeping.SourceUnchangedSinceEncode(entry, Path.Combine(folder, "gone.mkv")));
+    }
+
     // ---- an output that lands on its own source ----------------------------------------------------------------------------------------------
 
     [Theory]

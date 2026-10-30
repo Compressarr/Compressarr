@@ -8,7 +8,7 @@ namespace Compressarr.Core.Conversion;
 /// statements are shared with <see cref="HistoryDatabase"/>.</summary>
 internal static class StateDatabase
 {
-    public const int CurrentVersion = 7;
+    public const int CurrentVersion = 8;
     public const string FileName = "compressarr.state.db";
 
     /// <summary>The database that goes with a resume-file path: the app's own <c>compressarr.resume.json</c> maps to <c>compressarr.state.db</c> in the
@@ -104,7 +104,21 @@ internal static class StateDatabase
             HistoryDatabase.Execute(connection, "PRAGMA user_version = 7;", transaction);
             transaction.Commit();
         }
+
+        if (version < 8)
+        {
+            using var transaction = connection.BeginTransaction();
+            HistoryDatabase.Execute(connection, SchemaV8, transaction);
+            HistoryDatabase.Execute(connection, "PRAGMA user_version = 8;", transaction);
+            transaction.Commit();
+        }
     }
+
+    // v8: the source's creation time and a content fingerprint when its encode started, to tell a replaced source from the one that was converted even when size and time match.
+    private const string SchemaV8 = """
+        ALTER TABLE queue ADD COLUMN encoded_from_created_utc TEXT NULL;
+        ALTER TABLE queue ADD COLUMN encoded_from_fingerprint TEXT NULL;
+        """;
 
     // v7: the source's size and time when its encode started, so a source is only deleted after the encode if it is still that file.
     private const string SchemaV7 = """

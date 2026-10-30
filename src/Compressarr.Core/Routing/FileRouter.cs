@@ -16,6 +16,11 @@ public sealed class DestinationCollisionSkippedException : Exception
     }
 }
 
+/// <summary>The original source of a file being routed, when it could be what the routed file lands on (a lane whose Input folder is inside its own library, so a movie's
+/// final path is the path of its source). The router must not let its move replace that source before the source policy has been applied: with Maintain, or a source that is no
+/// longer the file that was converted, the result takes the next free name; with Delete or Recycle the source is disposed of the way the setting says first, then the move replaces nothing.</summary>
+public sealed record SourceProtection(string SourcePath, Config.DeleteAfterConvertMode Policy, bool SourceUnchanged, ITrashService Trash);
+
 public interface IFileRouter
 {
     /// <summary>Dispatches on the file's auto-detected content type to the matching base path -
@@ -33,22 +38,36 @@ public interface IFileRouter
     ///
     /// showEdition is a Plex edition tag ("{edition-Bluray Remaster}") the file's SOURCE show folder carried when the file name itself has none
     /// (PlexTags.EditionOfSourceShowFolder): a TV episode is then filed in the edition's show folder. Ignored for movies and for a name that
-    /// already carries an edition.</summary>
+    /// already carries an edition.
+    ///
+    /// protection: see <see cref="SourceProtection"/>; null when the caller has no source that could be overwritten.</summary>
     string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles,
-        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null);
+        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null);
 }
 
 /// <summary>Ported from Move-CompressarrMovieFile/Move-CompressarrTVFile/Move-CompressarrRoutedFile.</summary>
 public sealed class FileRouter : IFileRouter
 {
     public string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles,
-        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null)
+        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null)
     {
         if (!moveFiles) return null;
 
         return isTv
-            ? MoveTvFile(sourcePath, desiredFileName, tvShowBasePath, collisionMode, showEdition)
-            : MoveMovieFile(sourcePath, desiredFileName, movieBasePath, collisionMode);
+            ? MoveTvFile(sourcePath, desiredFileName, tvShowBasePath, collisionMode, showEdition, protection)
+            : MoveMovieFile(sourcePath, desiredFileName, movieBasePath, collisionMode, protection);
+    }
+
+    /// <summary>Like <see cref="ResolveCollision"/>, with the source protected: when the destination is the source itself, Overwrite does not simply replace it (see
+    /// <see cref="SourceProtection"/>). The source is disposed of here, before the caller's move, when the policy says to.</summary>
+    private static string ResolveDestination(string destPath, DestinationCollisionMode collisionMode, SourceProtection? protection)
+    {
+        if (protection is null) return ResolveCollision(destPath, collisionMode);
+
+        var mode = FileOutcomeHelpers.OutputCollisionMode(destPath, protection.SourcePath, collisionMode, protection.Policy, protection.SourceUnchanged, out var disposeSourceFirst);
+        var resolved = ResolveCollision(destPath, mode);
+        if (disposeSourceFirst) FileOutcomeHelpers.DisposeSource(protection.Trash, protection.SourcePath, protection.Policy);
+        return resolved;
     }
 
     /// <summary>Resolves destPath against an existing file at that path per collisionMode: unchanged
@@ -96,7 +115,7 @@ public sealed class FileRouter : IFileRouter
         }
     }
 
-    public string? MoveTvFile(string sourcePath, string desiredFileName, string outputBase, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null)
+    public string? MoveTvFile(string sourcePath, string desiredFileName, string outputBase, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null)
     {
         if (string.IsNullOrWhiteSpace(outputBase))
         {
@@ -115,13 +134,13 @@ public sealed class FileRouter : IFileRouter
         var showFolderName = showEdition is not null && !PlexTags.HasTrailingEdition(info.ShowName) ? info.ShowName + " " + showEdition : info.ShowName;
         var destFolder = Path.Combine(outputBase, showFolderName, "Season " + info.Season);
         Directory.CreateDirectory(destFolder);
-        var destPath = ResolveCollision(Path.Combine(destFolder, info.EpisodeFileName), collisionMode);
+        var destPath = ResolveDestination(Path.Combine(destFolder, info.EpisodeFileName), collisionMode, protection);
 
         File.Move(sourcePath, destPath, overwrite: true);
         return destPath;
     }
 
-    public string? MoveMovieFile(string sourcePath, string desiredFileName, string outputBase, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite)
+    public string? MoveMovieFile(string sourcePath, string desiredFileName, string outputBase, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, SourceProtection? protection = null)
     {
         if (string.IsNullOrWhiteSpace(outputBase))
         {
@@ -140,7 +159,7 @@ public sealed class FileRouter : IFileRouter
         RequireBaseFolder(outputBase, "Movie");
         var movieDestFolder = Path.Combine(outputBase, movieFolderName);
         Directory.CreateDirectory(movieDestFolder);
-        var destPath = ResolveCollision(Path.Combine(movieDestFolder, desiredFileName), collisionMode);
+        var destPath = ResolveDestination(Path.Combine(movieDestFolder, desiredFileName), collisionMode, protection);
         File.Move(sourcePath, destPath, overwrite: true);
         return destPath;
     }

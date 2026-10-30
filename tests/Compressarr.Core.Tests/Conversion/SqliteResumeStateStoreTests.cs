@@ -292,9 +292,12 @@ public class SqliteResumeStateStoreTests : IDisposable
     {
         var (store, clock) = StoreThatFellBackOnJsonAfterTheImport(Entry("a.mkv", 0), Entry("b.mkv", 1));
 
-        // While the database is away the person skips a.mkv (the fallback starts empty, so that creates its own entry) and a pass queues a new file.
-        store.Update(ResumePath, state => { state.Add(new ResumeEntry { LaneId = "lane1", FullName = @"C:\In\a.mkv", Status = ResumeStatus.Pending, Skipped = true, Order = 0 }); return true; });
-        store.Update(ResumePath, state => { state.Add(Entry("new.mkv", 0)); return true; });
+        // The outage is noticed, and a queue file turns up beside the database anyway (written by a JSON store that did not know better, such as an older build's fallback):
+        // a.mkv skipped (that creates its own entry) and a new file queued.
+        store.Prepare(ResumePath);
+        var json = new JsonResumeStateStore();
+        json.Update(ResumePath, state => { state.Add(new ResumeEntry { LaneId = "lane1", FullName = @"C:\In\a.mkv", Status = ResumeStatus.Pending, Skipped = true, Order = 0 }); return true; });
+        json.Update(ResumePath, state => { state.Add(Entry("new.mkv", 0)); return true; });
         Assert.NotNull(store.ImportFailure);
         Assert.True(File.Exists(ResumePath));
 
@@ -318,7 +321,8 @@ public class SqliteResumeStateStoreTests : IDisposable
         var kept = new ResumeEntry { LaneId = "lane1", FullName = @"C:\In\kept.mkv", Status = ResumeStatus.Completed, Order = 0, KeptSourceSize = 123, KeptSourceModifiedUtc = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) };
         var (store, clock) = StoreThatFellBackOnJsonAfterTheImport(Entry("moved.mkv", 1), kept);
 
-        store.Update(ResumePath, state =>
+        store.Prepare(ResumePath);
+        new JsonResumeStateStore().Update(ResumePath, state =>
         {
             // A pass ran on the fallback: it encoded moved.mkv and its routing failed (the staged file is the only copy of the result) ...
             state.Add(new ResumeEntry { LaneId = "lane1", FullName = @"C:\In\moved.mkv", Status = ResumeStatus.MoveFailed, EncodedFilePath = @"D:\Out\moved.compressarr-1.mkv", EncodedFileDesiredName = "moved.mkv", EncodedFromSize = 55, Order = 0 });
@@ -338,6 +342,42 @@ public class SqliteResumeStateStoreTests : IDisposable
         var keptAfter = loaded.Single(e => e.FullName == @"C:\In\kept.mkv");
         Assert.Equal(ResumeStatus.Completed, keptAfter.Status);                                  // not turned back into work by the fallback's fresh scan
         Assert.Equal(123, keptAfter.KeptSourceSize);
+    }
+
+    [Fact]
+    public void WhileTheDatabaseThatHoldsTheQueueIsUnavailable_NothingIsAcceptedOrRun_AndTheQueueIsIntactAfterwards()
+    {
+        var skipped = new ResumeEntry { LaneId = "lane1", FullName = @"C:\In\skipped.mkv", Status = ResumeStatus.Pending, Skipped = true, PresetOverride = "mine", DestinationLaneId = "lane2", Order = 9 };
+        var (store, clock) = StoreThatFellBackOnJsonAfterTheImport(skipped);
+
+        var reason = store.UnavailableReason(ResumePath);
+
+        Assert.NotNull(reason);                                                   // the engine is told to pause: the fallback knows nothing of the skip
+        Assert.Empty(store.Load(ResumePath));                                     // a reader sees nothing rather than something wrong
+        Assert.Throws<InvalidOperationException>(() => store.Update(ResumePath, state => { state.Add(Entry("x.mkv")); return true; }));   // a change is refused, not accepted into the fallback
+        Assert.Throws<InvalidOperationException>(() => store.Save(new List<ResumeEntry> { Entry("x.mkv") }, ResumePath));
+        Assert.False(File.Exists(ResumePath));                                    // nothing was written to a JSON fallback
+
+        TheDatabaseComesBack(clock);
+
+        Assert.Null(store.UnavailableReason(ResumePath));
+        var back = Assert.Single(store.Load(ResumePath));                         // exactly what was there: Skip, profile, destination and position intact
+        Assert.True(back.Skipped);
+        Assert.Equal("mine", back.PresetOverride);
+        Assert.Equal("lane2", back.DestinationLaneId);
+        Assert.Equal(9, back.Order);
+    }
+
+    [Fact]
+    public void ADatabaseThatWasNeverCreated_IsNotAnOutage_TheJsonFileStaysTheQueue()
+    {
+        new JsonResumeStateStore().Save(new List<ResumeEntry> { Entry("a.mkv", 0) }, ResumePath);
+        Directory.CreateDirectory(DbPath);                                        // the database cannot be created here
+        var store = new SqliteResumeStateStore(new MovableClock(new DateTimeOffset(2026, 10, 30, 9, 0, 0, TimeSpan.Zero)));
+
+        Assert.Null(store.UnavailableReason(ResumePath));                         // nothing was ever in a database: the old file is still the queue
+        store.Update(ResumePath, state => { state.Add(Entry("b.mkv", 1)); return true; });
+        Assert.Equal(2, store.Load(ResumePath).Count);
     }
 
     [Fact]

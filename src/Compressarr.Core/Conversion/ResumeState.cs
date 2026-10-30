@@ -1,4 +1,5 @@
 using Compressarr.Core.Config;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace Compressarr.Core.Conversion;
@@ -58,23 +59,76 @@ public static class ResumeKeeping
         entry.KeptSourceModifiedUtc = info.LastWriteTimeUtc;
     }
 
-    /// <summary>Notes the source's size and time as its encode starts, so that deleting "the source" afterwards can first check it is still that file.</summary>
+    private const int FingerprintSample = 1 << 20;
+
+    /// <summary>A short fingerprint of a file's content: its size and its first and last megabyte, hashed. Cheap (two megabytes read however large the file is) and enough to tell
+    /// one video from another even when a copy tool has given them the same size and time. Null when the file cannot be read.</summary>
+    internal static string? ContentFingerprint(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var length = stream.Length;
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buffer = new byte[FingerprintSample];
+
+            void Append(long from)
+            {
+                stream.Seek(from, SeekOrigin.Begin);
+                var wanted = (int)Math.Min(FingerprintSample, length - from);
+                var read = 0;
+                while (read < wanted)
+                {
+                    var n = stream.Read(buffer, read, wanted - read);
+                    if (n == 0) break;
+                    read += n;
+                }
+
+                hash.AppendData(buffer, 0, read);
+            }
+
+            Append(0);
+            if (length > FingerprintSample) Append(Math.Max(FingerprintSample, length - FingerprintSample));
+            hash.AppendData(BitConverter.GetBytes(length));
+            return Convert.ToHexString(hash.GetHashAndReset());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Notes what the source is as its encode starts (size, last-write and creation time, a content fingerprint), so that deleting "the source" afterwards can first check it
+    /// is still that file.</summary>
     public static void NoteEncodeStart(ResumeEntry entry)
     {
         if (!File.Exists(entry.FullName)) return;
         var info = new FileInfo(entry.FullName);
         entry.EncodedFromSize = info.Length;
         entry.EncodedFromModifiedUtc = info.LastWriteTimeUtc;
+        entry.EncodedFromCreatedUtc = info.CreationTimeUtc;
+        entry.EncodedFromFingerprint = ContentFingerprint(entry.FullName);
     }
 
-    /// <summary>False when what is at the entry's path is no longer the file that was encoded (another size or time). True when it matches, when the file is gone, or when
-    /// no stamp was recorded (an entry from before this existed): then there is nothing to prove otherwise and the old behaviour stands.</summary>
-    public static bool SourceUnchangedSinceEncode(ResumeEntry entry)
+    /// <summary>False when what is at the entry's path cannot be shown to be the file that was encoded: another size, time or creation time, or other content. True when it matches or
+    /// the file is gone. Without a stamp (an entry written before one was recorded) the question is put to the encoded file instead - <paramref name="encodedFilePath"/>, where the result
+    /// is or was staged: a source written or created after that file was finished cannot be what it was made from, so it counts as replaced. With neither there is nothing to compare
+    /// and it counts as unchanged. This is change detection, not proof: a different file made to look the same in all of these ways would not be noticed.</summary>
+    public static bool SourceUnchangedSinceEncode(ResumeEntry entry, string? encodedFilePath = null)
     {
-        if (entry.EncodedFromSize is not { } size || entry.EncodedFromModifiedUtc is not { } modified) return true;
         if (!File.Exists(entry.FullName)) return true;
         var info = new FileInfo(entry.FullName);
-        return info.Length == size && (info.LastWriteTimeUtc - modified).Duration() <= TimeTolerance;
+
+        if (entry.EncodedFromSize is not { } size || entry.EncodedFromModifiedUtc is not { } modified)
+        {
+            if (encodedFilePath is null || !File.Exists(encodedFilePath)) return true;
+            var finishedAt = File.GetLastWriteTimeUtc(encodedFilePath);
+            return info.LastWriteTimeUtc <= finishedAt + TimeTolerance && info.CreationTimeUtc <= finishedAt + TimeTolerance;
+        }
+
+        if (info.Length != size || (info.LastWriteTimeUtc - modified).Duration() > TimeTolerance) return false;
+        if (entry.EncodedFromCreatedUtc is { } created && (info.CreationTimeUtc - created).Duration() > TimeTolerance) return false;
+        return entry.EncodedFromFingerprint is not { } fingerprint || string.Equals(ContentFingerprint(entry.FullName), fingerprint, StringComparison.Ordinal);
     }
 
     /// <summary>True when this Completed entry is the very file now found at its path: converted already, left in place, unchanged.</summary>
@@ -139,6 +193,8 @@ internal static class ResumeResults
             onDisk.KeptSourceModifiedUtc = entry.KeptSourceModifiedUtc;
             onDisk.EncodedFromSize = entry.EncodedFromSize;
             onDisk.EncodedFromModifiedUtc = entry.EncodedFromModifiedUtc;
+            onDisk.EncodedFromCreatedUtc = entry.EncodedFromCreatedUtc;
+            onDisk.EncodedFromFingerprint = entry.EncodedFromFingerprint;
             return true;
         });
     }
@@ -377,6 +433,13 @@ public sealed class ResumeEntry
     /// <summary>The last-write time the source had when its encode started. See <see cref="EncodedFromSize"/>.</summary>
     public DateTime? EncodedFromModifiedUtc { get; set; }
 
+    /// <summary>The creation time the source had when its encode started: a file replaced by deleting and copying a new one in has a new one. See <see cref="EncodedFromSize"/>.</summary>
+    public DateTime? EncodedFromCreatedUtc { get; set; }
+
+    /// <summary>A fingerprint of the source's content when its encode started (see <see cref="ResumeKeeping.ContentFingerprint"/>): tells another video from this one even when its
+    /// size and times were made to match. See <see cref="EncodedFromSize"/>.</summary>
+    public string? EncodedFromFingerprint { get; set; }
+
     /// <summary>Set when this entry was created purely as bookkeeping for a queue-control action
     /// (reorder/skip/preset-override/remove) on a file the current pass hadn't tracked yet, rather
     /// than by ConversionOrchestrator's own real resume-from-interrupted-run bookkeeping. Exists
@@ -411,6 +474,14 @@ public static class ResumeQueueOrder
 {
     public static int NextOrder(IEnumerable<ResumeEntry> resumeState) =>
         resumeState.Where(e => e.Order.HasValue).Select(e => e.Order!.Value).DefaultIfEmpty(-1).Max() + 1;
+}
+
+/// <summary>Implemented by a queue store that can be unavailable (the database that holds the queue cannot be opened): the engine checks it before a pass and pauses instead of
+/// working from an empty queue.</summary>
+public interface IQueueAvailability
+{
+    /// <summary>Why the queue cannot be used right now, or null when it can.</summary>
+    string? UnavailableReason(string resumeFilePath);
 }
 
 public interface IResumeStateStore

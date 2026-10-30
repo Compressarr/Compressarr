@@ -666,6 +666,39 @@ public class RunOrchestratorTests : IDisposable
     }
 
     [Fact]
+    public async Task RunOnceAsync_WhileTheQueueDatabaseIsUnavailable_ScansAndEncodesNothing_AndASkippedFileStaysSkippedAfterwards()
+    {
+        var (config, input) = MakeSingleLaneConfig("a.mkv");
+        var clock = new Compressarr.Core.Tests.Conversion.MovableClock(new DateTimeOffset(2026, 10, 30, 9, 0, 0, TimeSpan.Zero));
+        var store = new SqliteResumeStateStore(clock);
+        var runner = new RecordingProcessRunner();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, runner, resumeStore: store);
+        var skipped = Path.Combine(input, "a.mkv");
+        store.Save(new List<ResumeEntry> { new() { LaneId = "lane", FullName = skipped, Status = ResumeStatus.Pending, Skipped = true, Order = 0 } }, resumeFilePath);
+
+        // The database is away (something else holds its place): the fallback knows nothing of the skip, and a scan would queue a.mkv as brand new work.
+        var db = StateDatabase.PathFor(resumeFilePath);
+        File.Move(db, db + ".away");
+        Directory.CreateDirectory(db);
+
+        var during = await orchestrator.RunOnceAsync(config);
+
+        Assert.Null(during);
+        Assert.Empty(runner.ProcessedInOrder);                         // nothing was encoded
+        Assert.False(File.Exists(resumeFilePath));                     // nothing was written to a fallback file
+
+        Directory.Delete(db);
+        File.Move(db + ".away", db);
+        clock.Advance(SqliteResumeStateStore.RetryFailedAfter + TimeSpan.FromSeconds(1));
+        var after = await orchestrator.RunOnceAsync(config);
+
+        Assert.Empty(runner.ProcessedInOrder);                         // still not: the Skip came back with the database
+        var entry = Assert.Single(store.Load(resumeFilePath));
+        Assert.True(entry.Skipped);
+        Assert.Equal(0, after?.TotalFiles ?? 0);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_WithMaintain_ASourceThatWasConverted_IsNotConvertedAgainOnTheNextPass()
     {
         // Maintain leaves every source in Input. Before, the finished entry was wiped at the end of the pass and the file

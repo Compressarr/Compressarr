@@ -11,7 +11,7 @@ namespace Compressarr.Core.Conversion;
 /// The first use with no database imports <c>compressarr.resume.json</c> (kept, renamed to .imported); a damaged database is set aside as .damaged
 /// and the app starts with an empty queue; if the import fails for any other reason the JSON store keeps serving for the session and the file is left
 /// exactly as it was. See docs/design-sqlite-queue.md.</summary>
-public sealed class SqliteResumeStateStore : IResumeStateStore
+public sealed class SqliteResumeStateStore : IResumeStateStore, IQueueAvailability
 {
     private const string ImportedKey = "resume_imported";
     private static readonly object InitLock = new();
@@ -25,14 +25,14 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
         nameof(ResumeEntry.LastRetryFailureMessage), nameof(ResumeEntry.Order), nameof(ResumeEntry.Skipped), nameof(ResumeEntry.PresetOverride),
         nameof(ResumeEntry.Removed), nameof(ResumeEntry.HeldAfterFailure), nameof(ResumeEntry.KeptSourceSize), nameof(ResumeEntry.KeptSourceModifiedUtc),
         nameof(ResumeEntry.CreatedByQueueEdit), nameof(ResumeEntry.FileBotUnmatched), nameof(ResumeEntry.DestinationLaneId),
-        nameof(ResumeEntry.EncodedFromSize), nameof(ResumeEntry.EncodedFromModifiedUtc)
+        nameof(ResumeEntry.EncodedFromSize), nameof(ResumeEntry.EncodedFromModifiedUtc), nameof(ResumeEntry.EncodedFromCreatedUtc), nameof(ResumeEntry.EncodedFromFingerprint)
     };
 
     private static readonly string[] Columns =
     {
         "lane_id", "full_name", "status", "encoded_file_path", "encoded_file_desired_name", "pending_companion_source_dir", "pending_companion_video_dest_path",
         "last_retry_failure_message", "position", "skipped", "preset_override", "removed", "held_after_failure", "kept_source_size", "kept_source_modified_utc",
-        "created_by_queue_edit", "filebot_unmatched", "destination_lane_id", "encoded_from_size", "encoded_from_modified_utc"
+        "created_by_queue_edit", "filebot_unmatched", "destination_lane_id", "encoded_from_size", "encoded_from_modified_utc", "encoded_from_created_utc", "encoded_from_fingerprint"
     };
 
     private static readonly string SelectSql = "SELECT id, " + string.Join(", ", Columns) + " FROM queue ORDER BY id;";
@@ -55,6 +55,7 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
     private readonly JsonResumeStateStore _json = new();
     private readonly TimeProvider _time;
     private string? _importFailure;
+    private bool _authoritativeUnavailable;   // the failure is of a database that was the queue's home: the JSON fallback is not a copy of it, so it must not stand in
     private DateTimeOffset _failedAt;
     private string? _notice;
 
@@ -65,6 +66,18 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
 
     /// <summary>Why the queue could not be moved into the database, or null. While it is set the JSON store serves instead.</summary>
     public string? ImportFailure => _importFailure;
+
+    /// <summary>Why the queue cannot be used right now, or null. Set only when the database that holds the queue (it exists, or it was in use) cannot be opened: the JSON
+    /// fallback starts empty, knows nothing of what was skipped, removed, held or kept, and an edit made to it cannot be reconciled with the database exactly, so while this is
+    /// set nothing is scanned or encoded and an edit is refused, instead of acting on an empty queue or accepting a change that may be lost. A database that could never be created
+    /// (nothing was ever in it) is not this: there the JSON file is still the queue and keeps serving.</summary>
+    public string? UnavailableReason(string resumeFilePath) => Ready(resumeFilePath) || !_authoritativeUnavailable ? null : _importFailure;
+
+    private void RefuseWhileUnavailable()
+    {
+        if (_authoritativeUnavailable)
+            throw new InvalidOperationException($"The queue database cannot be opened right now ({_importFailure}), so the change was not made. It is tried again every {(int)RetryFailedAfter.TotalSeconds} seconds.");
+    }
 
     /// <summary>Something the user should know about the queue that happened when the database was opened (a damaged database or JSON file was set
     /// aside), or null. The desktop app writes it to the log at start-up.</summary>
@@ -94,7 +107,7 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
 
     public void Save(List<ResumeEntry> state, string path)
     {
-        if (!Ready(path)) { _json.Save(state, path); return; }
+        if (!Ready(path)) { RefuseWhileUnavailable(); _json.Save(state, path); return; }
 
         _lock.Wait();
         try
@@ -114,7 +127,7 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
 
     public void DeleteIfComplete(List<ResumeEntry> state, string path)
     {
-        if (!Ready(path)) { _json.DeleteIfComplete(state, path); return; }
+        if (!Ready(path)) { RefuseWhileUnavailable(); _json.DeleteIfComplete(state, path); return; }
 
         var hasOutstanding = state.Any(e => e.Status is ResumeStatus.Pending or ResumeStatus.Error or ResumeStatus.MoveFailed or ResumeStatus.CompanionMoveFailed or ResumeStatus.CleanupPending);
         if (hasOutstanding) return;
@@ -125,7 +138,7 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
 
     public T Update<T>(string path, Func<List<ResumeEntry>, T> mutate)
     {
-        if (!Ready(path)) return _json.Update(path, mutate);
+        if (!Ready(path)) { RefuseWhileUnavailable(); return _json.Update(path, mutate); }
 
         _lock.Wait();
         try
@@ -160,7 +173,8 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
         e.LastRetryFailureMessage, e.Order is { } order ? (long)order : null, e.Skipped ? 1L : 0L, e.PresetOverride, e.Removed ? 1L : 0L, e.HeldAfterFailure ? 1L : 0L,
         e.KeptSourceSize, e.KeptSourceModifiedUtc is { } kept ? kept.ToString("O", CultureInfo.InvariantCulture) : null,
         e.CreatedByQueueEdit ? 1L : 0L, e.FileBotUnmatched ? 1L : 0L, e.DestinationLaneId,
-        e.EncodedFromSize, e.EncodedFromModifiedUtc is { } from ? from.ToString("O", CultureInfo.InvariantCulture) : null
+        e.EncodedFromSize, e.EncodedFromModifiedUtc is { } from ? from.ToString("O", CultureInfo.InvariantCulture) : null,
+        e.EncodedFromCreatedUtc is { } createdFrom ? createdFrom.ToString("O", CultureInfo.InvariantCulture) : null, e.EncodedFromFingerprint
     };
 
     /// <summary>Every row, in insertion order. <paramref name="withValues"/> also keeps each entry's stored values, which only an update needs (to see what its callback changed).</summary>
@@ -196,7 +210,9 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
                 FileBotUnmatched = Number(17) == 1,
                 DestinationLaneId = Text(18),
                 EncodedFromSize = Number(19),
-                EncodedFromModifiedUtc = Text(20) is { } from ? DateTime.Parse(from, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind) : null
+                EncodedFromModifiedUtc = Text(20) is { } from ? DateTime.Parse(from, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind) : null,
+                EncodedFromCreatedUtc = Text(21) is { } createdFrom ? DateTime.Parse(createdFrom, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind) : null,
+                EncodedFromFingerprint = Text(22)
             };
             rows.Add(new Row(entry, reader.GetInt64(0), withValues ? ValuesOf(entry) : Array.Empty<object?>()));
         }
@@ -291,6 +307,10 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
 
             if (ReadyPaths.Contains(databasePath) && File.Exists(databasePath)) return true;
 
+            // Whether this database was already the queue's home (it is there, it was in use, or its JSON file was moved into it): then a failure to open it is an outage
+            // of the real queue, not a fallback to the old one. Sticky until it opens again.
+            var wasInUse = ReadyPaths.Contains(databasePath) || File.Exists(databasePath) || File.Exists(resumeFilePath + ".imported");
+
             for (var attempt = 0; ; attempt++)
             {
                 var isNew = !File.Exists(databasePath);
@@ -306,6 +326,7 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
                     if (isNew && StateDatabase.OpenAndCheck(databasePath) is { } createFailure) throw new InvalidDataException(createFailure);
                     Import(resumeFilePath, databasePath);
                     ReadyPaths.Add(databasePath);
+                    _authoritativeUnavailable = false;
                     return true;
                 }
                 catch (Exception ex) when (IsTransient(ex) && attempt < TransientRetryDelays.Length)
@@ -317,6 +338,7 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
                 catch (Exception ex) when (ex is not (OutOfMemoryException or InvalidOperationException))
                 {
                     _importFailure = ex.Message;
+                    _authoritativeUnavailable |= wasInUse;
                     _failedAt = _time.GetUtcNow();
                     ReadyPaths.Remove(databasePath);   // not ready any more: when it is tried again it is opened, checked and (for a queue file written meanwhile) merged afresh
                     // A database this call just created is thrown away, so the next try imports the untouched JSON file again. One that was already
@@ -444,6 +466,8 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
             inDatabase.KeptSourceModifiedUtc = fromFallback.KeptSourceModifiedUtc;
             inDatabase.EncodedFromSize = fromFallback.EncodedFromSize;
             inDatabase.EncodedFromModifiedUtc = fromFallback.EncodedFromModifiedUtc;
+            inDatabase.EncodedFromCreatedUtc = fromFallback.EncodedFromCreatedUtc;
+            inDatabase.EncodedFromFingerprint = fromFallback.EncodedFromFingerprint;
         }
 
         inDatabase.Skipped |= fromFallback.Skipped;

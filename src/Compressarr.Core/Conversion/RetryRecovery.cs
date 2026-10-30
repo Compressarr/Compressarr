@@ -150,6 +150,10 @@ internal sealed class RetryRecovery
             var retrySucceeded = false;
             var currentPath = encodedFilePath;
 
+            // The result is filed whatever the Input setting says now; but the original and its companions are only deleted, moved or swept if they are still inside
+            // this lane's Input - the setting may have changed while the move waited.
+            var sourceOutsideInput = !PathContainment.IsStrictlyInside(entry.FullName, inputPath);
+
             // MoveFiles may have been turned off (or a collision Skip hit) since this entry first
             // failed - in either case routing has nothing further to do with it, but unlike a
             // still-failing retry, this outcome is final (Completed, never revisited), so it needs
@@ -162,7 +166,7 @@ internal sealed class RetryRecovery
             {
                 var desiredDestPath = Path.Combine(Path.GetDirectoryName(physicalPath)!, desiredFileName);
                 var collisionMode = FileOutcomeHelpers.OutputCollisionMode(desiredDestPath, entry.FullName, config.Processing.OnDestinationCollision, config.Processing.DeleteAfterConvert,
-                    ResumeKeeping.SourceUnchangedSinceEncode(entry), out var disposeSourceFirst);
+                    ResumeKeeping.SourceUnchangedSinceEncode(entry, physicalPath) && !sourceOutsideInput, out var disposeSourceFirst);
                 string resolvedDestPath;
                 try
                 {
@@ -190,8 +194,14 @@ internal sealed class RetryRecovery
                 if (string.Equals(entry.FullName, currentPath, StringComparison.OrdinalIgnoreCase)) return;
                 if (!File.Exists(entry.FullName) || config.Processing.DeleteAfterConvert == DeleteAfterConvertMode.Maintain) return;
 
+                if (sourceOutsideInput)
+                {
+                    _logger.Log($"  The source '{Path.GetFileName(entry.FullName)}' is not inside this lane's Input folder, so it was left where it is (deleting is only done inside Input).");
+                    return;
+                }
+
                 // The move may have been waiting days for its destination: what is at the original path now is only "the source" if it is still the file that was encoded.
-                if (!ResumeKeeping.SourceUnchangedSinceEncode(entry))
+                if (!ResumeKeeping.SourceUnchangedSinceEncode(entry, currentPath))
                 {
                     _logger.Log($"  The source '{Path.GetFileName(entry.FullName)}' is not the file that was converted (it changed since), so it was kept: it is queued again as new work.");
                     return;
@@ -258,12 +268,13 @@ internal sealed class RetryRecovery
                 var retryLibraries = LaneDestination.Resolve(config, _pathExpander, entry, tvShowBasePath, movieBasePath);
                 // Same edition rule as the first attempt, worked out from the original source path (which is still recorded when the file itself is gone).
                 var retryShowEdition = retryIsTv ? PlexTags.EditionOfSourceShowFolder(entry.FullName, inputPath, ContentClassifier.GetEpisodeInfo(desiredFileName).ShowName) : null;
-                retryDestPath = _fileRouter.RouteFile(encodedFilePath, desiredFileName, retryIsTv, retryLibraries.TvShowBasePath, retryLibraries.MovieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision, retryShowEdition);
+                retryDestPath = _fileRouter.RouteFile(encodedFilePath, desiredFileName, retryIsTv, retryLibraries.TvShowBasePath, retryLibraries.MovieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision, retryShowEdition,
+                    new SourceProtection(entry.FullName, config.Processing.DeleteAfterConvert, ResumeKeeping.SourceUnchangedSinceEncode(entry, encodedFilePath) && !sourceOutsideInput, _trash));
                 ResolveRetry(retryDestPath ?? RestInPlace(encodedFilePath) ?? encodedFilePath);
                 _logger.Log($"  Retried move for '{desiredFileName}' - succeeded.");
                 CleanUpRetriedSourceSafely();
 
-                if (retryDestPath is not null)
+                if (retryDestPath is not null && !sourceOutsideInput)
                 {
                     try
                     {
@@ -366,6 +377,8 @@ internal sealed class RetryRecovery
             var sourceDirectory = entry.PendingCompanionSourceDirectory!;
             var videoDestPath = entry.PendingCompanionVideoDestPath!;
 
+            if (LeaveAloneOutsideInput(entry, sourceDirectory, "companion retry", resumeFilePath)) continue;
+
             try
             {
                 _companionFiles.MoveCompanionFiles(entry.FullName, sourceDirectory, videoDestPath, config.Processing.DeleteAfterConvert, config.Processing.CompanionExtensions, config.Processing.UnmatchedCompanionAction, config.Processing.OnDestinationCollision, config.Processing.VidTypes);
@@ -447,6 +460,8 @@ internal sealed class RetryRecovery
             var sourceDirectory = entry.PendingCompanionSourceDirectory!;
             var videoDestPath = entry.PendingCompanionVideoDestPath!;
 
+            if (LeaveAloneOutsideInput(entry, sourceDirectory, "cleanup retry", resumeFilePath)) continue;
+
             // Already gone - by hand, or some other process - since the deferral. Unlike a dead
             // CompanionMoveFailed entry (companions genuinely lost), this is the actual goal
             // already achieved: no folder left to clean up, and no need to spend an *arr API call
@@ -518,5 +533,21 @@ internal sealed class RetryRecovery
         }
 
         return retriesSucceeded;
+
+        // A pending companion move or folder cleanup whose folder is no longer inside this lane's Input (the setting changed since) is not Compressarr's to touch: the
+        // entry is finished with a note, and the folder and its files are left exactly as they are.
+        bool LeaveAloneOutsideInput(ResumeEntry entry, string sourceDirectory, string context, string resumeFilePath)
+        {
+            // The video was a file inside Input (so its folder is Input itself or below it); anything else is not ours to touch.
+            if (PathContainment.IsStrictlyInside(entry.FullName, inputPath) && PathContainment.IsInsideOrSame(sourceDirectory, inputPath)) return false;
+
+            _logger.Log($"  '{sourceDirectory}' is not inside this lane's Input folder, so its {context} was dropped and it was left as it is.");
+            ResumeKeeping.MarkCompleted(entry, config.Processing.DeleteAfterConvert);
+            entry.PendingCompanionSourceDirectory = null;
+            entry.PendingCompanionVideoDestPath = null;
+            entry.LastRetryFailureMessage = null;
+            ResumeResults.Save(_resumeStore, entry, resumeFilePath);
+            return true;
+        }
     }
 }

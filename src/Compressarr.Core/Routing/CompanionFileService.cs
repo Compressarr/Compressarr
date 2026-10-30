@@ -199,6 +199,19 @@ public sealed class CompanionFileService : ICompanionFileService
             .Any(f => Path.GetFileName(f).StartsWith(stemPrefix, StringComparison.OrdinalIgnoreCase) && wanted.Contains(Path.GetExtension(f)));
     }
 
+    /// <summary>True when <paramref name="directory"/> holds any file with an extension on the wanted list, whatever video it belongs to. With the collision setting on Skip such a file
+    /// may be one that was deliberately left behind for a video that is already gone, and a folder can hold the leftovers of several videos: nothing in it says whose, so none is swept.</summary>
+    internal static bool AnyWantedCompanionIn(string directory, IReadOnlyList<string> companionExtensions)
+    {
+        if (!Directory.Exists(directory)) return false;
+
+        var wanted = companionExtensions
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => "." + t.Trim().TrimStart('.'))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return Directory.EnumerateFiles(directory).Any(f => wanted.Contains(Path.GetExtension(f)));
+    }
+
     public void CleanUpEmptySourceFolder(
         string originalFileDirectory,
         string inputRoot,
