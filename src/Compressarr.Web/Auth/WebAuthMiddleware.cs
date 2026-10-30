@@ -179,7 +179,7 @@ public sealed class WebAuthMiddleware
 
     /// <summary>With a list: the Host header's host must be listed; <c>localhost</c> and the loopback addresses always pass, so a typo can be fixed from the PC.
     /// Without one, the names a person uses on their own network still pass (an IP address, <c>localhost</c>, a computer name with no dots, a <c>.local</c>, <c>.lan</c>,
-    /// <c>.home</c> or <c>.internal</c> name) but a public-looking domain name does not: that is what a DNS-rebinding page uses to reach a program on the local network
+    /// <c>.home</c>, <c>.internal</c> or Tailscale <c>.ts.net</c> name) but a public-looking domain name does not: that is what a DNS-rebinding page uses to reach a program on the local network
     /// under its own name, and its requests would carry the local network's free pass. A request that went through a reverse proxy (forwarding headers) has no free pass
     /// and is not held to this, nor is the Automation API (it needs a key).</summary>
     internal static bool HostAllowed(HttpContext context, string[] allowedHosts, bool isV1 = false)
@@ -192,7 +192,7 @@ public sealed class WebAuthMiddleware
         return IsLocalStyleHost(host);
     }
 
-    private static readonly string[] LocalSuffixes = { ".local", ".lan", ".home", ".internal", ".localdomain", ".home.arpa" };
+    private static readonly string[] LocalSuffixes = { ".local", ".lan", ".home", ".internal", ".localdomain", ".home.arpa", ".ts.net" };
 
     internal static bool IsLocalStyleHost(string host)
     {

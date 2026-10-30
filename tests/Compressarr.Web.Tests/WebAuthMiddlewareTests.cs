@@ -466,6 +466,7 @@ public class WebAuthMiddlewareTests
     [InlineData("nas.local:1212", true)]
     [InlineData("server.lan", true)]
     [InlineData("compressarr.home.arpa", true)]
+    [InlineData("media-pc.tail1234.ts.net:1212", true)]
     [InlineData("rebind.evil.example:1212", false)]
     [InlineData("compressarr.example.com", false)]
     [InlineData("x.local.evil.example", false)]
