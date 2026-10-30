@@ -75,6 +75,11 @@ public static class HandBrakeEndpoints
             {
                 return Results.BadRequest(new { message = $"The HandBrakeCLI download failed. {Compressarr.Core.Net.NetworkProblem.Describe(ex)}" });
             }
+            catch (InvalidDataException ex)
+            {
+                // No checksum published, or the download did not match it: said plainly, nothing was installed.
+                return Results.BadRequest(new { message = ex.Message });
+            }
         });
     }
 }

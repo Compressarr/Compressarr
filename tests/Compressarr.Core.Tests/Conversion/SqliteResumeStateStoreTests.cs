@@ -4,6 +4,14 @@ using Microsoft.Data.Sqlite;
 
 namespace Compressarr.Core.Tests.Conversion;
 
+file sealed class MovableClock : TimeProvider
+{
+    private DateTimeOffset _now;
+    public MovableClock(DateTimeOffset now) => _now = now;
+    public void Advance(TimeSpan by) => _now += by;
+    public override DateTimeOffset GetUtcNow() => _now;
+}
+
 /// <summary>The queue in SQLite: every field survives, a failed or crashed change leaves the rows alone, two writers never lose one another, the old
 /// JSON file is imported once (and kept), and a damaged file or database is set aside instead of stopping the app.</summary>
 public class SqliteResumeStateStoreTests : IDisposable
@@ -222,6 +230,37 @@ public class SqliteResumeStateStoreTests : IDisposable
         Assert.Single(loaded);
         Assert.Equal(2, jsonStore.Load(ResumePath).Count);
         Assert.False(File.Exists(ResumePath + ".imported"));
+    }
+
+    [Fact]
+    public void ADatabaseThatCouldNotBeOpenedForAMoment_IsOpenedAgainAfterThePause_NotNeverUntilARestart()
+    {
+        // Something held the place of the database as the app started (here a folder, which is not a transient error but fails the same way). The JSON file serves
+        // for the pause; once the cause is gone and the pause is over, the database is created, the queue imported, and the fallback is left.
+        var jsonStore = new JsonResumeStateStore();
+        jsonStore.Save(new List<ResumeEntry> { Entry("a.mkv", 0) }, ResumePath);
+        Directory.CreateDirectory(DbPath);
+        var clock = new MovableClock(new DateTimeOffset(2026, 10, 30, 9, 0, 0, TimeSpan.Zero));
+        var store = new SqliteResumeStateStore(clock);
+
+        store.Prepare(ResumePath);
+        Assert.NotNull(store.ImportFailure);
+
+        Directory.Delete(DbPath);
+        clock.Advance(SqliteResumeStateStore.RetryFailedAfter - TimeSpan.FromSeconds(1));
+        Assert.Single(store.Load(ResumePath));
+        Assert.NotNull(store.ImportFailure);               // still inside the pause: the fallback serves
+        Assert.False(File.Exists(DbPath));
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        var loaded = store.Load(ResumePath);
+
+        Assert.Null(store.ImportFailure);
+        Assert.True(File.Exists(DbPath));
+        Assert.Equal(@"C:\In\a.mkv", Assert.Single(loaded).FullName);
+        Assert.True(File.Exists(ResumePath + ".imported"));
+        store.Update(ResumePath, state => { state.Add(Entry("b.mkv", 1)); return true; });
+        Assert.Equal(2, new SqliteResumeStateStore().Load(ResumePath).Count);   // from the database now
     }
 
     [Fact]

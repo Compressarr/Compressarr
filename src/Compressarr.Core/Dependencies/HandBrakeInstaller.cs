@@ -2,11 +2,13 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 
 namespace Compressarr.Core.Dependencies;
 
-public sealed record HandBrakeReleaseInfo(string Version, string AssetName, string DownloadUrl, long SizeBytes, string ReleaseUrl);
+/// <param name="Sha256">The SHA-256 GitHub publishes for the asset (hex), or null when it published none; an install without one is refused.</param>
+public sealed record HandBrakeReleaseInfo(string Version, string AssetName, string DownloadUrl, long SizeBytes, string ReleaseUrl, string? Sha256 = null);
 
 public interface IHandBrakeInstaller
 {
@@ -19,7 +21,8 @@ public interface IHandBrakeInstaller
     /// <summary>Downloads and installs the given release into installDir, returning the full path
     /// to the resulting HandBrakeCLI executable. Callers are expected to have already confirmed
     /// this download with the user (name, version, size) before calling - this method itself
-    /// performs no prompting.</summary>
+    /// performs no prompting. The download is checked against the SHA-256 GitHub publishes for the asset; with no
+    /// checksum, or one that does not match, nothing is installed (InvalidDataException).</summary>
     Task<string> InstallAsync(HandBrakeReleaseInfo release, string installDir, IProgress<string>? progress = null);
 
     /// <summary>Runs the HandBrakeCLI binary at cliPath with --version and parses the version
@@ -68,11 +71,38 @@ public sealed class HandBrakeInstaller : IHandBrakeInstaller
                     AssetName: name,
                     DownloadUrl: asset["browser_download_url"]!.GetValue<string>(),
                     SizeBytes: asset["size"]!.GetValue<long>(),
-                    ReleaseUrl: releaseUrl);
+                    ReleaseUrl: releaseUrl,
+                    Sha256: DigestOf(asset));
             }
         }
 
         return null;
+    }
+
+    /// <summary>GitHub publishes each asset's checksum as "sha256:&lt;hex&gt;"; null when there is none (or it is some other algorithm).</summary>
+    internal static string? DigestOf(JsonObject asset)
+    {
+        var digest = asset["digest"]?.GetValue<string>();
+        return digest is not null && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) && digest.Length > 7 ? digest[7..] : null;
+    }
+
+    /// <summary>Throws InvalidDataException when GitHub published no checksum for the download (nothing should be fetched then).</summary>
+    internal static void RequireChecksum(string? expectedSha256)
+    {
+        if (string.IsNullOrWhiteSpace(expectedSha256))
+        {
+            throw new InvalidDataException("GitHub published no checksum for this HandBrake download, so it can't be verified. Nothing was installed - download HandBrakeCLI yourself and set its path on the Encoder page.");
+        }
+    }
+
+    /// <summary>Throws InvalidDataException unless the download's checksum is the one GitHub published.</summary>
+    internal static void VerifyChecksum(string actualSha256, string? expectedSha256)
+    {
+        RequireChecksum(expectedSha256);
+        if (!string.Equals(actualSha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("The downloaded file does not match the checksum GitHub published for it, so it was thrown away and nothing was installed.");
+        }
     }
 
     public async Task<string?> GetInstalledVersionAsync(string cliPath)
@@ -127,21 +157,38 @@ public sealed class HandBrakeInstaller : IHandBrakeInstaller
 
     public async Task<string> InstallAsync(HandBrakeReleaseInfo release, string installDir, IProgress<string>? progress = null)
     {
+        // Refused before anything is downloaded: a program that is about to be run is not installed on trust.
+        RequireChecksum(release.Sha256);
+
         Directory.CreateDirectory(installDir);
 
-        var downloadPath = Path.Combine(Path.GetTempPath(), release.AssetName);
-        progress?.Report($"Downloading {release.AssetName} ({release.SizeBytes / 1024 / 1024} MB)...");
-
-        using (var client = _httpClientFactory.CreateClient(nameof(HandBrakeInstaller)))
-        {
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("Compressarr/2.0");
-            await using var httpStream = await client.GetStreamAsync(release.DownloadUrl);
-            await using var fileStream = File.Create(downloadPath);
-            await httpStream.CopyToAsync(fileStream);
-        }
-
+        var downloadPath = Path.Combine(Path.GetTempPath(), "compressarr-" + Guid.NewGuid().ToString("N")[..8] + "-" + release.AssetName);
         try
         {
+            progress?.Report($"Downloading {release.AssetName} ({release.SizeBytes / 1024 / 1024} MB)...");
+
+            string actual;
+            using (var client = _httpClientFactory.CreateClient(nameof(HandBrakeInstaller)))
+            {
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("Compressarr/2.0");
+                using var sha = SHA256.Create();
+                await using var httpStream = await client.GetStreamAsync(release.DownloadUrl);
+                await using var fileStream = File.Create(downloadPath);
+                var buffer = new byte[1024 * 1024];
+                int read;
+                while ((read = await httpStream.ReadAsync(buffer)) > 0)
+                {
+                    sha.TransformBlock(buffer, 0, read, null, 0);
+                    await fileStream.WriteAsync(buffer.AsMemory(0, read));
+                }
+
+                sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+                actual = Convert.ToHexString(sha.Hash!);
+            }
+
+            progress?.Report("Verifying the download...");
+            VerifyChecksum(actual, release.Sha256);
+
             if (OperatingSystem.IsWindows())
             {
                 return InstallFromWindowsZip(downloadPath, installDir, progress);
@@ -155,7 +202,7 @@ public sealed class HandBrakeInstaller : IHandBrakeInstaller
         }
         finally
         {
-            File.Delete(downloadPath);
+            try { File.Delete(downloadPath); } catch { /* a leftover temp file does no harm */ }
         }
     }
 
@@ -163,10 +210,10 @@ public sealed class HandBrakeInstaller : IHandBrakeInstaller
     {
         progress?.Report("Extracting HandBrakeCLI.exe...");
         var extractDir = Path.Combine(Path.GetTempPath(), "compressarr-hb-extract-" + Guid.NewGuid().ToString("N")[..8]);
-        ZipFile.ExtractToDirectory(zipPath, extractDir);
 
         try
         {
+            ZipFile.ExtractToDirectory(zipPath, extractDir);
             var exePath = Directory.EnumerateFiles(extractDir, "HandBrakeCLI.exe", SearchOption.AllDirectories).FirstOrDefault()
                 ?? throw new InvalidOperationException("HandBrakeCLI.exe not found inside the downloaded archive.");
 
@@ -178,7 +225,7 @@ public sealed class HandBrakeInstaller : IHandBrakeInstaller
         }
         finally
         {
-            Directory.Delete(extractDir, recursive: true);
+            try { if (Directory.Exists(extractDir)) Directory.Delete(extractDir, recursive: true); } catch { /* temp folder; the system clears it eventually */ }
         }
     }
 

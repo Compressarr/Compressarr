@@ -178,6 +178,45 @@ internal sealed class RetryRecovery
                 _trash.DeleteFile(entry.FullName, config.Processing.DeleteAfterConvert);
             }
 
+            // The encoded file is where it will stay (routed, or resting in Output under its clean name): only now is the entry done. Marking it Completed any
+            // earlier would let a failure of the move above (a locked file, a share that dropped) be swallowed as "still failing" with the entry already
+            // Completed and its EncodedFilePath forgotten - nothing would ever retry, and the file would sit under its staging name for good.
+            void ResolveRetry(string finalPath)
+            {
+                currentPath = finalPath;
+                ResumeKeeping.MarkCompleted(entry, config.Processing.DeleteAfterConvert);
+                entry.EncodedFilePath = null;
+                entry.EncodedFileDesiredName = null;
+                entry.LastRetryFailureMessage = null;
+                retrySucceeded = true;
+                retriesSucceeded++;
+            }
+
+            // Removing the original is housekeeping once the result is safe: a failure is reported, never allowed to undo or hide the finished move.
+            void CleanUpRetriedSourceSafely()
+            {
+                try { CleanUpRetriedSource(); }
+                catch (Exception ex) { _logger.Log($"  Could not remove the original '{entry.FullName}' after the retried move: {ex.Message}", LogSeverity.Error); }
+            }
+
+            // Still failing - leave it as MoveFailed, tried again on the next pass. Only
+            // flagged as an Error (which is what keeps this pass's log file from being
+            // discarded - see RunOrchestrator) the FIRST time this exact failure shows up, or
+            // if it's changed since last poll - a real gap found live: an offline destination
+            // retried every single poll otherwise logged Error every single poll too, and a
+            // multi-hour outage meant a kept log file per poll for the whole outage, the same
+            // file-proliferation problem all over again just gated on "error" instead of
+            // "empty." Still logged either way so it's visible live in the Recent Log panel,
+            // just at Info once it's confirmed to be the same still-unresolved problem.
+            void NoteStillFailing(Exception ex)
+            {
+                var isSameFailureAsLastPoll = entry.LastRetryFailureMessage == ex.Message;
+                var severity = isSameFailureAsLastPoll ? LogSeverity.Info : LogSeverity.Error;
+                var suffix = isSameFailureAsLastPoll ? " (still failing, same as last check)" : "";
+                _logger.Log($"  Retried move for '{desiredFileName}' failed again: {ex.Message}{suffix}", severity);
+                entry.LastRetryFailureMessage = ex.Message;
+            }
+
             // originalFileFullName/originalFileDirectory must be the TRUE original source location
             // (entry.FullName), not entry.EncodedFilePath - that's the already-converted file
             // sitting in the processing/staging area, a completely different folder. Passing the
@@ -198,22 +237,15 @@ internal sealed class RetryRecovery
                 // Same edition rule as the first attempt, worked out from the original source path (which is still recorded when the file itself is gone).
                 var retryShowEdition = retryIsTv ? PlexTags.EditionOfSourceShowFolder(entry.FullName, inputPath, ContentClassifier.GetEpisodeInfo(desiredFileName).ShowName) : null;
                 retryDestPath = _fileRouter.RouteFile(encodedFilePath, desiredFileName, retryIsTv, retryLibraries.TvShowBasePath, retryLibraries.MovieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision, retryShowEdition);
-                ResumeKeeping.MarkCompleted(entry, config.Processing.DeleteAfterConvert);
-                entry.EncodedFilePath = null;
-                entry.EncodedFileDesiredName = null;
-                entry.LastRetryFailureMessage = null;
-                retrySucceeded = true;
-                retriesSucceeded++;
+                ResolveRetry(retryDestPath ?? RestInPlace(encodedFilePath) ?? encodedFilePath);
                 _logger.Log($"  Retried move for '{desiredFileName}' - succeeded.");
-
-                currentPath = retryDestPath ?? RestInPlace(encodedFilePath) ?? encodedFilePath;
-                CleanUpRetriedSource();
+                CleanUpRetriedSourceSafely();
 
                 if (retryDestPath is not null)
                 {
                     try
                     {
-                        _companionFiles.MoveCompanionFiles(entry.FullName, originalSourceDirectory, retryDestPath, config.Processing.DeleteAfterConvert, config.Processing.CompanionExtensions, config.Processing.UnmatchedCompanionAction, config.Processing.OnDestinationCollision);
+                        _companionFiles.MoveCompanionFiles(entry.FullName, originalSourceDirectory, retryDestPath, config.Processing.DeleteAfterConvert, config.Processing.CompanionExtensions, config.Processing.UnmatchedCompanionAction, config.Processing.OnDestinationCollision, config.Processing.VidTypes);
                     }
                     catch (Exception ex)
                     {
@@ -234,33 +266,21 @@ internal sealed class RetryRecovery
             catch (DestinationCollisionSkippedException ex)
             {
                 // Configured to skip, not an error - the file just stays put; nothing left to
-                // retry, so this is as resolved as it's going to get.
-                ResumeKeeping.MarkCompleted(entry, config.Processing.DeleteAfterConvert);
-                entry.EncodedFilePath = null;
-                entry.EncodedFileDesiredName = null;
-                entry.LastRetryFailureMessage = null;
-                retrySucceeded = true;
-                retriesSucceeded++;
+                // retry, so this is as resolved as it's going to get (unless resting it in Output fails: then it is still failing).
                 _logger.Log($"  {ex.Message}");
-                currentPath = RestInPlace(encodedFilePath) ?? encodedFilePath;
-                CleanUpRetriedSource();
+                try
+                {
+                    ResolveRetry(RestInPlace(encodedFilePath) ?? encodedFilePath);
+                    CleanUpRetriedSourceSafely();
+                }
+                catch (Exception restFailure)
+                {
+                    NoteStillFailing(restFailure);
+                }
             }
             catch (Exception ex)
             {
-                // Still failing - leave it as MoveFailed, tried again on the next pass. Only
-                // flagged as an Error (which is what keeps this pass's log file from being
-                // discarded - see RunOrchestrator) the FIRST time this exact failure shows up, or
-                // if it's changed since last poll - a real gap found live: an offline destination
-                // retried every single poll otherwise logged Error every single poll too, and a
-                // multi-hour outage meant a kept log file per poll for the whole outage, the same
-                // file-proliferation problem all over again just gated on "error" instead of
-                // "empty." Still logged either way so it's visible live in the Recent Log panel,
-                // just at Info once it's confirmed to be the same still-unresolved problem.
-                var isSameFailureAsLastPoll = entry.LastRetryFailureMessage == ex.Message;
-                var severity = isSameFailureAsLastPoll ? LogSeverity.Info : LogSeverity.Error;
-                var suffix = isSameFailureAsLastPoll ? " (still failing, same as last check)" : "";
-                _logger.Log($"  Retried move for '{desiredFileName}' failed again: {ex.Message}{suffix}", severity);
-                entry.LastRetryFailureMessage = ex.Message;
+                NoteStillFailing(ex);
             }
 
             // *arr is told to stop monitoring only once disposition is final, same rule as
@@ -326,7 +346,7 @@ internal sealed class RetryRecovery
 
             try
             {
-                _companionFiles.MoveCompanionFiles(entry.FullName, sourceDirectory, videoDestPath, config.Processing.DeleteAfterConvert, config.Processing.CompanionExtensions, config.Processing.UnmatchedCompanionAction, config.Processing.OnDestinationCollision);
+                _companionFiles.MoveCompanionFiles(entry.FullName, sourceDirectory, videoDestPath, config.Processing.DeleteAfterConvert, config.Processing.CompanionExtensions, config.Processing.UnmatchedCompanionAction, config.Processing.OnDestinationCollision, config.Processing.VidTypes);
                 _logger.Log($"  Retried companion file move for '{Path.GetFileName(videoDestPath)}' - succeeded.");
 
                 var desiredFileName = Path.GetFileName(videoDestPath);

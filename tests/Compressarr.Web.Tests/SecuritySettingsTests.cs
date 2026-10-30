@@ -36,7 +36,8 @@ public class SecuritySettingsTests
         await using var host = await QueueHost.StartAsync(Lane1);
         var settings = await Settings(host);
         Assert.Equal("", settings["allowedHosts"]!.GetValue<string>());
-        Assert.Equal(HttpStatusCode.OK, await StatusWithHost(host, "anything.example"));
+        Assert.Equal(HttpStatusCode.OK, await StatusWithHost(host, "nas.local"));                                    // an empty list still answers to a home network's names
+        Assert.Equal(HttpStatusCode.BadRequest, await StatusWithHost(host, "anything.example"));                    // ...but not to a domain name (DNS rebinding)
 
         settings["allowedHosts"] = "  compressarr.lan, 192.168.10.91  ";
         Assert.Equal(HttpStatusCode.OK, await Save(host, settings));
@@ -48,7 +49,8 @@ public class SecuritySettingsTests
 
         settings["allowedHosts"] = "";
         Assert.Equal(HttpStatusCode.OK, await Save(host, settings));
-        Assert.Equal(HttpStatusCode.OK, await StatusWithHost(host, "evil.example"));
+        Assert.Equal(HttpStatusCode.BadRequest, await StatusWithHost(host, "evil.example"));                          // back to the default rule
+        Assert.Equal(HttpStatusCode.OK, await StatusWithHost(host, "192.168.10.91:1212"));
     }
 
     [Fact]

@@ -57,6 +57,43 @@ file sealed class RecordingProcessRunner : IEncoderRunner
     }
 }
 
+/// <summary>Holds each encode until released (or, ungated, a moment) and records how many ran at the same time: the proof that two passes never overlap.</summary>
+file sealed class OverlapDetectingProcessRunner : IEncoderRunner
+{
+    private readonly object _lock = new();
+    private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly bool _gated;
+    private int _active;
+
+    public int MostAtOnce { get; private set; }
+    public int Started { get; private set; }
+    public TaskCompletionSource EncodeStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public OverlapDetectingProcessRunner(bool gated = false)
+    {
+        _gated = gated;
+        if (!gated) _release.SetResult();
+    }
+
+    public void Release() => _release.TrySetResult();
+
+    public async Task<EncodeResult> RunAsync(EncodeRequest request, Action<EncodeProgress>? onProgress, CancellationToken cancellationToken)
+    {
+        lock (_lock) { _active++; Started++; MostAtOnce = Math.Max(MostAtOnce, _active); }
+        EncodeStarted.TrySetResult();
+        try
+        {
+            if (_gated) await _release.Task; else await Task.Delay(150, cancellationToken);
+            File.WriteAllText(request.OutputPath, "fake encoded output");
+            return new EncodeResult(Success: true, DetailLogFile: request.DetailLogFile);
+        }
+        finally
+        {
+            lock (_lock) _active--;
+        }
+    }
+}
+
 /// <summary>Simulates HandBrakeCLI failing every encode (no output file written).</summary>
 file sealed class FailingProcessRunner : IEncoderRunner
 {
@@ -66,7 +103,7 @@ file sealed class FailingProcessRunner : IEncoderRunner
 
 file sealed class NoOpCompanionFileService : ICompanionFileService
 {
-    public void MoveCompanionFiles(string originalFileFullName, string originalFileDirectory, string routedVideoDestPath, DeleteAfterConvertMode deleteAfterConvert, IReadOnlyList<string> companionExtensions, DeleteAfterConvertMode unmatchedCompanionAction, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite) { }
+    public void MoveCompanionFiles(string originalFileFullName, string originalFileDirectory, string routedVideoDestPath, DeleteAfterConvertMode deleteAfterConvert, IReadOnlyList<string> companionExtensions, DeleteAfterConvertMode unmatchedCompanionAction, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, IReadOnlyList<string>? videoExtensions = null) { }
     public void CleanUpEmptySourceFolder(string originalFileDirectory, string inputRoot, IReadOnlyList<string> vidTypes, DeleteAfterConvertMode deleteAfterConvert, DeleteAfterConvertMode unmatchedCompanionAction) { }
 }
 
@@ -1186,6 +1223,83 @@ public class RunOrchestratorTests : IDisposable
         Assert.Contains(logger.Messages, m => m.Severity == LogSeverity.Error &&
             m.Message.Contains("Post-execution command was killed", StringComparison.Ordinal) &&
             m.Message.Contains("didn't finish within", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_PostExecCannotBeStarted_IsLogged_AndTheRestOfThePassStillHappens()
+    {
+        // A file that exists but is not an executable (a script, a text file) makes Process.Start throw. That used to escape the pass after the run was recorded but
+        // before its report and notifications.
+        var notExecutable = Path.Combine(_tempDir, "after-run.txt");
+        File.WriteAllText(notExecutable, "not a program");
+
+        var config = new CompressarrConfig { Processing = new ProcessingSettings { MoveFiles = false, ClearTitleMetadata = false } };
+        config.HandBrake.CliPath = Path.Combine(_tempDir, "HandBrakeCLI.exe");
+        config.HandBrake.PresetsPath = Path.Combine(_tempDir, "presets.json");
+        config.Logging.LogFilePath = Path.Combine(_tempDir, "Logs");
+        config.Report.ReportPath = Path.Combine(_tempDir, "Reports");
+        config.PostExec.Cmd = notExecutable;
+        config.PostExec.Args = "";
+
+        var logger = new NoOpRunLogger();
+        var (orchestrator, _) = BuildOrchestrator(config, new RecordingProcessRunner(), logger: logger, postExecTimeout: TimeSpan.FromSeconds(30));
+
+        await orchestrator.RunOnceAsync(config);
+
+        Assert.Contains(logger.Messages, m => m.Severity == LogSeverity.Error && m.Message.Contains("Post-execution command could not be started", StringComparison.Ordinal));
+        Assert.Contains(logger.Messages, m => m.Message.Contains("Compressarr run completed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_TwoPassesAskedAtOnce_RunOneAfterTheOther_NeverTogether()
+    {
+        // Run Now while monitoring starts, the Automation API next to the Monitor page, the old /api/run/once: whoever asks, one pass at a time - two would pick the
+        // same queued file and encode it twice while deleting its source from under each other.
+        var config = LaneConfigWithTwoFiles(out _);
+        var runner = new OverlapDetectingProcessRunner();
+        var (orchestrator, _) = BuildOrchestrator(config, runner);
+
+        await Task.WhenAll(orchestrator.RunOnceAsync(config), orchestrator.RunOnceAsync(config));
+
+        Assert.Equal(1, runner.MostAtOnce);
+        Assert.True(runner.Started >= 2);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_StopArrivesWhileAnotherPassHoldsTheWay_StartsNothingAndReturnsNull()
+    {
+        var config = LaneConfigWithTwoFiles(out _);
+        var runner = new OverlapDetectingProcessRunner(gated: true);
+        var (orchestrator, _) = BuildOrchestrator(config, runner);
+
+        var first = orchestrator.RunOnceAsync(config);
+        await runner.EncodeStarted.Task;
+        using var stop = new CancellationTokenSource();
+        var second = orchestrator.RunOnceAsync(config, stop.Token);
+        stop.Cancel();
+
+        Assert.Null(await second);
+        runner.Release();
+        await first;
+        Assert.Equal(2, runner.Started);   // the first pass's own two files, nothing from the second
+    }
+
+    private CompressarrConfig LaneConfigWithTwoFiles(out string inputDir)
+    {
+        inputDir = Path.Combine(_tempDir, "Input");
+        var outputDir = Path.Combine(_tempDir, "Output");
+        Directory.CreateDirectory(inputDir);
+        Directory.CreateDirectory(outputDir);
+        File.WriteAllText(Path.Combine(inputDir, "One (2001).mkv"), "x");
+        File.WriteAllText(Path.Combine(inputDir, "Two (2002).mkv"), "x");
+
+        var config = new CompressarrConfig { Processing = new ProcessingSettings { MoveFiles = false, ClearTitleMetadata = false } };
+        config.HandBrake.CliPath = Path.Combine(_tempDir, "HandBrakeCLI.exe");
+        config.HandBrake.PresetsPath = Path.Combine(_tempDir, "presets.json");
+        config.Logging.LogFilePath = Path.Combine(_tempDir, "Logs");
+        config.Report.ReportPath = Path.Combine(_tempDir, "Reports");
+        config.Lanes.Add(MakeLane("lane1", "Lane", inputDir, outputDir));
+        return config;
     }
 
     [Fact]

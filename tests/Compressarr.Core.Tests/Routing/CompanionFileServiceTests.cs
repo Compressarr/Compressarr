@@ -140,6 +140,30 @@ public class CompanionFileServiceTests : IDisposable
         Assert.False(File.Exists(Path.Combine(destDir, "movie.bak")), "an unrecognized file type must never be moved to the destination");
     }
 
+    [Fact]
+    public void MoveCompanionFiles_AnotherVideoSharingTheStem_IsLeftAloneAndNeverRecycledAsUnmatched()
+    {
+        // "movie.mp4" begins with "movie." like the subtitle does, but it is a video of its own, perhaps still waiting in the queue: it is not a companion and not a
+        // leftover. Only the real unmatched file (movie.bak) is disposed of.
+        var sourceDir = Path.Combine(_tempDir, "Input", "Movie");
+        Directory.CreateDirectory(sourceDir);
+        var converted = Path.Combine(sourceDir, "movie.mkv");
+        var otherVideo = Path.Combine(sourceDir, "movie.mp4");
+        var subtitle = Path.Combine(sourceDir, "movie.srt");
+        var unwanted = Path.Combine(sourceDir, "movie.bak");
+        foreach (var f in new[] { converted, otherVideo, subtitle, unwanted }) File.WriteAllText(f, "x");
+
+        var destDir = Path.Combine(_tempDir, "Output", "Movie");
+        Directory.CreateDirectory(destDir);
+
+        _service.MoveCompanionFiles(converted, sourceDir, RoutedPath(destDir, "movie.mkv"), DeleteAfterConvertMode.Delete, CompanionExtensions, DeleteAfterConvertMode.Recycle, videoExtensions: VidTypes);
+
+        Assert.True(File.Exists(otherVideo), "another video that merely shares the name must not be disposed of");
+        Assert.False(File.Exists(Path.Combine(destDir, "movie.mp4")), "nor moved as if it were a companion");
+        Assert.True(File.Exists(Path.Combine(destDir, "movie.srt")));
+        Assert.False(File.Exists(unwanted));
+    }
+
     // ---- v2.1.3 code review finding #5: companion collision handling ----
 
     [Fact]

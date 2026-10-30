@@ -54,21 +54,74 @@ public interface IQueueService
     int RemoveError(string laneId, string fullName);
 }
 
+/// <summary>How long the queue display may reuse a lane's folder listing. Every status poll (the Monitor page every 1.5 s per open tab, Home Assistant, scripts) builds the list from a
+/// recursive scan of every lane's Input folder; on a share holding thousands of files that is real disk and network traffic competing with the encode. Zero = scan every time.</summary>
+public sealed record QueueScanOptions(TimeSpan CacheFor);
+
+/// <summary>A short-lived memory of what a folder scan found, for the queue display only (the engine scans for itself, always fresh). Cleared whenever the file being encoded
+/// changes - a finished file's source is gone by then - so a just-finished file does not linger in the list.</summary>
+internal sealed class CachedVideoFileScanner : IVideoFileScanner
+{
+    private readonly IVideoFileScanner _inner;
+    private readonly TimeSpan _cacheFor;
+    private readonly TimeProvider _time;
+    private readonly object _lock = new();
+    private readonly Dictionary<string, (DateTimeOffset At, IReadOnlyList<FileInfo> Files)> _results = new();
+    private string? _currentFile;
+
+    public CachedVideoFileScanner(IVideoFileScanner inner, TimeSpan cacheFor, TimeProvider? time = null)
+    {
+        _inner = inner;
+        _cacheFor = cacheFor;
+        _time = time ?? TimeProvider.System;
+    }
+
+    public IReadOnlyList<FileInfo> FindVideoFiles(string inputPath, IReadOnlyList<string> vidTypes, long minSizeBytes, int limit)
+    {
+        if (_cacheFor <= TimeSpan.Zero) return _inner.FindVideoFiles(inputPath, vidTypes, minSizeBytes, limit);
+
+        var key = string.Join("|", inputPath, string.Join(",", vidTypes), minSizeBytes, limit);
+        lock (_lock)   // held through the scan: callers arriving together share one scan instead of each walking the folder
+        {
+            var now = _time.GetUtcNow();
+            if (_results.TryGetValue(key, out var hit) && now - hit.At < _cacheFor) return hit.Files;
+
+            var files = _inner.FindVideoFiles(inputPath, vidTypes, minSizeBytes, limit);
+            _results[key] = (now, files);
+            return files;
+        }
+    }
+
+    /// <summary>Tells the cache which file is being encoded; a change (one finished, the next started, or the run ended) drops everything remembered.</summary>
+    public void ObserveCurrentFile(string? fullName)
+    {
+        lock (_lock)
+        {
+            if (string.Equals(_currentFile, fullName, StringComparison.OrdinalIgnoreCase)) return;
+            _currentFile = fullName;
+            _results.Clear();
+        }
+    }
+}
+
 public sealed class QueueService : IQueueService
 {
     private readonly IResumeStateStore _resumeStore;
     private readonly IPathExpander _pathExpander;
     private readonly IVideoFileScanner _scanner;
+    private readonly CachedVideoFileScanner _cachedScanner;
 
-    public QueueService(IResumeStateStore resumeStore, IPathExpander pathExpander, IVideoFileScanner scanner)
+    public QueueService(IResumeStateStore resumeStore, IPathExpander pathExpander, IVideoFileScanner scanner, QueueScanOptions? scanOptions = null)
     {
         _resumeStore = resumeStore;
         _pathExpander = pathExpander;
-        _scanner = scanner;
+        _cachedScanner = new CachedVideoFileScanner(scanner, scanOptions?.CacheFor ?? TimeSpan.Zero);
+        _scanner = _cachedScanner;
     }
 
     public List<UpNextItem> GetUpNext(CompressarrConfig config, QueueRunContext currentRun)
     {
+        _cachedScanner.ObserveCurrentFile(currentRun.CurrentFileFullName);
         var upNext = QueueRules.BuildUpNext(config, _resumeStore.Load(AppPaths.GetResumeFilePath()), _pathExpander, _scanner, currentRun, out var sawUntracked);
         if (!sawUntracked) return upNext;
 

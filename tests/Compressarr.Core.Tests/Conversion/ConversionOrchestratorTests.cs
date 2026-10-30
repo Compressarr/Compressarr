@@ -350,7 +350,7 @@ file sealed class SequencedOutcomeArrUnmonitorService : IArrUnmonitorService
 
 file sealed class ThrowingCompanionFileService : ICompanionFileService
 {
-    public void MoveCompanionFiles(string originalFileFullName, string originalFileDirectory, string routedVideoDestPath, DeleteAfterConvertMode deleteAfterConvert, IReadOnlyList<string> companionExtensions, DeleteAfterConvertMode unmatchedCompanionAction, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite) =>
+    public void MoveCompanionFiles(string originalFileFullName, string originalFileDirectory, string routedVideoDestPath, DeleteAfterConvertMode deleteAfterConvert, IReadOnlyList<string> companionExtensions, DeleteAfterConvertMode unmatchedCompanionAction, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, IReadOnlyList<string>? videoExtensions = null) =>
         throw new IOException("Access to the path is denied.");
 
     public void CleanUpEmptySourceFolder(string originalFileDirectory, string inputRoot, IReadOnlyList<string> vidTypes, DeleteAfterConvertMode deleteAfterConvert, DeleteAfterConvertMode unmatchedCompanionAction) =>
@@ -359,7 +359,7 @@ file sealed class ThrowingCompanionFileService : ICompanionFileService
 
 file sealed class NoOpCompanionFileService : ICompanionFileService
 {
-    public void MoveCompanionFiles(string originalFileFullName, string originalFileDirectory, string routedVideoDestPath, DeleteAfterConvertMode deleteAfterConvert, IReadOnlyList<string> companionExtensions, DeleteAfterConvertMode unmatchedCompanionAction, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite) { }
+    public void MoveCompanionFiles(string originalFileFullName, string originalFileDirectory, string routedVideoDestPath, DeleteAfterConvertMode deleteAfterConvert, IReadOnlyList<string> companionExtensions, DeleteAfterConvertMode unmatchedCompanionAction, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, IReadOnlyList<string>? videoExtensions = null) { }
     public void CleanUpEmptySourceFolder(string originalFileDirectory, string inputRoot, IReadOnlyList<string> vidTypes, DeleteAfterConvertMode deleteAfterConvert, DeleteAfterConvertMode unmatchedCompanionAction) { }
 }
 
@@ -372,7 +372,7 @@ file sealed class ThrowOnMoveCompanionFileService : ICompanionFileService
 {
     public bool CleanUpCalled { get; private set; }
 
-    public void MoveCompanionFiles(string originalFileFullName, string originalFileDirectory, string routedVideoDestPath, DeleteAfterConvertMode deleteAfterConvert, IReadOnlyList<string> companionExtensions, DeleteAfterConvertMode unmatchedCompanionAction, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite) =>
+    public void MoveCompanionFiles(string originalFileFullName, string originalFileDirectory, string routedVideoDestPath, DeleteAfterConvertMode deleteAfterConvert, IReadOnlyList<string> companionExtensions, DeleteAfterConvertMode unmatchedCompanionAction, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, IReadOnlyList<string>? videoExtensions = null) =>
         throw new IOException("Access to the path is denied.");
 
     public void CleanUpEmptySourceFolder(string originalFileDirectory, string inputRoot, IReadOnlyList<string> vidTypes, DeleteAfterConvertMode deleteAfterConvert, DeleteAfterConvertMode unmatchedCompanionAction) =>
@@ -385,7 +385,7 @@ file sealed class ThrowOnMoveCompanionFileService : ICompanionFileService
 /// confirmed complete).</summary>
 file sealed class ThrowOnCleanupCompanionFileService : ICompanionFileService
 {
-    public void MoveCompanionFiles(string originalFileFullName, string originalFileDirectory, string routedVideoDestPath, DeleteAfterConvertMode deleteAfterConvert, IReadOnlyList<string> companionExtensions, DeleteAfterConvertMode unmatchedCompanionAction, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite) { }
+    public void MoveCompanionFiles(string originalFileFullName, string originalFileDirectory, string routedVideoDestPath, DeleteAfterConvertMode deleteAfterConvert, IReadOnlyList<string> companionExtensions, DeleteAfterConvertMode unmatchedCompanionAction, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, IReadOnlyList<string>? videoExtensions = null) { }
 
     public void CleanUpEmptySourceFolder(string originalFileDirectory, string inputRoot, IReadOnlyList<string> vidTypes, DeleteAfterConvertMode deleteAfterConvert, DeleteAfterConvertMode unmatchedCompanionAction) =>
         throw new IOException("Access to the path is denied.");
@@ -1658,6 +1658,73 @@ public class ConversionOrchestratorTests : IDisposable
         Assert.Equal(ResumeStatus.MoveFailed, entry.Status);
         Assert.Equal(encodedPath, entry.EncodedFilePath);
         Assert.True(File.Exists(encodedPath)); // still sitting right where it was
+    }
+
+    [Fact]
+    public async Task ProcessLaneAsync_MoveFailedEntry_RestingInOutputFails_StaysMoveFailed_AndIsFiledOnALaterPass()
+    {
+        // The retry succeeds at routing (MoveFiles has since been turned off, so the file is to rest in Output under its clean name) but resting it fails - a locked
+        // file. That is "still failing": the entry must stay MoveFailed with its staged path, the original untouched, so a later pass can finish the job. It used to be
+        // marked Completed (staged path forgotten) before the move was attempted, which stranded the file under its staging name for good.
+        if (!OperatingSystem.IsWindows()) return;   // a sharing violation is how the lock shows
+
+        var inputDir = Path.Combine(_tempDir, "Input");
+        var outputDir = Path.Combine(_tempDir, "Output");
+        Directory.CreateDirectory(inputDir);
+        Directory.CreateDirectory(outputDir);
+
+        var sourcePath = Path.Combine(inputDir, "Caddyshack (1980).mkv");
+        File.WriteAllText(sourcePath, "source");
+
+        var lane = new LaneConfig
+        {
+            Id = "lane1",
+            DisplayName = "Test Lane",
+            Enabled = true,
+            Input = inputDir,
+            Output = outputDir,
+            MoviePreset = "Any Preset",
+            MovieBasePath = @"Z:\Unavailable\Movies"
+        };
+
+        var config = new CompressarrConfig
+        {
+            Processing = new ProcessingSettings { DeleteAfterConvert = DeleteAfterConvertMode.Delete, MoveFiles = true, ClearTitleMetadata = false }
+        };
+        config.Lanes.Add(lane);
+        var configStore = new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue);
+
+        var orchestrator = new ConversionOrchestrator(
+            new PassThroughPathExpander(), new RealFolderScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), new MetadataService(),
+            new FakeProcessRunner(), new FileRouter(), new NoOpCompanionFileService(), new NoOpArrUnmonitorService(),
+            new DeletingTrashService(), new NoOpRunLogger(), new NoOpResumeStateStore(), new NoOpProgressReporter(), configStore);
+
+        var resumeState = new List<ResumeEntry>();
+        await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000000", resumeState, Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+        var encodedPath = Assert.Single(resumeState).EncodedFilePath!;
+        Assert.Equal(ResumeStatus.MoveFailed, resumeState[0].Status);
+
+        config.Processing.MoveFiles = false;
+        var clean = Path.Combine(outputDir, "Caddyshack (1980).mkv");
+        using (new FileStream(clean, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000100", resumeState, Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+            var stuck = Assert.Single(resumeState);
+            Assert.Equal(ResumeStatus.MoveFailed, stuck.Status);
+            Assert.Equal(encodedPath, stuck.EncodedFilePath);
+            Assert.True(File.Exists(encodedPath));
+            Assert.True(File.Exists(sourcePath));       // the original is only cleaned up once the result is in its place
+        }
+
+        File.Delete(clean);
+        await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000200", resumeState, Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        var done = Assert.Single(resumeState);
+        Assert.Equal(ResumeStatus.Completed, done.Status);
+        Assert.True(File.Exists(clean));
+        Assert.False(File.Exists(encodedPath));
+        Assert.False(File.Exists(sourcePath));
     }
 
     [Fact]

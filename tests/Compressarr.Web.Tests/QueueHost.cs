@@ -9,6 +9,7 @@ using Compressarr.Core.Catalog;
 using Compressarr.Core.Config;
 using Compressarr.Core.Conversion;
 using Compressarr.Core.Diagnostics;
+using Compressarr.Core.Queue;
 using Compressarr.Core.Reporting;
 using Compressarr.Web;
 using Microsoft.AspNetCore.Builder;
@@ -113,6 +114,9 @@ public sealed class QueueHost : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.WebHost.UseTestServer();
         builder.Services.AddCompressarrCore();
+        // A test drops a file and asks for the queue at once: no remembered folder listing.
+        builder.Services.RemoveAll<QueueScanOptions>();
+        builder.Services.AddSingleton(new QueueScanOptions(TimeSpan.Zero));
         builder.Services.AddCompressarrWeb();
         builder.Services.RemoveAll<ICpuUsageSampler>();
         builder.Services.AddSingleton<ICpuUsageSampler, NoCpuSampler>();

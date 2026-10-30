@@ -437,10 +437,9 @@ public class WebAuthMiddlewareTests
     }
 
     [Fact]
-    public async Task AllowedHosts_EmptyMeansAny_ASetListAnswersOnlyToItsNames_AndLocalhostAlways()
+    public async Task AllowedHosts_ASetListAnswersOnlyToItsNames_AndLocalhostAlways()
     {
         await using var host = await QueueHost.StartAsync(Lane1);
-        using (var any = await Get(host, "/api/run/status", "127.0.0.1", ("Host", "whatever.example"))) Assert.Equal(HttpStatusCode.OK, any.StatusCode);
 
         AllowHosts(host, "Compressarr.LAN, 192.168.10.91");
 
@@ -456,6 +455,54 @@ public class WebAuthMiddlewareTests
         Assert.Equal(HttpStatusCode.BadRequest, rebinding.StatusCode);
         Assert.Equal(HttpStatusCode.OK, localhost.StatusCode);
         Assert.Equal(HttpStatusCode.OK, loopback.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, v6.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("192.168.10.91:1212", true)]
+    [InlineData("[fe80::1]:1212", true)]
+    [InlineData("nas:1212", true)]
+    [InlineData("MEDIA-PC", true)]
+    [InlineData("nas.local:1212", true)]
+    [InlineData("server.lan", true)]
+    [InlineData("compressarr.home.arpa", true)]
+    [InlineData("rebind.evil.example:1212", false)]
+    [InlineData("compressarr.example.com", false)]
+    [InlineData("x.local.evil.example", false)]
+    public async Task AllowedHostsEmpty_AnswersToTheNamesOfAHomeNetwork_ButNotToADomainNameARebindingPageWouldUse(string hostHeader, bool answers)
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+
+        using var response = await Get(host, "/api/run/status", Lan, ("Host", hostHeader));
+
+        Assert.Equal(answers ? HttpStatusCode.OK : HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AllowedHostsEmpty_LeavesAProxiedRequestAndTheKeyedApiAlone_BecauseNeitherCarriesTheLocalFreePass()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        Configure(host);
+
+        // Through a proxy (a forwarding header) there is no free pass: it is the sign-in that decides, not the name.
+        using var proxied = await Get(host, "/api/run/status", Lan, ("Host", "compressarr.example.com"), ("X-Forwarded-For", "203.0.113.9"));
+        using var v1 = await Get(host, "/api/v1/whoami", Lan, ("Host", "compressarr.example.com"));
+        using var plain = await Get(host, "/api/run/status", Lan, ("Host", "compressarr.example.com"));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, proxied.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, v1.StatusCode);   // reached the key check (missing_key), not the host check
+        Assert.Equal(HttpStatusCode.BadRequest, plain.StatusCode);
+    }
+
+    [Fact]
+    public async Task AllowedHostsEmpty_LocalhostAndLoopbackAlwaysAnswer()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+
+        using var localhost = await Get(host, "/api/run/status", "127.0.0.1", ("Host", "localhost:1212"));
+        using var v6 = await Get(host, "/api/run/status", "::1", ("Host", "[::1]:1212"));
+
+        Assert.Equal(HttpStatusCode.OK, localhost.StatusCode);
         Assert.Equal(HttpStatusCode.OK, v6.StatusCode);
     }
 

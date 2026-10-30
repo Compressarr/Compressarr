@@ -261,7 +261,7 @@ internal sealed class EncodedFileFinisher
         {
             try
             {
-                _companionFiles.MoveCompanionFiles(file.FullName, file.DirectoryName!, routedDestPath, config.Processing.DeleteAfterConvert, config.Processing.CompanionExtensions, config.Processing.UnmatchedCompanionAction, config.Processing.OnDestinationCollision);
+                _companionFiles.MoveCompanionFiles(file.FullName, file.DirectoryName!, routedDestPath, config.Processing.DeleteAfterConvert, config.Processing.CompanionExtensions, config.Processing.UnmatchedCompanionAction, config.Processing.OnDestinationCollision, config.Processing.VidTypes);
             }
             catch (Exception ex)
             {

@@ -31,8 +31,12 @@ public static class RunEndpoints
 
     public static void MapRunEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/api/run/once", async (IConfigStore configStore, IRunOrchestrator runOrchestrator) =>
+        app.MapPost("/api/run/once", async (IConfigStore configStore, IRunOrchestrator runOrchestrator, IActiveRunController activeRun) =>
         {
+            // A pass already in flight (monitoring, a Run Now) is not joined by a second one: it would only wait its turn and then run a needless extra pass. Between passes the monitor is idle, and this runs.
+            if (activeRun.IsRunning)
+                return Results.Json(new { message = "A pass is already running." }, statusCode: StatusCodes.Status409Conflict);
+
             var config = configStore.Load(AppPaths.GetConfigFilePath());
             var result = await runOrchestrator.RunOnceAsync(config);
             return result is null

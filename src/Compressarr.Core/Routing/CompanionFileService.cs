@@ -38,7 +38,11 @@ public interface ICompanionFileService
     /// matched set. collisionMode applies the SAME Overwrite/Skip/Rename policy the video itself
     /// already gets (v2.1.3 code review finding #5 - a companion collision used to always
     /// overwrite, independent of what was actually configured); a Skip on one companion only
-    /// leaves that one file where it is, it does not abort handling the rest.</summary>
+    /// leaves that one file where it is, it does not abort handling the rest.
+    ///
+    /// videoExtensions (the lane scan's VidTypes, no leading dot): a stem-matched file of one of these types is another video that merely shares the name
+    /// ("Movie.mkv" and "Movie.mp4", "Show S01E01.mkv" and "Show S01E01.avi"), possibly still waiting in the queue. It is never a companion and never an
+    /// "unmatched leftover" to dispose of - it is left exactly where it is (unless the type is also on the companion list).</summary>
     void MoveCompanionFiles(
         string originalFileFullName,
         string originalFileDirectory,
@@ -46,7 +50,8 @@ public interface ICompanionFileService
         DeleteAfterConvertMode deleteAfterConvert,
         IReadOnlyList<string> companionExtensions,
         DeleteAfterConvertMode unmatchedCompanionAction,
-        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite);
+        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite,
+        IReadOnlyList<string>? videoExtensions = null);
 
     /// <summary>Checks whether originalFileDirectory is now empty of video (every video that was
     /// ever in it has since been routed/deleted) and, if so, disposes of whatever's left per
@@ -91,7 +96,8 @@ public sealed class CompanionFileService : ICompanionFileService
         DeleteAfterConvertMode deleteAfterConvert,
         IReadOnlyList<string> companionExtensions,
         DeleteAfterConvertMode unmatchedCompanionAction,
-        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite)
+        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite,
+        IReadOnlyList<string>? videoExtensions = null)
     {
         if (!Directory.Exists(originalFileDirectory)) return;
 
@@ -103,6 +109,12 @@ public sealed class CompanionFileService : ICompanionFileService
             .Select(t => "." + t.Trim().TrimStart('.'))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        var otherVideoExtensions = (videoExtensions ?? Array.Empty<string>())
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => "." + t.Trim().TrimStart('.'))
+            .Where(e => !wantedExtensions.Contains(e))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         // Matched as "the video's own extension-stripped name, followed by a '.'" rather than a
         // plain prefix, so "S03E1"'s own stem can't accidentally also claim "S03E10 - Magic.eng.srt"
         // (both start with "S03E1", but only one is followed by ".").
@@ -110,6 +122,7 @@ public sealed class CompanionFileService : ICompanionFileService
         var ownCompanions = Directory.EnumerateFiles(originalFileDirectory)
             .Where(f => !string.Equals(f, originalFileFullName, StringComparison.OrdinalIgnoreCase))
             .Where(f => Path.GetFileName(f).StartsWith(stemPrefix, StringComparison.OrdinalIgnoreCase))
+            .Where(f => !otherVideoExtensions.Contains(Path.GetExtension(f)))
             .ToList();
 
         foreach (var sibling in ownCompanions)

@@ -43,10 +43,24 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
     private static readonly string UpdateSql =
         "UPDATE OR REPLACE queue SET key = @key, " + string.Join(", ", Columns.Select((c, i) => c + " = @p" + i)) + ", updated_at = @now WHERE id = @id;";
 
+    /// <summary>After a failure to open the database the JSON store serves, but only for this long: then the database is tried again. A failure that was only a moment's
+    /// trouble (a virus scanner holding the file as the app started, a busy database) must not leave the queue, the sign-in, the API keys and the hold on the fallback until
+    /// the app is restarted.</summary>
+    internal static readonly TimeSpan RetryFailedAfter = TimeSpan.FromSeconds(30);
+
+    private static readonly TimeSpan[] TransientRetryDelays = { TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(750) };
+
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly JsonResumeStateStore _json = new();
+    private readonly TimeProvider _time;
     private string? _importFailure;
+    private DateTimeOffset _failedAt;
     private string? _notice;
+
+    public SqliteResumeStateStore() : this(TimeProvider.System) { }
+
+    /// <summary>For tests that need to move the clock past the retry pause.</summary>
+    internal SqliteResumeStateStore(TimeProvider time) => _time = time;
 
     /// <summary>Why the queue could not be moved into the database, or null. While it is set the JSON store serves instead.</summary>
     public string? ImportFailure => _importFailure;
@@ -261,35 +275,60 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
     /// <summary>True when the database is ready to use (created, checked, migrated, and the JSON file imported if there was one).</summary>
     private bool Ready(string resumeFilePath)
     {
-        if (_importFailure is not null) return false;
         var databasePath = StateDatabase.PathFor(resumeFilePath);
         lock (InitLock)
         {
-            if (ReadyPaths.Contains(databasePath) && File.Exists(databasePath)) return true;
-            var isNew = !File.Exists(databasePath);
-            try
+            if (_importFailure is not null)
             {
-                if (!isNew && StateDatabase.OpenAndCheck(databasePath) is { } damage)
-                {
-                    var aside = SetAside(databasePath, ".damaged");
-                    _notice = $"The queue database was damaged ({damage}) and was set aside as {Path.GetFileName(aside)}; the queue starts empty and your folders are scanned again. Queue edits (order, skips, profile choices) were lost.";
-                    isNew = true;
-                }
-
-                if (isNew && StateDatabase.OpenAndCheck(databasePath) is { } createFailure) throw new InvalidDataException(createFailure);
-                Import(resumeFilePath, databasePath);
-                ReadyPaths.Add(databasePath);
-                return true;
+                // Inside the pause after a failure the fallback keeps serving; after it, the database is looked at again.
+                if (_time.GetUtcNow() - _failedAt < RetryFailedAfter) return false;
+                _importFailure = null;
             }
-            catch (Exception ex) when (ex is not (OutOfMemoryException or InvalidOperationException))
+
+            if (ReadyPaths.Contains(databasePath) && File.Exists(databasePath)) return true;
+
+            for (var attempt = 0; ; attempt++)
             {
-                _importFailure = ex.Message;
-                // A database this call just created is thrown away, so the next start imports the untouched JSON file again. One that was already
-                // there is never deleted: it may be damaged, but it may also hold the only copy of the queue.
-                if (isNew) { try { File.Delete(databasePath); } catch { /* the next start tries again */ } }
-                return false;
+                var isNew = !File.Exists(databasePath);
+                try
+                {
+                    if (!isNew && StateDatabase.OpenAndCheck(databasePath) is { } damage)
+                    {
+                        var aside = SetAside(databasePath, ".damaged");
+                        _notice = $"The queue database was damaged ({damage}) and was set aside as {Path.GetFileName(aside)}; the queue starts empty and your folders are scanned again. Queue edits (order, skips, profile choices) were lost.";
+                        isNew = true;
+                    }
+
+                    if (isNew && StateDatabase.OpenAndCheck(databasePath) is { } createFailure) throw new InvalidDataException(createFailure);
+                    Import(resumeFilePath, databasePath);
+                    ReadyPaths.Add(databasePath);
+                    return true;
+                }
+                catch (Exception ex) when (IsTransient(ex) && attempt < TransientRetryDelays.Length)
+                {
+                    // A file held for a moment (a scanner, another process): wait a little and open it again before falling back.
+                    DiscardIfJustCreated(isNew, databasePath);
+                    Thread.Sleep(TransientRetryDelays[attempt]);
+                }
+                catch (Exception ex) when (ex is not (OutOfMemoryException or InvalidOperationException))
+                {
+                    _importFailure = ex.Message;
+                    _failedAt = _time.GetUtcNow();
+                    // A database this call just created is thrown away, so the next try imports the untouched JSON file again. One that was already
+                    // there is never deleted: it may be damaged, but it may also hold the only copy of the queue.
+                    DiscardIfJustCreated(isNew, databasePath);
+                    return false;
+                }
             }
         }
+    }
+
+    /// <summary>Trouble that passes by itself: the file or its folder is held, or the database is busy or locked, right now.</summary>
+    private static bool IsTransient(Exception ex) => ex is IOException || ex is SqliteException { SqliteErrorCode: 5 or 6 };
+
+    private static void DiscardIfJustCreated(bool isNew, string databasePath)
+    {
+        if (isNew) { try { File.Delete(databasePath); } catch { /* the next try starts again */ } }
     }
 
     /// <summary>Moves the JSON queue file into an empty database, once (the marker in <c>meta</c> says it was done, with or without a file).</summary>

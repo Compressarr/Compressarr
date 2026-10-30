@@ -103,9 +103,9 @@ public sealed class WebAuthMiddleware
         var path = context.Request.Path.Value ?? "/";
         var isV1 = path.Equals("/api/v1", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/api/v1/", StringComparison.OrdinalIgnoreCase);
 
-        if (!HostAllowed(context, allowedHosts))
+        if (!HostAllowed(context, allowedHosts, isV1))
         {
-            await Plain(context, StatusCodes.Status400BadRequest, "Invalid host. Open Compressarr with one of the names set in Settings > Host > Allowed Hosts.");
+            await Plain(context, StatusCodes.Status400BadRequest, "Invalid host. Open Compressarr by its IP address or computer name, or add the name you are using to Settings > Host > Allowed Hosts.");
             return;
         }
 
@@ -177,14 +177,29 @@ public sealed class WebAuthMiddleware
 
     // ---- the checks ----------------------------------------------------------------------------------------------------------------------
 
-    /// <summary>Empty list = any host. Otherwise the Host header's host must be listed; <c>localhost</c> and the loopback addresses always pass, so a typo can be fixed from the PC.</summary>
-    private static bool HostAllowed(HttpContext context, string[] allowedHosts)
+    /// <summary>With a list: the Host header's host must be listed; <c>localhost</c> and the loopback addresses always pass, so a typo can be fixed from the PC.
+    /// Without one, the names a person uses on their own network still pass (an IP address, <c>localhost</c>, a computer name with no dots, a <c>.local</c>, <c>.lan</c>,
+    /// <c>.home</c> or <c>.internal</c> name) but a public-looking domain name does not: that is what a DNS-rebinding page uses to reach a program on the local network
+    /// under its own name, and its requests would carry the local network's free pass. A request that went through a reverse proxy (forwarding headers) has no free pass
+    /// and is not held to this, nor is the Automation API (it needs a key).</summary>
+    internal static bool HostAllowed(HttpContext context, string[] allowedHosts, bool isV1 = false)
     {
-        if (allowedHosts.Length == 0) return true;
-
         var host = WebAuthGate.HostOf(context.Request.Host.Value ?? "").ToLowerInvariant();
         if (host is "localhost" or "127.0.0.1" or "::1") return true;
-        return allowedHosts.Contains(host);
+        if (allowedHosts.Length > 0) return allowedHosts.Contains(host);
+        if (isV1 || WebAuthPolicy.HasForwardingHeader(context.Request.Headers.Keys)) return true;
+
+        return IsLocalStyleHost(host);
+    }
+
+    private static readonly string[] LocalSuffixes = { ".local", ".lan", ".home", ".internal", ".localdomain", ".home.arpa" };
+
+    internal static bool IsLocalStyleHost(string host)
+    {
+        if (host.Length == 0) return true;   // an HTTP/1.0 request without a Host header
+        if (IPAddress.TryParse(host, out _)) return true;
+        if (!host.Contains('.')) return true;
+        return LocalSuffixes.Any(suffix => host.EndsWith(suffix, StringComparison.Ordinal));
     }
 
     /// <summary>For every state-changing request: the browser says where it came from (<c>Sec-Fetch-Site</c>), or - older browsers - the <c>Origin</c> must be this site. A request with

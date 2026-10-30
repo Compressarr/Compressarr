@@ -30,6 +30,22 @@ file sealed class BrokenSecretStore : ISecretStore
     public bool ReplaceAll(IReadOnlyDictionary<string, string> secrets) => false;
 }
 
+/// <summary>A secret store whose reads fail a set number of times (a database that is busy for a moment) and are real after that.</summary>
+file sealed class FlakyReadSecretStore : ISecretStore
+{
+    private readonly ISecretStore _inner;
+    public FlakyReadSecretStore(ISecretStore inner) => _inner = inner;
+    public int FailNextReads { get; set; }
+
+    public IReadOnlyDictionary<string, string>? ReadAll()
+    {
+        if (FailNextReads > 0) { FailNextReads--; return null; }
+        return _inner.ReadAll();
+    }
+
+    public bool ReplaceAll(IReadOnlyDictionary<string, string> secrets) => _inner.ReplaceAll(secrets);
+}
+
 file sealed class NoTrash : ITrashService
 {
     public void DeleteFile(string path, DeleteAfterConvertMode mode) { }
@@ -161,6 +177,40 @@ public class SecretsTests : AppDataTestBase
         Assert.Contains("son-secret", SettingsText());
         Assert.Contains("tok-secret", SettingsText());
         Assert.Equal("son-secret", store.Load(AppPaths.GetConfigFilePath()).Arrs.Sonarr.ApiKey);
+    }
+
+    [Fact]
+    public void AnUpdate_WhoseLoadCouldNotReadTheDatabase_DoesNotEraseTheStoredSecrets()
+    {
+        // The database is busy for a moment as the settings are loaded and free again by the time they are saved. The loaded settings carry no keys (they could not be
+        // fetched, not "there are none"); saving them as they are used to write that empty set over every stored key and webhook address.
+        var real = NewStore();
+        real.Save(ConfigWithSecrets(), AppPaths.GetConfigFilePath());
+
+        var flaky = new FlakyReadSecretStore(new SqliteSecretStore(new SqliteResumeStateStore())) { FailNextReads = 1 };
+        NewStore(flaky).Update(AppPaths.GetConfigFilePath(), c => { c.Web.Port = 4321; return true; });
+
+        var loaded = real.Load(AppPaths.GetConfigFilePath());
+        Assert.Equal(4321, loaded.Web.Port);
+        Assert.Equal("son-secret", loaded.Arrs.Sonarr.ApiKey);
+        Assert.Equal("rad-secret", loaded.Arrs.Radarr.ApiKey);
+        Assert.Equal("tok-secret", loaded.Notifications.Channels.Single().Settings["token"]);
+        Assert.DoesNotContain("son-secret", SettingsText());
+    }
+
+    [Fact]
+    public void AnUpdate_WhenTheDatabaseStaysUnreadable_LeavesTheStoredSecretsAlone()
+    {
+        var real = NewStore();
+        real.Save(ConfigWithSecrets(), AppPaths.GetConfigFilePath());
+
+        var flaky = new FlakyReadSecretStore(new SqliteSecretStore(new SqliteResumeStateStore())) { FailNextReads = 2 };   // the load and the look before the save
+        NewStore(flaky).Update(AppPaths.GetConfigFilePath(), c => { c.Web.Port = 4321; return true; });
+
+        var loaded = real.Load(AppPaths.GetConfigFilePath());
+        Assert.Equal(4321, loaded.Web.Port);
+        Assert.Equal("son-secret", loaded.Arrs.Sonarr.ApiKey);
+        Assert.Equal("tok-secret", loaded.Notifications.Channels.Single().Settings["token"]);
     }
 
     [Fact]

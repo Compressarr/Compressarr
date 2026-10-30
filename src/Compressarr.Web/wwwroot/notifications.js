@@ -6,9 +6,7 @@ const addChannelType = document.getElementById('addChannelType');
 let notifierTypes = []; // [{type, displayName, fields: [{key,label,inputType,required,secret,options}]}]
 
 function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  return String(text ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 // ---- Toast toggle - a single setting, saved immediately on change rather than needing its own

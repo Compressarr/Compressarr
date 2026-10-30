@@ -105,6 +105,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<INotificationDispatcher, NotificationDispatcher>();
 
         services.AddSingleton<IActiveRunController, ActiveRunController>();
+        // The queue display reuses a lane's folder listing for a few seconds (see QueueScanOptions); the engine always scans fresh.
+        services.AddSingleton(new QueueScanOptions(TimeSpan.FromSeconds(3)));
         services.AddSingleton<IQueueService, QueueService>();
         services.AddSingleton<IConversionOrchestrator, ConversionOrchestrator>();
         services.AddSingleton<IRunOrchestrator, RunOrchestrator>();

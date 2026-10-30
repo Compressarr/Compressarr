@@ -1,4 +1,7 @@
+using System.IO.Compression;
 using System.Net;
+using System.Security.Cryptography;
+using System.Text.Json.Nodes;
 using Compressarr.Core.Dependencies;
 
 namespace Compressarr.Core.Tests.Dependencies;
@@ -33,9 +36,9 @@ public class HandBrakeInstallerTests
           "tag_name": "1.11.2",
           "html_url": "https://github.com/HandBrake/HandBrake/releases/tag/1.11.2",
           "assets": [
-            { "name": "HandBrakeCLI-1.11.2-win-x86_64.zip", "browser_download_url": "https://github.com/HandBrake/HandBrake/releases/download/1.11.2/HandBrakeCLI-1.11.2-win-x86_64.zip", "size": 25721458 },
+            { "name": "HandBrakeCLI-1.11.2-win-x86_64.zip", "browser_download_url": "https://github.com/HandBrake/HandBrake/releases/download/1.11.2/HandBrakeCLI-1.11.2-win-x86_64.zip", "size": 25721458, "digest": "sha256:80bfe8d5f5d11cc3ef76b834add3ed4e82dee6523ffeb435c283f88b1a21f09d" },
             { "name": "HandBrakeCLI-1.11.2-win-aarch64.zip", "browser_download_url": "https://github.com/HandBrake/HandBrake/releases/download/1.11.2/HandBrakeCLI-1.11.2-win-aarch64.zip", "size": 24000000 },
-            { "name": "HandBrakeCLI-1.11.2.dmg", "browser_download_url": "https://github.com/HandBrake/HandBrake/releases/download/1.11.2/HandBrakeCLI-1.11.2.dmg", "size": 30000000 },
+            { "name": "HandBrakeCLI-1.11.2.dmg", "browser_download_url": "https://github.com/HandBrake/HandBrake/releases/download/1.11.2/HandBrakeCLI-1.11.2.dmg", "size": 30000000, "digest": "sha256:14463aa81038aaa3ce421dc6cee65fd6c82fdabda040931541ccca38939299fa" },
             { "name": "HandBrake-1.11.2-x86_64-Win_GUI.zip", "browser_download_url": "https://example.invalid/gui.zip", "size": 99999999 }
           ]
         }
@@ -113,5 +116,105 @@ public class HandBrakeInstallerTests
         // machine, so it's worth asserting directly rather than trusting the implementation.
         Assert.NotNull(capturedRequest);
         Assert.NotEmpty(capturedRequest!.Headers.UserAgent);
+    }
+
+    [Fact]
+    public async Task GetLatestReleaseAsync_CarriesTheChecksumGitHubPublishedForTheAsset()
+    {
+        if (OperatingSystem.IsLinux()) return;
+
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(SampleReleaseJson) });
+        var release = await new Compressarr.Core.Dependencies.HandBrakeInstaller(new FakeHttpClientFactory(handler)).GetLatestReleaseAsync();
+
+        Assert.Equal(OperatingSystem.IsWindows() ? "80bfe8d5f5d11cc3ef76b834add3ed4e82dee6523ffeb435c283f88b1a21f09d" : "14463aa81038aaa3ce421dc6cee65fd6c82fdabda040931541ccca38939299fa", release!.Sha256);
+    }
+
+    [Theory]
+    [InlineData("sha256:abc123", "abc123")]
+    [InlineData("SHA256:ABC123", "ABC123")]
+    [InlineData("sha512:abc123", null)]
+    [InlineData("sha256:", null)]
+    [InlineData(null, null)]
+    public void DigestOf_ReadsOnlyASha256Value(string? digest, string? expected)
+    {
+        var asset = new JsonObject { ["name"] = "x.zip" };
+        if (digest is not null) asset["digest"] = digest;
+
+        Assert.Equal(expected, Compressarr.Core.Dependencies.HandBrakeInstaller.DigestOf(asset));
+    }
+
+    [Fact]
+    public async Task InstallAsync_WithNoPublishedChecksum_IsRefusedBeforeAnythingIsDownloaded()
+    {
+        var requests = 0;
+        var handler = new FakeHttpMessageHandler(_ => { requests++; return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[] { 1, 2, 3 }) }; });
+        var installer = new Compressarr.Core.Dependencies.HandBrakeInstaller(new FakeHttpClientFactory(handler));
+        var folder = Path.Combine(Path.GetTempPath(), "compressarr-hbinst-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var release = new HandBrakeReleaseInfo("1.11.2", "HandBrakeCLI-1.11.2-win-x86_64.zip", "https://example.invalid/hb.zip", 3, "https://example.invalid/r", Sha256: null);
+
+            await Assert.ThrowsAsync<InvalidDataException>(() => installer.InstallAsync(release, folder));
+
+            Assert.Equal(0, requests);
+            Assert.False(Directory.Exists(folder));
+        }
+        finally
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task InstallAsync_ADownloadThatDoesNotMatchTheChecksum_IsThrownAwayAndNothingIsInstalled()
+    {
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[] { 1, 2, 3, 4 }) });
+        var installer = new Compressarr.Core.Dependencies.HandBrakeInstaller(new FakeHttpClientFactory(handler));
+        var folder = Path.Combine(Path.GetTempPath(), "compressarr-hbinst-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var release = new HandBrakeReleaseInfo("1.11.2", "HandBrakeCLI-1.11.2-win-x86_64.zip", "https://example.invalid/hb.zip", 4, "https://example.invalid/r", Sha256: new string('0', 64));
+
+            var ex = await Assert.ThrowsAsync<InvalidDataException>(() => installer.InstallAsync(release, folder));
+
+            Assert.Contains("does not match", ex.Message);
+            Assert.Empty(Directory.EnumerateFiles(folder));
+        }
+        finally
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task InstallAsync_ADownloadThatMatchesTheChecksum_IsInstalled()
+    {
+        if (!OperatingSystem.IsWindows()) return;   // the zip route is the Windows one
+
+        var zip = new MemoryStream();
+        using (var archive = new ZipArchive(zip, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using var writer = new StreamWriter(archive.CreateEntry("HandBrakeCLI-1.11.2-win-x86_64/HandBrakeCLI.exe").Open());
+            writer.Write("fake program");
+        }
+        var bytes = zip.ToArray();
+        var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) });
+        var installer = new Compressarr.Core.Dependencies.HandBrakeInstaller(new FakeHttpClientFactory(handler));
+        var folder = Path.Combine(Path.GetTempPath(), "compressarr-hbinst-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            var release = new HandBrakeReleaseInfo("1.11.2", "HandBrakeCLI-1.11.2-win-x86_64.zip", "https://example.invalid/hb.zip", bytes.Length, "https://example.invalid/r", Sha256: sha);
+
+            var installed = await installer.InstallAsync(release, folder);
+
+            Assert.Equal(Path.Combine(folder, "HandBrakeCLI.exe"), installed);
+            Assert.True(File.Exists(installed));
+        }
+        finally
+        {
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
     }
 }

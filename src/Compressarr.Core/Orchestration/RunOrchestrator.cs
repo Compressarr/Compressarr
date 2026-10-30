@@ -65,6 +65,10 @@ public sealed class RunOrchestrator : IRunOrchestrator
 
     private readonly TimeSpan _postExecTimeout;
 
+    /// <summary>One pass at a time, whoever asks (the monitor loop, Run Now, the Automation API, the old /api/run/once): two passes would pick the same queued file, encode it twice
+    /// and delete the source under each other, and IActiveRunController tracks a single pass. A second caller waits for the first to finish.</summary>
+    private readonly SemaphoreSlim _passLock = new(1, 1);
+
     private readonly IPathExpander _pathExpander;
     private readonly IEncoderPresetService _presets;
     private readonly IConversionOrchestrator _conversionOrchestrator;
@@ -164,6 +168,27 @@ public sealed class RunOrchestrator : IRunOrchestrator
     }
 
     public async Task<RunResult?> RunOnceAsync(CompressarrConfig config, CancellationToken stopToken = default)
+    {
+        try
+        {
+            await _passLock.WaitAsync(stopToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return null;   // Stop Monitoring arrived while another pass still held the way: nothing was started
+        }
+
+        try
+        {
+            return await RunOncePassAsync(config, stopToken);
+        }
+        finally
+        {
+            _passLock.Release();
+        }
+    }
+
+    private async Task<RunResult?> RunOncePassAsync(CompressarrConfig config, CancellationToken stopToken)
     {
         var timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
         var beginTime = DateTime.Now;
@@ -495,7 +520,19 @@ public sealed class RunOrchestrator : IRunOrchestrator
         if (!string.IsNullOrWhiteSpace(postExecCmd) && File.Exists(postExecCmd))
         {
             _logger.Log($"\nRunning post-execution command: {postExecCmd} {config.PostExec.Args}");
-            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(postExecCmd, config.PostExec.Args) { UseShellExecute = false, CreateNoWindow = true });
+            // A command that cannot be started (a script that is not an executable, access denied, a bad argument) is logged and the pass carries on: the report,
+            // the notifications and the end of the pass must not be lost because of what runs afterwards.
+            System.Diagnostics.Process? process = null;
+            try
+            {
+                process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(postExecCmd, config.PostExec.Args) { UseShellExecute = false, CreateNoWindow = true });
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or ArgumentException or IOException)
+            {
+                _logger.Log($"Post-execution command could not be started: {ex.Message}", LogSeverity.Error);
+            }
+
+            using var startedProcess = process;
             if (process is not null)
             {
                 // token here is Abort's hard-kill token (see RunOnceAsync/_activeRunController.Begin

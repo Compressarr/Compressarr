@@ -222,10 +222,17 @@ public sealed class SecretsConfigStore : IConfigStore
 
     private Dictionary<string, HashSet<string>> Keys() => ConfigSecrets.ChannelKeys(_notifiers());
 
+    /// <summary>The settings objects Load handed out while the database could not be read: they carry no secrets, not because there are none but because they could not be
+    /// fetched. Saving one as it is would write that empty set over the stored keys, so Save looks again first.</summary>
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<CompressarrConfig, object> _loadedWithoutSecrets = new();
+
     public CompressarrConfig Load(string path)
     {
         var config = _inner.Load(path);
-        if (IsAppFile(path) && _secrets.ReadAll() is { } stored) ConfigSecrets.Fill(config, stored, Keys());
+        if (!IsAppFile(path)) return config;
+
+        if (_secrets.ReadAll() is { } stored) ConfigSecrets.Fill(config, stored, Keys());
+        else _loadedWithoutSecrets.AddOrUpdate(config, string.Empty);
         return config;
     }
 
@@ -238,6 +245,23 @@ public sealed class SecretsConfigStore : IConfigStore
         }
 
         var keys = Keys();
+        if (_loadedWithoutSecrets.TryGetValue(config, out _))
+        {
+            // The database could not be read when these settings were loaded. If it can be now, the stored keys fill whatever the settings lack (a value the settings
+            // hold wins, as in Load). If it still cannot, the stored set is left exactly as it is (writing the settings' set over it could erase it) and the file keeps
+            // whatever secrets the settings do hold, to be moved into the database by a later save.
+            if (_secrets.ReadAll() is { } stored)
+            {
+                ConfigSecrets.Fill(config, stored, keys);
+                _loadedWithoutSecrets.Remove(config);
+            }
+            else
+            {
+                _inner.Save(config, path);
+                return;
+            }
+        }
+
         if (_secrets.ReplaceAll(ConfigSecrets.Collect(config, keys))) _inner.Save(config, path, node => ConfigSecrets.Strip(node, keys));
         else _inner.Save(config, path);
     }
