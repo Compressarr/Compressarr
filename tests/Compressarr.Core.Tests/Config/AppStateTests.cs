@@ -167,7 +167,7 @@ public class AppStateTests : AppDataTestBase
     {
         var resumePath = AppPaths.GetResumeFilePath();
         new SqliteResumeStateStore().Save(new List<ResumeEntry> { new() { LaneId = "lane1", FullName = @"C:\In\a.mkv", Order = 3 } }, resumePath);
-        // Make it look like a database written by 3.0.0-rc.2: schema version 1, no kv, holds, api_secrets, auth, web_sessions or secrets table (all are added by the migration; v3's api_keys is dropped again by v5).
+        // Make it look like a database written by 3.0.0-rc.2: schema version 1, no kv, holds, api_secrets, auth, web_sessions or secrets table and none of the queue's later columns (all are added by the migration; v3's api_keys is dropped again by v5).
         var oldFolder = Directory.CreateDirectory(Path.Combine(AppData, "old")).FullName;
         var oldResume = Path.Combine(oldFolder, "compressarr.resume.json");
         StateDatabase.Snapshot(AppPaths.GetStateDbPath(), StateDatabase.PathFor(oldResume));
@@ -175,7 +175,7 @@ public class AppStateTests : AppDataTestBase
         {
             connection.Open();
             using var command = connection.CreateCommand();
-            command.CommandText = "DROP TABLE kv; DROP TABLE holds; DROP TABLE api_secrets; DROP TABLE auth; DROP TABLE web_sessions; DROP TABLE secrets; PRAGMA user_version = 1;";
+            command.CommandText = "DROP TABLE kv; DROP TABLE holds; DROP TABLE api_secrets; DROP TABLE auth; DROP TABLE web_sessions; DROP TABLE secrets; ALTER TABLE queue DROP COLUMN encoded_from_size; ALTER TABLE queue DROP COLUMN encoded_from_modified_utc; PRAGMA user_version = 1;";
             command.ExecuteNonQuery();
         }
 

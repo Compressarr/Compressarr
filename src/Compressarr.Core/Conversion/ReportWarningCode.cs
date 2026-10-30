@@ -23,6 +23,9 @@ public enum ReportWarningCode
 
     /// <summary>Removing the empty source folder failed (a locked file, permissions, antivirus) and is retried on a later pass.</summary>
     CleanupDeferredFailed = 205,
+
+    /// <summary>The file at the source's path was not the one that was converted (it changed while the encode ran, or while a move waited), so it was kept instead of deleted.</summary>
+    SourceChangedKept = 206,
 }
 
 public static class ReportWarningCodeExtensions
@@ -35,6 +38,7 @@ public static class ReportWarningCodeExtensions
         ReportWarningCode.ArrUnmonitorFailed => "Arr unmonitor failed",
         ReportWarningCode.CleanupDeferredRescan => "Cleanup deferred (rescan not confirmed)",
         ReportWarningCode.CleanupDeferredFailed => "Cleanup deferred (cleanup failed)",
+        ReportWarningCode.SourceChangedKept => "Source changed, kept",
         _ => "Warning",
     };
 
@@ -51,6 +55,8 @@ public static class ReportWarningCodeExtensions
             "The video was converted and filed. Sonarr or Radarr has not confirmed its rescan yet, so the now-empty source folder is left for a later pass to remove.",
         ReportWarningCode.CleanupDeferredFailed =>
             "The video was converted and filed, but the empty source folder could not be removed (a locked file, permissions, antivirus). It is retried on the next pass.",
+        ReportWarningCode.SourceChangedKept =>
+            "The video was converted and filed, but the file at the source's path is no longer the one that was converted (Sonarr or Radarr replaced it, or a different file was copied in while it converted). It was kept instead of deleted, and is queued as new work on a later scan.",
         _ => "An unspecified warning.",
     };
 }

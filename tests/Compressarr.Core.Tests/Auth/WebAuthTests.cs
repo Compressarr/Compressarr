@@ -532,12 +532,16 @@ public class WebAuthTests : AppDataTestBase
     // ---- when the database is not there --------------------------------------------------------------------------------------------------
 
     [Fact]
-    public void WhenTheDatabaseCannotBeOpened_ItIsLocalOnlyWithNothingSetUp_NeverLocked()
+    public void WhenTheDatabaseCannotBeOpened_OnlyThisComputerIsFree_NeverFreerThanTheSavedSettingsMightHaveBeen()
     {
         Directory.CreateDirectory(AppPaths.GetStateDbPath());   // a folder where the database file should be
         var auth = New();
 
-        Assert.Equal(AuthSettings.Default, auth.GetSettings());
+        var settings = auth.GetSettings();
+        Assert.True(settings.IsUnavailable);
+        Assert.False(WebAuthPolicy.IsFree(settings, System.Net.IPAddress.Parse("192.168.1.5"), hasForwardingHeader: false));   // a LAN peer is not let in by the fault
+        Assert.False(WebAuthPolicy.IsFree(settings, System.Net.IPAddress.Parse("203.0.113.9"), hasForwardingHeader: false));
+        Assert.True(WebAuthPolicy.IsFree(settings, System.Net.IPAddress.Loopback, hasForwardingHeader: false));                // this computer still is
         Assert.Equal(LoginOutcome.NotAvailable, auth.Login("mark", "a long password phrase", "10.0.0.1", false).Outcome);
         Assert.Null(auth.ValidateSession("anything"));
         Assert.Throws<InvalidOperationException>(() => auth.SaveSettings(AuthMethod.Forms, AuthRequired.Enabled, false, "mark", "a long password phrase"));

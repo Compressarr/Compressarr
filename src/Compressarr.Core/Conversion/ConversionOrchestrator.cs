@@ -591,6 +591,9 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         // was last written) right before the encoder is started.
         var presetSource = isPassthrough ? "" : binding.Presets.PreparePresetSource();
 
+        // What the source is as the encode starts: deleting "the source" afterwards (here, or in a retried move days later) first checks it is still this file.
+        ResumeKeeping.NoteEncodeStart(resumeEntry);
+
         var runResult = await binding.Runner.RunAsync(
             new EncodeRequest(binding.ToolPath, file.FullName, tempFileName, presetSource, presetName, binding.ExtraOptions, detailLogFile, binding.ProbePath),
             OnProgress,

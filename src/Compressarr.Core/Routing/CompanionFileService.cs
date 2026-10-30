@@ -181,6 +181,24 @@ public sealed class CompanionFileService : ICompanionFileService
         }
     }
 
+    /// <summary>True when a companion of the video at <paramref name="originalFileFullName"/> (a file of its name followed by a '.', with an extension on the wanted list)
+    /// is still in <paramref name="directory"/>. After <see cref="MoveCompanionFiles"/> has run, that can only be one left on purpose: the collision setting is Skip and
+    /// the destination already had a file of that name. It is the user's to resolve, so the folder sweep leaves it - and the folder - alone. Works from what is on disk, so it
+    /// still holds on a later pass or after a restart.</summary>
+    internal static bool WantedCompanionRemains(string directory, string originalFileFullName, IReadOnlyList<string> companionExtensions)
+    {
+        if (!Directory.Exists(directory)) return false;
+
+        var wanted = companionExtensions
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => "." + t.Trim().TrimStart('.'))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var stemPrefix = Path.GetFileNameWithoutExtension(originalFileFullName) + ".";
+        return Directory.EnumerateFiles(directory)
+            .Where(f => !string.Equals(f, originalFileFullName, StringComparison.OrdinalIgnoreCase))
+            .Any(f => Path.GetFileName(f).StartsWith(stemPrefix, StringComparison.OrdinalIgnoreCase) && wanted.Contains(Path.GetExtension(f)));
+    }
+
     public void CleanUpEmptySourceFolder(
         string originalFileDirectory,
         string inputRoot,
@@ -191,15 +209,14 @@ public sealed class CompanionFileService : ICompanionFileService
         if (deleteAfterConvert == DeleteAfterConvertMode.Maintain) return;
         if (!Directory.Exists(originalFileDirectory)) return;
 
-        // Never sweep or remove the lane's Input root itself - it's the lane's persistent watch
-        // folder for the next run, and may still hold other unrelated content this function never
-        // inspected.
+        // Only ever sweep or remove a folder strictly INSIDE the lane's Input root: never the root itself (the lane's persistent watch folder, which may
+        // hold other unrelated content this function never inspected), and never a folder outside it (a stale or mistaken path would otherwise be
+        // swept as if it were part of Input, and the cascade below would walk up toward a root it can never reach). A missing or unreadable root
+        // means no boundary can be shown, so nothing is touched. A link (junction/symlink) on the way is not followed: what is behind it is unknown.
         var inputRootFull = SafeFullPath(inputRoot);
         var originalDirFull = SafeFullPath(originalFileDirectory);
-        if (inputRootFull is not null && string.Equals(originalDirFull, inputRootFull, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
+        if (inputRootFull is null || originalDirFull is null || !PathContainment.IsStrictlyInside(originalDirFull, inputRootFull)) return;
+        if (PathContainment.CrossesLink(originalDirFull, inputRootFull)) return;
 
         var extensions = vidTypes
             .Where(t => !string.IsNullOrWhiteSpace(t))
@@ -245,17 +262,13 @@ public sealed class CompanionFileService : ICompanionFileService
 
         // Cascade upward: remove each parent folder in turn as long as it's now completely
         // empty, stopping the moment we reach a non-empty folder or the lane's Input root.
-        if (inputRootFull is not null)
+        var current = Path.GetDirectoryName(originalDirFull);
+        while (!string.IsNullOrEmpty(current) && Directory.Exists(current) && PathContainment.IsStrictlyInside(current, inputRootFull))
         {
-            var current = Path.GetDirectoryName(originalFileDirectory);
-            while (!string.IsNullOrEmpty(current) && Directory.Exists(current) &&
-                   !string.Equals(current, inputRootFull, StringComparison.OrdinalIgnoreCase))
-            {
-                if (Directory.EnumerateFileSystemEntries(current).Any()) break;
+            if (Directory.EnumerateFileSystemEntries(current).Any()) break;
 
-                _trash.DeleteFolder(current, deleteAfterConvert);
-                current = Path.GetDirectoryName(current);
-            }
+            _trash.DeleteFolder(current, deleteAfterConvert);
+            current = Path.GetDirectoryName(current);
         }
     }
 

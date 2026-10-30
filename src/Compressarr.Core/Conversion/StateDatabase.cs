@@ -8,7 +8,7 @@ namespace Compressarr.Core.Conversion;
 /// statements are shared with <see cref="HistoryDatabase"/>.</summary>
 internal static class StateDatabase
 {
-    public const int CurrentVersion = 6;
+    public const int CurrentVersion = 7;
     public const string FileName = "compressarr.state.db";
 
     /// <summary>The database that goes with a resume-file path: the app's own <c>compressarr.resume.json</c> maps to <c>compressarr.state.db</c> in the
@@ -96,7 +96,21 @@ internal static class StateDatabase
             HistoryDatabase.Execute(connection, "PRAGMA user_version = 6;", transaction);
             transaction.Commit();
         }
+
+        if (version < 7)
+        {
+            using var transaction = connection.BeginTransaction();
+            HistoryDatabase.Execute(connection, SchemaV7, transaction);
+            HistoryDatabase.Execute(connection, "PRAGMA user_version = 7;", transaction);
+            transaction.Commit();
+        }
     }
+
+    // v7: the source's size and time when its encode started, so a source is only deleted after the encode if it is still that file.
+    private const string SchemaV7 = """
+        ALTER TABLE queue ADD COLUMN encoded_from_size INTEGER NULL;
+        ALTER TABLE queue ADD COLUMN encoded_from_modified_utc TEXT NULL;
+        """;
 
     // v6: the keys, tokens and webhook addresses of the settings (Sonarr, Radarr, TMDb, OMDb, the notification channels' secret fields), which used to sit in compressarr.settings.json.
     private const string SchemaV6 = """

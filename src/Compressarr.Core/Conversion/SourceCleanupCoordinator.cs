@@ -69,11 +69,21 @@ internal sealed class SourceCleanupCoordinator
     /// <summary>Removes the source folder if it is now empty (the cascade stops at <paramref name="inputPath"/>,
     /// always the file's OWN lane's Input root). Returns the failure message if it threw, or null on success.
     /// A failure is logged as "Source folder cleanup skipped{context}: ..." unless <paramref name="context"/>
-    /// is null, in which case the caller logs it itself.</summary>
-    public string? TryCleanUpSourceFolder(CompressarrConfig config, string directory, string inputPath, string? context)
+    /// is null, in which case the caller logs it itself.
+    /// <paramref name="videoPath"/> is the converted video's original path (the file itself may be gone by now): a wanted companion of it that is still in the folder was
+    /// not moved (the destination already had one and the collision setting is Skip, or the video was not filed anywhere) and is not an "unmatched leftover" - the folder is
+    /// then kept as it is, which is reported as done. Not with Maintain, which never removes anything and copies companions, so they always remain.</summary>
+    public string? TryCleanUpSourceFolder(CompressarrConfig config, string directory, string inputPath, string? context, string? videoPath = null)
     {
         try
         {
+            if (videoPath is not null && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain
+                && CompanionFileService.WantedCompanionRemains(directory, videoPath, config.Processing.CompanionExtensions))
+            {
+                _logger.Log($"  Source folder kept: a companion file of '{Path.GetFileNameWithoutExtension(videoPath)}' was not moved (for example the destination already had one and the collision setting is Skip), so it was left where it is.");
+                return null;
+            }
+
             _companionFiles.CleanUpEmptySourceFolder(directory, inputPath, config.Processing.VidTypes, config.Processing.DeleteAfterConvert, config.Processing.UnmatchedCompanionAction);
             return null;
         }

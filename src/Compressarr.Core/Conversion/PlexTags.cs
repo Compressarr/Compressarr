@@ -61,20 +61,7 @@ public static partial class PlexTags
         return Key(StripTrailing(folderName)) == Key(StripTrailing(showName)) && Key(showName).Length > 0 ? edition.Value : null;
     }
 
-    private static bool IsInside(string folder, string root)
-    {
-        try
-        {
-            var inner = Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var outer = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            return inner.StartsWith(outer + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-                || inner.StartsWith(outer + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
+    private static bool IsInside(string folder, string root) => Compressarr.Core.Routing.PathContainment.IsStrictlyInside(folder, root);
 
     /// <summary>A name reduced to its lower-case letters and digits, so "Babylon.5.(1994)" and "Babylon 5 (1994)" are the same show.</summary>
     private static string Key(string name) => new(name.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());

@@ -4,7 +4,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Compressarr.Core.Tests.Conversion;
 
-file sealed class MovableClock : TimeProvider
+internal sealed class MovableClock : TimeProvider
 {
     private DateTimeOffset _now;
     public MovableClock(DateTimeOffset now) => _now = now;
@@ -49,7 +49,8 @@ public class SqliteResumeStateStoreTests : IDisposable
             EncodedFilePath = @"D:\Out\x.mkv", EncodedFileDesiredName = "Movie (1999).mkv", PendingCompanionSourceDirectory = @"C:\In",
             PendingCompanionVideoDestPath = @"E:\Movies\Movie (1999).mkv", LastRetryFailureMessage = "the share is offline", Order = 7, Skipped = true,
             PresetOverride = "My preset", Removed = true, HeldAfterFailure = true, KeptSourceSize = 12_345_678_901L, KeptSourceModifiedUtc = kept,
-            CreatedByQueueEdit = true, FileBotUnmatched = true, DestinationLaneId = "lane2"
+            CreatedByQueueEdit = true, FileBotUnmatched = true, DestinationLaneId = "lane2",
+            EncodedFromSize = 9_876_543_210L, EncodedFromModifiedUtc = kept.AddHours(-5)
         };
         var store = new SqliteResumeStateStore();
         store.Save(new List<ResumeEntry> { entry, Entry("plain.mkv", order: null) }, ResumePath);
@@ -77,6 +78,10 @@ public class SqliteResumeStateStoreTests : IDisposable
         Assert.True(first.CreatedByQueueEdit);
         Assert.True(first.FileBotUnmatched);
         Assert.Equal("lane2", first.DestinationLaneId);
+        Assert.Equal(9_876_543_210L, first.EncodedFromSize);
+        Assert.Equal(kept.AddHours(-5), first.EncodedFromModifiedUtc);
+        Assert.Equal(DateTimeKind.Utc, first.EncodedFromModifiedUtc!.Value.Kind);
+        Assert.Null(loaded[1].EncodedFromSize);
         Assert.Null(loaded[1].Order);
         Assert.Null(loaded[1].KeptSourceModifiedUtc);
         Assert.False(loaded[1].Skipped);
@@ -261,6 +266,93 @@ public class SqliteResumeStateStoreTests : IDisposable
         Assert.True(File.Exists(ResumePath + ".imported"));
         store.Update(ResumePath, state => { state.Add(Entry("b.mkv", 1)); return true; });
         Assert.Equal(2, new SqliteResumeStateStore().Load(ResumePath).Count);   // from the database now
+    }
+
+    /// <summary>An installation whose queue already lives in the database, and whose database was unavailable for a while (here a folder in its place) - the app carried on
+    /// with the JSON fallback. Returns the store, with the clock still inside the pause and the database back in place but not yet looked at again.</summary>
+    private (SqliteResumeStateStore Store, MovableClock Clock) StoreThatFellBackOnJsonAfterTheImport(params ResumeEntry[] inTheDatabase)
+    {
+        var clock = new MovableClock(new DateTimeOffset(2026, 10, 30, 9, 0, 0, TimeSpan.Zero));
+        var store = new SqliteResumeStateStore(clock);
+        store.Save(inTheDatabase.ToList(), ResumePath);                  // the database exists and the import marker is set
+        File.Move(DbPath, DbPath + ".away");
+        Directory.CreateDirectory(DbPath);                              // now something else holds its place
+        return (store, clock);
+    }
+
+    private void TheDatabaseComesBack(MovableClock clock)
+    {
+        Directory.Delete(DbPath);
+        File.Move(DbPath + ".away", DbPath);
+        clock.Advance(SqliteResumeStateStore.RetryFailedAfter + TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
+    public void EditsMadeOnTheJsonFallback_AreMergedIntoTheDatabaseWhenItComesBack_NotAbandoned()
+    {
+        var (store, clock) = StoreThatFellBackOnJsonAfterTheImport(Entry("a.mkv", 0), Entry("b.mkv", 1));
+
+        // While the database is away the person skips a.mkv (the fallback starts empty, so that creates its own entry) and a pass queues a new file.
+        store.Update(ResumePath, state => { state.Add(new ResumeEntry { LaneId = "lane1", FullName = @"C:\In\a.mkv", Status = ResumeStatus.Pending, Skipped = true, Order = 0 }); return true; });
+        store.Update(ResumePath, state => { state.Add(Entry("new.mkv", 0)); return true; });
+        Assert.NotNull(store.ImportFailure);
+        Assert.True(File.Exists(ResumePath));
+
+        TheDatabaseComesBack(clock);
+        var loaded = store.Load(ResumePath);
+
+        Assert.Null(store.ImportFailure);
+        Assert.True(loaded.Single(e => e.FullName == @"C:\In\a.mkv").Skipped);                  // the edit survived
+        Assert.False(loaded.Single(e => e.FullName == @"C:\In\b.mkv").Skipped);                 // rows the fallback never mentioned are untouched
+        Assert.Contains(loaded, e => e.FullName == @"C:\In\new.mkv");                          // and so is the file queued meanwhile
+        Assert.Equal(3, loaded.Count);
+        Assert.Equal(loaded.Count, loaded.Select(e => e.Order).Distinct().Count());              // positions did not collide with the database's own
+        Assert.False(File.Exists(ResumePath));                                                  // the fallback file is consumed ...
+        Assert.True(File.Exists(ResumePath + ".recovered"));                                    // ... and kept
+        Assert.Equal(3, new SqliteResumeStateStore().Load(ResumePath).Count);                   // a fresh process reads the same
+    }
+
+    [Fact]
+    public void WhatTheFallbackRecordedAboutProcessing_WinsOverTheDatabasesOlderPending_ButAFreshScanDoesNotEraseAKeptSource()
+    {
+        var kept = new ResumeEntry { LaneId = "lane1", FullName = @"C:\In\kept.mkv", Status = ResumeStatus.Completed, Order = 0, KeptSourceSize = 123, KeptSourceModifiedUtc = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc) };
+        var (store, clock) = StoreThatFellBackOnJsonAfterTheImport(Entry("moved.mkv", 1), kept);
+
+        store.Update(ResumePath, state =>
+        {
+            // A pass ran on the fallback: it encoded moved.mkv and its routing failed (the staged file is the only copy of the result) ...
+            state.Add(new ResumeEntry { LaneId = "lane1", FullName = @"C:\In\moved.mkv", Status = ResumeStatus.MoveFailed, EncodedFilePath = @"D:\Out\moved.compressarr-1.mkv", EncodedFileDesiredName = "moved.mkv", EncodedFromSize = 55, Order = 0 });
+            // ... and it scanned kept.mkv as a plain new file (the fallback did not know it was converted already).
+            state.Add(new ResumeEntry { LaneId = "lane1", FullName = @"C:\In\kept.mkv", Status = ResumeStatus.Pending, Order = 1 });
+            return true;
+        });
+
+        TheDatabaseComesBack(clock);
+        var loaded = store.Load(ResumePath);
+
+        var moved = loaded.Single(e => e.FullName == @"C:\In\moved.mkv");
+        Assert.Equal(ResumeStatus.MoveFailed, moved.Status);
+        Assert.Equal(@"D:\Out\moved.compressarr-1.mkv", moved.EncodedFilePath);
+        Assert.Equal("moved.mkv", moved.EncodedFileDesiredName);
+        Assert.Equal(55, moved.EncodedFromSize);
+        var keptAfter = loaded.Single(e => e.FullName == @"C:\In\kept.mkv");
+        Assert.Equal(ResumeStatus.Completed, keptAfter.Status);                                  // not turned back into work by the fallback's fresh scan
+        Assert.Equal(123, keptAfter.KeptSourceSize);
+    }
+
+    [Fact]
+    public void AFallbackFileThatCannotBeRead_IsSetAside_AndTheDatabaseIsUsedAsItIs()
+    {
+        var (store, clock) = StoreThatFellBackOnJsonAfterTheImport(Entry("a.mkv", 0));
+        store.Prepare(ResumePath);
+        File.WriteAllText(ResumePath, "{ not json");
+        TheDatabaseComesBack(clock);
+
+        var loaded = store.Load(ResumePath);
+
+        Assert.Single(loaded);
+        Assert.True(File.Exists(ResumePath + ".damaged"));
+        Assert.Contains("written while the database was unavailable", store.Notice);
     }
 
     [Fact]

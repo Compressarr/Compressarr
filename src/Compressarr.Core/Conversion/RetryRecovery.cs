@@ -86,6 +86,23 @@ internal sealed class RetryRecovery
             ResumeResults.Remove(_resumeStore, deadEntries, resumeFilePath);
         }
 
+        // A Pending or Error entry whose file is not inside this lane's Input folder (the Input setting was changed since it was queued, or a request named some
+        // other file) is not work this lane may do: converting it would end in deleting that file and sweeping its folder, which are only ever allowed inside Input.
+        // Only the queue entry is dropped; the file is not touched.
+        var strayEntries = resumeState.Where(e => e.LaneId == lane.Id
+            && e.Status is ResumeStatus.Pending or ResumeStatus.Error
+            && File.Exists(e.FullName)
+            && !PathContainment.IsStrictlyInside(e.FullName, inputPath)).ToList();
+        if (strayEntries.Count > 0)
+        {
+            foreach (var stray in strayEntries)
+            {
+                _logger.Log($"Resume entry for '{stray.FullName}' is not inside this lane's Input folder - removing it from the queue (the file itself is left alone).", LogSeverity.Error);
+                resumeState.Remove(stray);
+            }
+            ResumeResults.Remove(_resumeStore, strayEntries, resumeFilePath);
+        }
+
         // A CompanionMoveFailed entry whose companions' own source folder is gone (removed by
         // hand, or the whole thing cleaned up some other way between runs) has nothing left to
         // retry - same reasoning as deadEntries above, checked against
@@ -144,16 +161,19 @@ internal sealed class RetryRecovery
             string? RestInPlace(string physicalPath)
             {
                 var desiredDestPath = Path.Combine(Path.GetDirectoryName(physicalPath)!, desiredFileName);
+                var collisionMode = FileOutcomeHelpers.OutputCollisionMode(desiredDestPath, entry.FullName, config.Processing.OnDestinationCollision, config.Processing.DeleteAfterConvert,
+                    ResumeKeeping.SourceUnchangedSinceEncode(entry), out var disposeSourceFirst);
                 string resolvedDestPath;
                 try
                 {
-                    resolvedDestPath = FileRouter.ResolveCollision(desiredDestPath, config.Processing.OnDestinationCollision);
+                    resolvedDestPath = FileRouter.ResolveCollision(desiredDestPath, collisionMode);
                 }
                 catch (DestinationCollisionSkippedException ex)
                 {
                     _logger.Log($"  {ex.Message}");
                     return null;
                 }
+                if (disposeSourceFirst) FileOutcomeHelpers.DisposeSource(_trash, entry.FullName, config.Processing.DeleteAfterConvert);
                 File.Move(physicalPath, resolvedDestPath, overwrite: true);
                 return resolvedDestPath;
             }
@@ -170,12 +190,14 @@ internal sealed class RetryRecovery
                 if (string.Equals(entry.FullName, currentPath, StringComparison.OrdinalIgnoreCase)) return;
                 if (!File.Exists(entry.FullName) || config.Processing.DeleteAfterConvert == DeleteAfterConvertMode.Maintain) return;
 
-                var attrs = File.GetAttributes(entry.FullName);
-                if (attrs.HasFlag(FileAttributes.ReadOnly))
+                // The move may have been waiting days for its destination: what is at the original path now is only "the source" if it is still the file that was encoded.
+                if (!ResumeKeeping.SourceUnchangedSinceEncode(entry))
                 {
-                    File.SetAttributes(entry.FullName, attrs & ~FileAttributes.ReadOnly);
+                    _logger.Log($"  The source '{Path.GetFileName(entry.FullName)}' is not the file that was converted (it changed since), so it was kept: it is queued again as new work.");
+                    return;
                 }
-                _trash.DeleteFile(entry.FullName, config.Processing.DeleteAfterConvert);
+
+                FileOutcomeHelpers.DisposeSource(_trash, entry.FullName, config.Processing.DeleteAfterConvert);
             }
 
             // The encoded file is where it will stay (routed, or resting in Output under its clean name): only now is the entry done. Marking it Completed any
@@ -309,7 +331,7 @@ internal sealed class RetryRecovery
                     // transient cleanup error was just as permanently forgotten as an
                     // unconfirmed rescan used to be. Treated the same way now: falls through
                     // to CleanupPending just like arrCleanupSafe == false does.
-                    cleanupFailed = _cleanup.TryCleanUpSourceFolder(config, originalSourceDirectory, inputPath, " on move retry") is not null;
+                    cleanupFailed = _cleanup.TryCleanUpSourceFolder(config, originalSourceDirectory, inputPath, " on move retry", entry.FullName) is not null;
                 }
             }
 
@@ -362,7 +384,7 @@ internal sealed class RetryRecovery
 
                 if (arrCleanupSafe)
                 {
-                    if (_cleanup.TryCleanUpSourceFolder(config, sourceDirectory, inputPath, " on companion retry") is null)
+                    if (_cleanup.TryCleanUpSourceFolder(config, sourceDirectory, inputPath, " on companion retry", entry.FullName) is null)
                     {
                         ResumeKeeping.MarkCompleted(entry, config.Processing.DeleteAfterConvert);
                         entry.PendingCompanionSourceDirectory = null;
@@ -450,7 +472,7 @@ internal sealed class RetryRecovery
             if (arrCleanupSafe)
             {
                 // context is null: this loop logs a failure itself, below, with its own Error-once/Info-on-repeat dedup.
-                var cleanupError = _cleanup.TryCleanUpSourceFolder(config, sourceDirectory, inputPath, null);
+                var cleanupError = _cleanup.TryCleanUpSourceFolder(config, sourceDirectory, inputPath, null, entry.FullName);
                 if (cleanupError is null)
                 {
                     _logger.Log($"  Retried source folder cleanup for '{desiredFileName}' - succeeded.");

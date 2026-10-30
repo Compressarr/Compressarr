@@ -75,8 +75,19 @@ for that full history.
 - An ffmpeg Check / Install now says so when the file is not ffmpeg, and gives up after 8 seconds instead of 30; custom HandBrake presets a lane uses are never missed, even after a restore or import.
 - A queue change could be wiped by a retry or the start of a pass; a deleted lane's old entries are cleaned up quietly.
 - E-AC3 is reported honestly as 5.1; HDR10+ files are described as HDR10+; ffmpeg lanes give clearer messages for damaged files.
+- **A source is only deleted if it is still the file that was converted.** Compressarr notes the source's size and time when its encode starts; if a different file is at that path afterwards (Sonarr or Radarr upgraded it, or you copied a new release in during the encode, or while a failed move waited for its destination), the new file is kept and queued as new work, and the report says so (WARN 206).
+- **Output written back into the Input folder no longer overwrites the original.** With the collision setting on Overwrite, a result that took the source's own name replaced it before **Maintain** or **Recycle** was considered. Now Maintain keeps the original (the result takes the next free name), and Recycle sends the original to the recycle bin first.
+- **A companion file skipped because the destination already has one is kept.** The folder cleanup treated it as an unmatched leftover and deleted it (with Skip, delete-after-convert on, and unmatched files set to Delete or Recycle). The file and its folder are now left alone.
+- **Cleanup only works inside a lane's Input folder.** A queue request naming a file outside Input is refused, a stale queue entry outside it (after you change Input) is dropped without touching the file, and the folder sweep never runs outside Input, through a link or junction, or when the Input folder cannot be checked.
+- **A storage fault no longer loosens sign-in.** If the settings database cannot be opened, only this computer is let in; everyone else is told it is unavailable (503) until it opens again, instead of falling back to "local network is free" when you had asked for sign-in everywhere.
+- **Work done while the queue database was unavailable is merged back** when it returns (queue edits, finished encodes, a failed move waiting to be retried), and the file it was kept in is renamed `compressarr.resume.json.recovered`; it used to be left behind and ignored.
+- **The queue forgets finished work again.** In 3.0 the end-of-pass cleanup only ran if the old JSON queue file still existed, so finished rows were never removed from the database.
+
+### Known limits
+- **A crash between filing a result and recording it** (power loss while Compressarr is routing, deleting the source, moving companions or waiting for Sonarr/Radarr) can leave a companion file behind, forget a pending source-folder cleanup, or leave an encoded file in Output; the filed video itself is never lost. A step-by-step record of those stages is planned for 3.1.
 
 ### Compatibility
+- The state database is now version 7 (two columns were added to the queue). An older 3.0 pre-release refuses to open it ("newer than this build understands"): restore a backup first if you go back to one.
 - 3.0 reads a 2.1 history file (found in the Logs folder) and keeps it as `.imported`; a 2.1 install cannot read 3.0's databases (see the note at the top).
 - The 2.x line is retired with 2.1.10. The pre-releases 2.2.0-beta.1 to 2.2.0-rc.2 were never released as a final 2.2, and everything in them is in 3.0.
 

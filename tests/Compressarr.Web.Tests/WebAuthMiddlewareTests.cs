@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Compressarr.Core.Auth;
 using Compressarr.Core.Config;
 using Compressarr.Web.Auth;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Compressarr.Web.Tests;
@@ -84,6 +85,35 @@ public class WebAuthMiddlewareTests
         Assert.Equal(HttpStatusCode.Unauthorized, outsidePage.StatusCode);
         Assert.Contains("username and password", await outsidePage.Content.ReadAsStringAsync());
         Assert.Equal("text/html", outsidePage.Content.Headers.ContentType!.MediaType);
+    }
+
+    [Fact]
+    public async Task WhenTheSettingsDatabaseCannotBeOpened_ALocalNetworkPeerIsNotLetIn_ButThisComputerIs()
+    {
+        // Sign-in is required of everyone. If the database that holds that setting cannot be read, the answer must not fall back to "local network free".
+        await using var host = await QueueHost.StartAsync(Lane1);
+        Configure(host, required: AuthRequired.Enabled);
+        using var before = await Get(host, "/api/run/status", Lan);
+        Assert.Equal(HttpStatusCode.Unauthorized, before.StatusCode);   // the working case: asked to sign in
+
+        // Take the database away (a folder where the file was) and let the middleware look again: the process has it open, so it is put aside first.
+        var path = AppPaths.GetStateDbPath();
+        SqliteConnection.ClearAllPools();
+        File.Move(path, path + ".away");
+        Directory.CreateDirectory(path);
+        host.Services.GetRequiredService<WebAuthGate>().Invalidate();
+
+        using var lan = await Get(host, "/api/run/status", Lan);
+        using var lanPage = await Get(host, "/monitor.html", Lan);
+        using var outside = await Get(host, "/api/run/status", Outside);
+        using var local = await Get(host, "/api/run/status");
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, lan.StatusCode);
+        Assert.Equal("settings_unavailable", await ErrorCode(lan));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, lanPage.StatusCode);
+        Assert.Contains("could not be opened", await lanPage.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, outside.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, local.StatusCode);              // this computer can still look at it
     }
 
     [Fact]

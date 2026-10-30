@@ -385,7 +385,7 @@ public sealed class QueueRulesTests : IDisposable
             ("laneA", errored),
             ("laneA", Path.Combine(_root, "missing.mkv")),
             ("laneA", a)
-        });
+        }, new PassThroughPathExpander());
 
         Assert.Equal(0, state.Single(e => e.FullName == b).Order);
         Assert.Equal(4, state.Single(e => e.FullName == a).Order); // positions are consumed even by skipped items

@@ -142,7 +142,7 @@ public sealed class QueueService : IQueueService
     {
         _resumeStore.Update(AppPaths.GetResumeFilePath(), resumeState =>
         {
-            QueueRules.ApplyExplicitOrder(config, resumeState, items);
+            QueueRules.ApplyExplicitOrder(config, resumeState, items, _pathExpander);
             return true;
         });
     }
@@ -185,7 +185,7 @@ public sealed class QueueService : IQueueService
         var found = _resumeStore.Update(AppPaths.GetResumeFilePath(), resumeState =>
         {
             QueueRules.LockInVisibleOrder(config, resumeState, _pathExpander, _scanner);
-            var entry = QueueRules.FindOrCreatePendingEntry(resumeState, lane.Id, fullName);
+            var entry = QueueRules.FindOrCreatePendingEntry(resumeState, lane.Id, fullName, _pathExpander.Expand(lane.Input));
             if (entry is null) return false;
             apply(entry);
             return true;

@@ -1,3 +1,6 @@
+using Compressarr.Core.Config;
+using Compressarr.Core.Routing;
+
 namespace Compressarr.Core.Conversion;
 
 /// <summary>Small pure helpers for reading what happened to a file - shared by the orchestrator and the step that
@@ -31,6 +34,34 @@ internal static class FileOutcomeHelpers
             ex.Message.Contains("network location", StringComparison.OrdinalIgnoreCase) ||
             ex.Message.Contains("cannot find the path", StringComparison.OrdinalIgnoreCase) ||
             ex.Message.Contains("is not accessible", StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>How an output that is about to be written to <paramref name="destPath"/> must be resolved when that path is the source itself (output written back into
+    /// the Input folder under the same name). Overwrite would replace the original in the same move, before any source policy is looked at: Maintain would lose the
+    /// file it promises to keep, and Recycle would never see it. So with Maintain - or a source that is no longer the file that was converted - the output takes the
+    /// next free name instead (<paramref name="disposeSourceFirst"/> stays false), and with Delete or Recycle the source is disposed of first by the caller, per
+    /// the setting, and the move then replaces nothing. Any other case is returned as it came.</summary>
+    internal static DestinationCollisionMode OutputCollisionMode(string destPath, string sourcePath, DestinationCollisionMode mode, DeleteAfterConvertMode keep, bool sourceUnchanged, out bool disposeSourceFirst)
+    {
+        disposeSourceFirst = false;
+        if (mode != DestinationCollisionMode.Overwrite || !File.Exists(sourcePath)) return mode;
+        if (!string.Equals(Path.GetFullPath(destPath), Path.GetFullPath(sourcePath), StringComparison.OrdinalIgnoreCase)) return mode;
+
+        if (keep == DeleteAfterConvertMode.Maintain || !sourceUnchanged) return DestinationCollisionMode.Rename;
+        disposeSourceFirst = true;
+        return mode;
+    }
+
+    /// <summary>Removes a source file the way the setting says (Delete or Recycle), clearing a read-only flag first so it does not block the removal.</summary>
+    internal static void DisposeSource(ITrashService trash, string path, DeleteAfterConvertMode mode)
+    {
+        if (File.Exists(path))
+        {
+            var attrs = File.GetAttributes(path);
+            if (attrs.HasFlag(FileAttributes.ReadOnly)) File.SetAttributes(path, attrs & ~FileAttributes.ReadOnly);
+        }
+
+        trash.DeleteFile(path, mode);
+    }
 
     /// <summary>Combines a new post-process warning onto any existing one for the same file - the
     /// companion-file move and the arr-unmonitor call are independent steps that can both fail for

@@ -24,14 +24,15 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
         nameof(ResumeEntry.EncodedFileDesiredName), nameof(ResumeEntry.PendingCompanionSourceDirectory), nameof(ResumeEntry.PendingCompanionVideoDestPath),
         nameof(ResumeEntry.LastRetryFailureMessage), nameof(ResumeEntry.Order), nameof(ResumeEntry.Skipped), nameof(ResumeEntry.PresetOverride),
         nameof(ResumeEntry.Removed), nameof(ResumeEntry.HeldAfterFailure), nameof(ResumeEntry.KeptSourceSize), nameof(ResumeEntry.KeptSourceModifiedUtc),
-        nameof(ResumeEntry.CreatedByQueueEdit), nameof(ResumeEntry.FileBotUnmatched), nameof(ResumeEntry.DestinationLaneId)
+        nameof(ResumeEntry.CreatedByQueueEdit), nameof(ResumeEntry.FileBotUnmatched), nameof(ResumeEntry.DestinationLaneId),
+        nameof(ResumeEntry.EncodedFromSize), nameof(ResumeEntry.EncodedFromModifiedUtc)
     };
 
     private static readonly string[] Columns =
     {
         "lane_id", "full_name", "status", "encoded_file_path", "encoded_file_desired_name", "pending_companion_source_dir", "pending_companion_video_dest_path",
         "last_retry_failure_message", "position", "skipped", "preset_override", "removed", "held_after_failure", "kept_source_size", "kept_source_modified_utc",
-        "created_by_queue_edit", "filebot_unmatched", "destination_lane_id"
+        "created_by_queue_edit", "filebot_unmatched", "destination_lane_id", "encoded_from_size", "encoded_from_modified_utc"
     };
 
     private static readonly string SelectSql = "SELECT id, " + string.Join(", ", Columns) + " FROM queue ORDER BY id;";
@@ -158,7 +159,8 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
         e.LaneId, e.FullName, e.Status.ToString(), e.EncodedFilePath, e.EncodedFileDesiredName, e.PendingCompanionSourceDirectory, e.PendingCompanionVideoDestPath,
         e.LastRetryFailureMessage, e.Order is { } order ? (long)order : null, e.Skipped ? 1L : 0L, e.PresetOverride, e.Removed ? 1L : 0L, e.HeldAfterFailure ? 1L : 0L,
         e.KeptSourceSize, e.KeptSourceModifiedUtc is { } kept ? kept.ToString("O", CultureInfo.InvariantCulture) : null,
-        e.CreatedByQueueEdit ? 1L : 0L, e.FileBotUnmatched ? 1L : 0L, e.DestinationLaneId
+        e.CreatedByQueueEdit ? 1L : 0L, e.FileBotUnmatched ? 1L : 0L, e.DestinationLaneId,
+        e.EncodedFromSize, e.EncodedFromModifiedUtc is { } from ? from.ToString("O", CultureInfo.InvariantCulture) : null
     };
 
     /// <summary>Every row, in insertion order. <paramref name="withValues"/> also keeps each entry's stored values, which only an update needs (to see what its callback changed).</summary>
@@ -192,7 +194,9 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
                 KeptSourceModifiedUtc = Text(15) is { } kept ? DateTime.Parse(kept, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind) : null,
                 CreatedByQueueEdit = Number(16) == 1,
                 FileBotUnmatched = Number(17) == 1,
-                DestinationLaneId = Text(18)
+                DestinationLaneId = Text(18),
+                EncodedFromSize = Number(19),
+                EncodedFromModifiedUtc = Text(20) is { } from ? DateTime.Parse(from, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind) : null
             };
             rows.Add(new Row(entry, reader.GetInt64(0), withValues ? ValuesOf(entry) : Array.Empty<object?>()));
         }
@@ -314,6 +318,7 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
                 {
                     _importFailure = ex.Message;
                     _failedAt = _time.GetUtcNow();
+                    ReadyPaths.Remove(databasePath);   // not ready any more: when it is tried again it is opened, checked and (for a queue file written meanwhile) merged afresh
                     // A database this call just created is thrown away, so the next try imports the untouched JSON file again. One that was already
                     // there is never deleted: it may be damaged, but it may also hold the only copy of the queue.
                     DiscardIfJustCreated(isNew, databasePath);
@@ -335,7 +340,11 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
     private void Import(string resumeFilePath, string databasePath)
     {
         using var connection = HistoryDatabase.Open(databasePath);
-        if (HistoryDatabase.Scalar(connection, $"SELECT COUNT(*) FROM meta WHERE key = '{ImportedKey}';") > 0) return;
+        if (HistoryDatabase.Scalar(connection, $"SELECT COUNT(*) FROM meta WHERE key = '{ImportedKey}';") > 0)
+        {
+            MergeFallback(connection, resumeFilePath);
+            return;
+        }
 
         var entries = new List<ResumeEntry>();
         var hadFile = File.Exists(resumeFilePath);
@@ -367,6 +376,80 @@ public sealed class SqliteResumeStateStore : IResumeStateStore
             try { File.Move(resumeFilePath, resumeFilePath + ".imported", overwrite: true); }
             catch (IOException) { /* imported all the same: the marker stops a second import */ }
         }
+    }
+
+    /// <summary>The database is already the queue's home, yet a queue file is there: it was written by the JSON store while the database could not be opened (everything
+    /// the app did meanwhile - queue edits, finished encodes, a failed move waiting to be retried - went there). Now that the database is back that work is merged into it,
+    /// then the file is renamed .recovered. Rows the file does not mention are untouched. For a file in both: what the app recorded about the file's processing (status,
+    /// where the encoded file sits, held failure, kept-source and source stamps) wins when the fallback actually processed it; the person's queue choices (skip, remove,
+    /// profile, destination) are carried over when set; the database's own values stand otherwise.</summary>
+    private void MergeFallback(SqliteConnection connection, string resumeFilePath)
+    {
+        if (!File.Exists(resumeFilePath)) return;
+
+        List<ResumeEntry> fallback;
+        try
+        {
+            fallback = _json.Load(resumeFilePath);
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException)
+        {
+            var aside = SetAside(resumeFilePath, ".damaged");
+            _notice = $"The queue file written while the database was unavailable could not be read ({ex.Message}) and was set aside as {Path.GetFileName(aside)}; the queue in the database is used as it is.";
+            return;
+        }
+
+        if (fallback.Count > 0)
+        {
+            Transact(connection, () =>
+            {
+                var rows = ReadAll(connection);
+                var entries = rows.Select(r => r.Entry).ToList();
+                var byKey = entries.ToDictionary(KeyOf);
+                var nextOrder = ResumeQueueOrder.NextOrder(entries);
+
+                foreach (var fromFallback in fallback.OrderBy(e => e.Order ?? int.MaxValue))
+                {
+                    if (byKey.TryGetValue(KeyOf(fromFallback), out var inDatabase))
+                    {
+                        MergeEntry(inDatabase, fromFallback);
+                        continue;
+                    }
+
+                    if (fromFallback.Order is not null) fromFallback.Order = nextOrder++;   // after what the database already holds, in the order the fallback had
+                    entries.Add(fromFallback);
+                    byKey[KeyOf(fromFallback)] = fromFallback;
+                }
+
+                Apply(connection, rows, entries);
+            });
+        }
+
+        try { File.Move(resumeFilePath, resumeFilePath + ".recovered", overwrite: true); }
+        catch (IOException) { /* merged all the same; a second merge of the same file changes nothing */ }
+    }
+
+    private static void MergeEntry(ResumeEntry inDatabase, ResumeEntry fromFallback)
+    {
+        if (fromFallback.Status != ResumeStatus.Pending)
+        {
+            inDatabase.Status = fromFallback.Status;
+            inDatabase.EncodedFilePath = fromFallback.EncodedFilePath;
+            inDatabase.EncodedFileDesiredName = fromFallback.EncodedFileDesiredName;
+            inDatabase.PendingCompanionSourceDirectory = fromFallback.PendingCompanionSourceDirectory;
+            inDatabase.PendingCompanionVideoDestPath = fromFallback.PendingCompanionVideoDestPath;
+            inDatabase.LastRetryFailureMessage = fromFallback.LastRetryFailureMessage;
+            inDatabase.HeldAfterFailure = fromFallback.HeldAfterFailure;
+            inDatabase.KeptSourceSize = fromFallback.KeptSourceSize;
+            inDatabase.KeptSourceModifiedUtc = fromFallback.KeptSourceModifiedUtc;
+            inDatabase.EncodedFromSize = fromFallback.EncodedFromSize;
+            inDatabase.EncodedFromModifiedUtc = fromFallback.EncodedFromModifiedUtc;
+        }
+
+        inDatabase.Skipped |= fromFallback.Skipped;
+        inDatabase.Removed |= fromFallback.Removed;
+        if (!string.IsNullOrEmpty(fromFallback.PresetOverride)) inDatabase.PresetOverride = fromFallback.PresetOverride;
+        if (fromFallback.DestinationLaneId is not null) inDatabase.DestinationLaneId = fromFallback.DestinationLaneId;
     }
 
     private static string SetAside(string path, string suffix)

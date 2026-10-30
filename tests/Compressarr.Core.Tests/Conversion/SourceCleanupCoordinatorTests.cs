@@ -143,6 +143,47 @@ public class SourceCleanupCoordinatorTests
     }
 
     [Fact]
+    public void TryCleanUp_AWantedCompanionOfTheVideoIsStillThere_LeavesTheFolderAlone_AndSaysSo()
+    {
+        var folder = Directory.CreateTempSubdirectory("compressarr-coordinator-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(folder, "Movie (2020).en.srt"), "left by a Skip");
+            _config.Processing.DeleteAfterConvert = DeleteAfterConvertMode.Delete;
+
+            var error = Coordinator().TryCleanUpSourceFolder(_config, folder, Path.GetDirectoryName(folder)!, "", Path.Combine(folder, "Movie (2020).mkv"));
+
+            Assert.Null(error);                                   // not a failure, and nothing to retry
+            Assert.Empty(_companions.Cleanups);                   // the sweep never ran
+            Assert.Contains("Source folder kept", Assert.Single(_logger.Logs).Message);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryCleanUp_WithMaintain_CompanionsAlwaysRemainAndThatIsNotNews()
+    {
+        var folder = Directory.CreateTempSubdirectory("compressarr-coordinator-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(folder, "Movie (2020).en.srt"), "copied, not moved");
+            _config.Processing.DeleteAfterConvert = DeleteAfterConvertMode.Maintain;
+
+            Coordinator().TryCleanUpSourceFolder(_config, folder, Path.GetDirectoryName(folder)!, "", Path.Combine(folder, "Movie (2020).mkv"));
+
+            Assert.Single(_companions.Cleanups);                  // handed on as before (it does nothing for Maintain) ...
+            Assert.Empty(_logger.Logs);                           // ... with no "folder kept" line on every pass
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
     public void TryCleanUp_OnFailure_ReturnsTheMessage_AndLogsItWithTheContext()
     {
         _companions.Throw = new IOException("file is locked");

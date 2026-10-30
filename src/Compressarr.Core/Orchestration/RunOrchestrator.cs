@@ -447,12 +447,13 @@ public sealed class RunOrchestrator : IRunOrchestrator
         }
 
         var stillOutstanding = resumeState.Any(e => e.Status != ResumeStatus.Completed);
-        if (!stillOutstanding && File.Exists(resumeFilePath))
+        if (!stillOutstanding)
         {
             // Nothing left to do. A converted file whose source was kept (Maintain) is still remembered, or it would be converted
             // again on the next pass; everything else is forgotten as before. Decided against the file as it is now, not this pass's
-            // older list: a file the Monitor page tracked in the meantime is outstanding work, and keeps the file as it is (the store
-            // removes the file itself when nothing is left).
+            // older list: a file the Monitor page tracked in the meantime is outstanding work, and keeps the queue as it is.
+            // Not guarded by the old JSON file existing: once the queue is in the database that file is gone (renamed .imported, or never
+            // there on a new install), and the finished rows would pile up for good.
             _resumeStore.Update(resumeFilePath, disk =>
             {
                 if (disk.Any(e => e.Status != ResumeStatus.Completed)) return false;

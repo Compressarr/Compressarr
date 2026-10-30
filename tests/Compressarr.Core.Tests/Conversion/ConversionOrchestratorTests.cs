@@ -440,6 +440,34 @@ file sealed class RequestRecordingRunner : IEncoderRunner
 /// lifetime, so a change made while a lane was still processing files had no effect until
 /// restarted. ConversionOrchestrator now reloads config immediately after each file's
 /// HandBrakeCLI pass finishes, before that file's own post-processing.</summary>
+/// <summary>Writes its output as usual, then - while the "encode" is still running - replaces the source with a different file (what a Sonarr/Radarr upgrade, or a person copying a new
+/// release in, does during a multi-hour encode).</summary>
+file sealed class SourceReplacingProcessRunner : IEncoderRunner
+{
+    public Task<EncodeResult> RunAsync(EncodeRequest request, Action<EncodeProgress>? onProgress, CancellationToken cancellationToken)
+    {
+        File.WriteAllText(request.OutputPath, "fake encoded output");
+        File.WriteAllText(request.SourcePath, "a different, newer release of the movie that arrived while this one was encoding");
+        Directory.CreateDirectory(Path.GetDirectoryName(request.DetailLogFile)!);
+        File.WriteAllText(request.DetailLogFile, "detail");
+        return Task.FromResult(new EncodeResult(Success: true, DetailLogFile: request.DetailLogFile));
+    }
+}
+
+/// <summary>A recycle bin that really keeps what it is given: copies the file into a folder, then removes it.</summary>
+file sealed class KeepingTrashService : ITrashService
+{
+    private readonly string _bin;
+    public KeepingTrashService(string bin) { _bin = bin; Directory.CreateDirectory(bin); }
+    public void DeleteFile(string path, DeleteAfterConvertMode mode)
+    {
+        if (!File.Exists(path)) return;
+        File.Copy(path, Path.Combine(_bin, Path.GetFileName(path)), overwrite: true);
+        File.Delete(path);
+    }
+    public void DeleteFolder(string path, DeleteAfterConvertMode mode) { try { Directory.Delete(path, recursive: true); } catch { } }
+}
+
 public class ConversionOrchestratorTests : IDisposable
 {
     private readonly string _tempDir = Directory.CreateTempSubdirectory("compressarr-conversion-orchestrator-tests-").FullName;
@@ -3891,5 +3919,158 @@ public class ConversionOrchestratorTests : IDisposable
         Assert.Equal(result.BeginSizeGb, result.EndSizeGb);                              // nothing saved
         // The Delete / Maintain choice governs the source exactly as it does after an encode.
         Assert.Equal(sourceIsRemoved ? 1 : 0, trash.Calls.Count(c => c.Path == source));
+    }
+
+    // ---- source safety (3.0 independent review) ---------------------------------------------------------------------------------------------
+
+    private (LaneConfig Lane, CompressarrConfig Config, string Input, string Output) SafetyLane(DeleteAfterConvertMode mode, bool moveFiles, bool outSameAsIn, string? movieBase = null)
+    {
+        var input = Path.Combine(_tempDir, "Input");
+        var output = Path.Combine(_tempDir, "Output");
+        Directory.CreateDirectory(input);
+        Directory.CreateDirectory(output);
+        var lane = new LaneConfig { Id = "lane1", DisplayName = "Test Lane", Enabled = true, Input = input, Output = output, MoviePreset = "Any Preset", MovieBasePath = movieBase ?? "" };
+        var config = new CompressarrConfig
+        {
+            Processing = new ProcessingSettings { DeleteAfterConvert = mode, MoveFiles = moveFiles, OutSameAsIn = outSameAsIn, ClearTitleMetadata = false, OnDestinationCollision = DestinationCollisionMode.Overwrite }
+        };
+        config.Lanes.Add(lane);
+        return (lane, config, input, output);
+    }
+
+    private ConversionOrchestrator Orchestrator(CompressarrConfig config, IEncoderRunner runner, ITrashService trash, ICompanionFileService? companions = null) =>
+        new(new PassThroughPathExpander(), new VideoFileScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), new MetadataService(),
+            runner, new FileRouter(), companions ?? new NoOpCompanionFileService(), new NoOpArrUnmonitorService(),
+            trash, new NoOpRunLogger(), new NoOpResumeStateStore(), new NoOpProgressReporter(), new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue));
+
+    [Fact]
+    public async Task OutputWrittenOverItsOwnSource_WithMaintain_KeepsTheOriginal_AndTheOutputTakesTheNextFreeName()
+    {
+        // Output goes back into the Input folder under the same name, and the collision setting is Overwrite. The move used to replace the original before Maintain was ever consulted.
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Maintain, moveFiles: false, outSameAsIn: true);
+        var source = Path.Combine(input, "Movie (2020).mkv");
+        File.WriteAllText(source, "original bytes");
+
+        var results = await RunLaneAsync(Orchestrator(config, new FakeProcessRunner(), new DeletingTrashService()), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.True(Assert.Single(results).Success);
+        Assert.Equal("original bytes", File.ReadAllText(source));
+        var output = Assert.Single(Directory.GetFiles(input), f => f != source);
+        Assert.Equal("Movie (2020) (2).mkv", Path.GetFileName(output));
+        Assert.Equal("fake encoded output", File.ReadAllText(output));
+    }
+
+    [Fact]
+    public async Task OutputWrittenOverItsOwnSource_WithRecycle_SendsTheOriginalToTheRecycleBinFirst()
+    {
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Recycle, moveFiles: false, outSameAsIn: true);
+        var source = Path.Combine(input, "Movie (2020).mkv");
+        File.WriteAllText(source, "original bytes");
+        var bin = Path.Combine(_tempDir, "bin");
+
+        await RunLaneAsync(Orchestrator(config, new FakeProcessRunner(), new KeepingTrashService(bin)), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.Equal("fake encoded output", File.ReadAllText(source));                                  // the converted file now has the name, as Recycle always meant
+        Assert.Equal("original bytes", File.ReadAllText(Path.Combine(bin, "Movie (2020).mkv")));       // and the original is recoverable
+    }
+
+    [Fact]
+    public async Task ASourceReplacedWhileItEncoded_IsKeptAsNewWork_NotDeletedAsTheSource()
+    {
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Delete, moveFiles: false, outSameAsIn: false);
+        var source = Path.Combine(input, "Movie (2020).mkv");
+        File.WriteAllText(source, "the original release");
+
+        var results = await RunLaneAsync(Orchestrator(config, new SourceReplacingProcessRunner(), new DeletingTrashService()), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.True(result.Success);
+        Assert.Contains(ReportWarningCode.SourceChangedKept, result.WarningCodes);
+        Assert.StartsWith("a different, newer release", File.ReadAllText(source));                     // still there, untouched
+    }
+
+    [Fact]
+    public async Task AnUnchangedSource_IsStillDeletedAfterTheEncode()
+    {
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Delete, moveFiles: false, outSameAsIn: false);
+        var source = Path.Combine(input, "Movie (2020).mkv");
+        File.WriteAllText(source, "the original release");
+
+        var results = await RunLaneAsync(Orchestrator(config, new FakeProcessRunner(), new DeletingTrashService()), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.True(Assert.Single(results).Success);
+        Assert.Empty(results[0].WarningCodes);
+        Assert.False(File.Exists(source));
+    }
+
+    [Fact]
+    public async Task AMovedRetry_DoesNotDeleteASourceThatWasReplacedWhileItWaited()
+    {
+        var movieBase = Path.Combine(_tempDir, "Movies");
+        Directory.CreateDirectory(movieBase);
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Delete, moveFiles: true, outSameAsIn: false, movieBase: @"Z:\Unavailable\Movies");
+        var source = Path.Combine(input, "Movie (2020).mkv");
+        File.WriteAllText(source, "the original release");
+        var orchestrator = Orchestrator(config, new FakeProcessRunner(), new DeletingTrashService());
+        var resumeState = new List<ResumeEntry>();
+        var resumePath = Path.Combine(_tempDir, "resume.json");
+
+        await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000000", resumeState, resumePath, CancellationToken.None);
+        Assert.Equal(ResumeStatus.MoveFailed, Assert.Single(resumeState).Status);
+
+        // Days later, with the destination still away, something puts a newer release at the same path. Then the destination comes back.
+        File.WriteAllText(source, "a newer, different release that must survive");
+        lane.MovieBasePath = movieBase;
+        await orchestrator.PrepareLaneAsync(lane, config, resumeState, resumePath);   // the retry runs here; nothing is encoded yet
+
+        Assert.True(File.Exists(Path.Combine(movieBase, "Movie (2020)", "Movie (2020).mkv")));          // the encoded result was filed
+        Assert.Equal("a newer, different release that must survive", File.ReadAllText(source));          // the newer release was not "the source"
+        Assert.Equal(ResumeStatus.Pending, Assert.Single(resumeState).Status);                           // it is queued as work of its own
+    }
+
+    [Fact]
+    public async Task ASkippedCompanion_IsNeverSweptAwayAsAnUnmatchedLeftover()
+    {
+        // The destination already has a subtitle with that name and the collision setting is Skip: the source's subtitle stays put, and the cleanup of the (now video-free) folder must not delete it.
+        var movieBase = Path.Combine(_tempDir, "Movies");
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Delete, moveFiles: true, outSameAsIn: false, movieBase: movieBase);
+        config.Processing.OnDestinationCollision = DestinationCollisionMode.Skip;
+        config.Processing.UnmatchedCompanionAction = DeleteAfterConvertMode.Delete;
+        var folder = Path.Combine(input, "Movie (2020)");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "Movie (2020).mkv"), "source");
+        File.WriteAllText(Path.Combine(folder, "Movie (2020).en.srt"), "the source's own subtitle");
+        File.WriteAllText(Path.Combine(folder, "notes.txt"), "unrelated leftover");
+        var destFolder = Path.Combine(movieBase, "Movie (2020)");
+        Directory.CreateDirectory(destFolder);
+        File.WriteAllText(Path.Combine(destFolder, "Movie (2020).en.srt"), "a different subtitle that was already there");
+
+        await RunLaneAsync(Orchestrator(config, new FakeProcessRunner(), new DeletingTrashService(), new CompanionFileService(new DeletingTrashService())), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.True(File.Exists(Path.Combine(destFolder, "Movie (2020).mkv")));
+        Assert.Equal("the source's own subtitle", File.ReadAllText(Path.Combine(folder, "Movie (2020).en.srt")));   // not swept
+        Assert.Equal("a different subtitle that was already there", File.ReadAllText(Path.Combine(destFolder, "Movie (2020).en.srt")));
+        Assert.True(File.Exists(Path.Combine(folder, "notes.txt")));                                    // the folder was left as it was, not partly swept
+    }
+
+    [Fact]
+    public async Task AQueuedFileOutsideTheLanesInput_IsDroppedFromTheQueue_NotConvertedOrSweptAfter()
+    {
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Delete, moveFiles: false, outSameAsIn: false);
+        var elsewhere = Path.Combine(_tempDir, "Elsewhere", "Personal");
+        Directory.CreateDirectory(elsewhere);
+        var stray = Path.Combine(elsewhere, "holiday.mkv");
+        File.WriteAllText(stray, "not part of this lane");
+        File.WriteAllText(Path.Combine(elsewhere, "diary.txt"), "personal");
+        var encoder = new FakeProcessRunner();
+        var resumeState = new List<ResumeEntry> { new() { LaneId = "lane1", FullName = stray, Status = ResumeStatus.Pending, Order = 0 } };
+
+        var results = await RunLaneAsync(Orchestrator(config, encoder, new DeletingTrashService(), new CompanionFileService(new DeletingTrashService())), lane, config, _tempDir, "20260101_000000", resumeState, Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.Empty(results);
+        Assert.Equal(0, encoder.CallCount);
+        Assert.Empty(resumeState);                                                                      // the queue entry is gone ...
+        Assert.True(File.Exists(stray));                                                                // ... the file and its folder are not touched
+        Assert.True(File.Exists(Path.Combine(elsewhere, "diary.txt")));
     }
 }

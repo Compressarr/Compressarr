@@ -129,10 +129,12 @@ internal sealed class EncodedFileFinisher
         string? RestInPlace(string physicalPath, string folder)
         {
             var desiredDestPath = Path.Combine(folder, desiredFileName);
+            var collisionMode = FileOutcomeHelpers.OutputCollisionMode(desiredDestPath, file.FullName, config.Processing.OnDestinationCollision, config.Processing.DeleteAfterConvert,
+                ResumeKeeping.SourceUnchangedSinceEncode(resumeEntry), out var disposeSourceFirst);
             string resolvedDestPath;
             try
             {
-                resolvedDestPath = FileRouter.ResolveCollision(desiredDestPath, config.Processing.OnDestinationCollision);
+                resolvedDestPath = FileRouter.ResolveCollision(desiredDestPath, collisionMode);
             }
             catch (DestinationCollisionSkippedException ex)
             {
@@ -140,6 +142,8 @@ internal sealed class EncodedFileFinisher
                 _logger.Log($"  {ex.Message}");
                 return null;
             }
+            // The output is about to take the source's own name: the source goes the way the setting says first (Recycle keeps it recoverable), not under the move.
+            if (disposeSourceFirst) FileOutcomeHelpers.DisposeSource(_trash, file.FullName, config.Processing.DeleteAfterConvert);
             File.Move(physicalPath, resolvedDestPath, overwrite: true);
             return resolvedDestPath;
         }
@@ -238,17 +242,20 @@ internal sealed class EncodedFileFinisher
         // alongside its video, and the video's own source copy needs to already be gone for
         // the folder-emptiness check further below (CleanUpEmptySourceFolder, called much
         // later - see there for why) to eventually find this folder truly empty.
-        if (!moveFailed && !sameAsSource && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain)
+        // The path alone does not prove it is still the file that was encoded: an encode takes hours, and Sonarr/Radarr (an upgrade) or a person can put a different
+        // file at the same path meanwhile. That one is new work - kept, and queued again on a later scan - never deleted as "the source".
+        var sourceReplaced = !moveFailed && !sameAsSource && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain
+            && !ResumeKeeping.SourceUnchangedSinceEncode(resumeEntry);
+        if (sourceReplaced)
         {
-            if (File.Exists(file.FullName))
-            {
-                var attrs = File.GetAttributes(file.FullName);
-                if (attrs.HasFlag(FileAttributes.ReadOnly))
-                {
-                    File.SetAttributes(file.FullName, attrs & ~FileAttributes.ReadOnly);
-                }
-            }
-            _trash.DeleteFile(file.FullName, config.Processing.DeleteAfterConvert);
+            var changed = $"The source '{file.Name}' is not the file that was converted (it changed while it was converting), so it was kept: it is queued again as new work.";
+            AddWarning(ReportWarningCode.SourceChangedKept, changed);
+            _logger.Log($"  {changed}");
+        }
+
+        if (!moveFailed && !sameAsSource && !sourceReplaced && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain)
+        {
+            FileOutcomeHelpers.DisposeSource(_trash, file.FullName, config.Processing.DeleteAfterConvert);
         }
 
         // Only attempted when the video actually reached a routed (TV/Movie library)
@@ -314,7 +321,7 @@ internal sealed class EncodedFileFinisher
         // companion still waiting to be moved, not a genuine orphan to sweep.
         if (routedDestPath is not null && !companionMoveFailed && arrCleanupSafe)
         {
-            var cleanupError = _cleanup.TryCleanUpSourceFolder(config, file.DirectoryName!, inputPath, "");
+            var cleanupError = _cleanup.TryCleanUpSourceFolder(config, file.DirectoryName!, inputPath, "", file.FullName);
             if (cleanupError is not null)
             {
                 // Code-review finding: a filesystem-level cleanup failure (locked file,

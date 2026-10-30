@@ -25,6 +25,13 @@ public sealed record AuthSettings(AuthMethod Method, AuthRequired Required, bool
 {
     public static AuthSettings Default { get; } = new(AuthMethod.Forms, AuthRequired.DisabledForLocalAddresses, false, null, false);
 
+    /// <summary>What is in force while the settings cannot be read because the database could not be opened. Not "first run": the person may well have asked for sign-in
+    /// everywhere, and a storage fault must never make anyone freer than that. Only this computer is let in (so the fault can be looked at and fixed), everyone else
+    /// is told to wait; once the database opens again the real settings apply.</summary>
+    public static AuthSettings Unavailable { get; } = new(AuthMethod.Forms, AuthRequired.DisabledForLocalhost, false, null, false);
+
+    public bool IsUnavailable => ReferenceEquals(this, Unavailable);
+
     /// <summary>True once a username and password exist, so there is something to sign in with.</summary>
     public bool CredentialsSet => HasPassword && !string.IsNullOrEmpty(Username);
 }

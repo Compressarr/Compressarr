@@ -137,6 +137,12 @@ public sealed class WebAuthMiddleware
 
         // Credentials are needed from here on.
         var address = peer?.ToString() ?? "unknown";
+        if (settings.IsUnavailable)
+        {
+            await Unavailable(context);
+            return;
+        }
+
         if (!settings.CredentialsSet)
         {
             await NotSetUp(context);
@@ -271,6 +277,23 @@ public sealed class WebAuthMiddleware
         }
 
         await Json(context, StatusCodes.Status401Unauthorized, "login_not_set_up", message);
+    }
+
+    private static async Task Unavailable(HttpContext context)
+    {
+        const string message = "Compressarr's settings database could not be opened, so sign-in cannot be checked right now. It is tried again every few seconds: wait a moment and reload, or open Compressarr on the computer it runs on.";
+        context.Response.Headers.RetryAfter = "30";
+        if (WantsPage(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            context.Response.ContentType = "text/html; charset=utf-8";
+            await context.Response.WriteAsync("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Compressarr</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"></head>"
+                + "<body style=\"font-family: system-ui, sans-serif; max-width: 34em; margin: 4em auto; padding: 0 1em; line-height: 1.5\"><h2>Compressarr</h2><p>"
+                + System.Net.WebUtility.HtmlEncode(message) + "</p></body></html>");
+            return;
+        }
+
+        await Json(context, StatusCodes.Status503ServiceUnavailable, "settings_unavailable", message);
     }
 
     private static async Task Locked(HttpContext context, TimeSpan? retryAfter)

@@ -58,6 +58,25 @@ public static class ResumeKeeping
         entry.KeptSourceModifiedUtc = info.LastWriteTimeUtc;
     }
 
+    /// <summary>Notes the source's size and time as its encode starts, so that deleting "the source" afterwards can first check it is still that file.</summary>
+    public static void NoteEncodeStart(ResumeEntry entry)
+    {
+        if (!File.Exists(entry.FullName)) return;
+        var info = new FileInfo(entry.FullName);
+        entry.EncodedFromSize = info.Length;
+        entry.EncodedFromModifiedUtc = info.LastWriteTimeUtc;
+    }
+
+    /// <summary>False when what is at the entry's path is no longer the file that was encoded (another size or time). True when it matches, when the file is gone, or when
+    /// no stamp was recorded (an entry from before this existed): then there is nothing to prove otherwise and the old behaviour stands.</summary>
+    public static bool SourceUnchangedSinceEncode(ResumeEntry entry)
+    {
+        if (entry.EncodedFromSize is not { } size || entry.EncodedFromModifiedUtc is not { } modified) return true;
+        if (!File.Exists(entry.FullName)) return true;
+        var info = new FileInfo(entry.FullName);
+        return info.Length == size && (info.LastWriteTimeUtc - modified).Duration() <= TimeTolerance;
+    }
+
     /// <summary>True when this Completed entry is the very file now found at its path: converted already, left in place, unchanged.</summary>
     public static bool IsConvertedAndUnchanged(ResumeEntry entry, FileInfo found) =>
         entry.Status == ResumeStatus.Completed
@@ -118,6 +137,8 @@ internal static class ResumeResults
             onDisk.HeldAfterFailure = entry.HeldAfterFailure;
             onDisk.KeptSourceSize = entry.KeptSourceSize;
             onDisk.KeptSourceModifiedUtc = entry.KeptSourceModifiedUtc;
+            onDisk.EncodedFromSize = entry.EncodedFromSize;
+            onDisk.EncodedFromModifiedUtc = entry.EncodedFromModifiedUtc;
             return true;
         });
     }
@@ -347,6 +368,14 @@ public sealed class ResumeEntry
 
     /// <summary>The last-write time the kept source had. See <see cref="KeptSourceSize"/>.</summary>
     public DateTime? KeptSourceModifiedUtc { get; set; }
+
+    /// <summary>The size the source had when its encode started. Whatever is found at the path later (a retried move can come hours or days after the encode, an encode
+    /// itself takes hours) is only the file this encode replaced if it still matches: a different file there - Sonarr or Radarr upgraded it, someone copied a new
+    /// one in - is new work and is never deleted as "the source". Null (an entry from before this was recorded) means nothing to compare against.</summary>
+    public long? EncodedFromSize { get; set; }
+
+    /// <summary>The last-write time the source had when its encode started. See <see cref="EncodedFromSize"/>.</summary>
+    public DateTime? EncodedFromModifiedUtc { get; set; }
 
     /// <summary>Set when this entry was created purely as bookkeeping for a queue-control action
     /// (reorder/skip/preset-override/remove) on a file the current pass hadn't tracked yet, rather

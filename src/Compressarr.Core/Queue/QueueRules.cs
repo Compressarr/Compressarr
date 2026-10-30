@@ -1,5 +1,6 @@
 using Compressarr.Core.Config;
 using Compressarr.Core.Conversion;
+using Compressarr.Core.Routing;
 
 namespace Compressarr.Core.Queue;
 
@@ -55,8 +56,11 @@ public static class QueueRules
     /// bare name alone let a skip/remove/preset-override/reorder request silently target the wrong
     /// one of two same-named files, or fail ambiguously. Also simpler than the old approach: since
     /// the caller already has the file's real full path (from the UpNextItem it's acting on), no
-    /// directory search is needed at all - just a direct File.Exists check.</summary>
-    public static ResumeEntry? FindOrCreatePendingEntry(List<ResumeEntry> resumeState, string laneId, string fullName)
+    /// directory search is needed at all - just a direct File.Exists check.
+    ///
+    /// <paramref name="inputRoot"/> is the lane's expanded Input folder. A new entry is only made for a file strictly inside it: the lane's Input is what the engine
+    /// is allowed to convert and, afterwards, to delete and sweep, so a request naming any other file (a typo, a stale path, a hand-made request) is refused.</summary>
+    public static ResumeEntry? FindOrCreatePendingEntry(List<ResumeEntry> resumeState, string laneId, string fullName, string inputRoot)
     {
         var existingAnyStatus = resumeState.FirstOrDefault(e =>
             e.LaneId == laneId &&
@@ -66,7 +70,7 @@ public static class QueueRules
             return existingAnyStatus.Status == ResumeStatus.Pending ? existingAnyStatus : null;
         }
 
-        if (!File.Exists(fullName)) return null;
+        if (!PathContainment.IsStrictlyInside(fullName, inputRoot) || !File.Exists(fullName)) return null;
 
         // Stamped here too, same as the engine's own entry-creation - a file touched by a
         // queue-control action before the engine ever tracked it still gets a permanent queue
@@ -377,14 +381,15 @@ public static class QueueRules
     public static void ApplyExplicitOrder(
         CompressarrConfig config,
         List<ResumeEntry> resumeState,
-        IReadOnlyList<(string LaneId, string FullName)> items)
+        IReadOnlyList<(string LaneId, string FullName)> items,
+        IPathExpander pathExpander)
     {
         for (var i = 0; i < items.Count; i++)
         {
             var lane = config.Lanes.FirstOrDefault(l => l.Id == items[i].LaneId);
             if (lane is null) continue;
 
-            var entry = FindOrCreatePendingEntry(resumeState, lane.Id, items[i].FullName);
+            var entry = FindOrCreatePendingEntry(resumeState, lane.Id, items[i].FullName, pathExpander.Expand(lane.Input));
             if (entry is not null) entry.Order = i;
         }
     }

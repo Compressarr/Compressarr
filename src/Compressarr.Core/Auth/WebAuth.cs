@@ -153,7 +153,7 @@ public sealed class SqliteWebAuth : IWebAuth
     private Stored Read()
     {
         using var connection = _store.OpenReady(_resumeFilePath());
-        if (connection is null) return new Stored(AuthSettings.Default, null);   // an unreadable database is "local only, nothing set up", never "locked"
+        if (connection is null) return new Stored(AuthSettings.Unavailable, null);   // an unreadable database never frees anyone the settings might have held back
 
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT method, required, trust_cgnat, username, password_hash FROM auth WHERE id = 1;";

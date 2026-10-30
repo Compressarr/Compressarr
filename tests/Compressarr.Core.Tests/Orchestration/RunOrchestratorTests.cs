@@ -631,6 +631,41 @@ public class RunOrchestratorTests : IDisposable
     }
 
     [Fact]
+    public async Task RunOnceAsync_OnTheSqliteQueue_ForgetsFinishedRows_EvenThoughThereIsNoJsonFileAnyMore()
+    {
+        // In 3.x the queue lives in the database and compressarr.resume.json is gone (renamed .imported, or never there on a new install). The end-of-pass prune used to be
+        // guarded by that file existing, so finished rows were never forgotten and piled up for good.
+        var (config, input) = MakeSingleLaneConfig("a.mkv", "b.mkv");
+        var store = new SqliteResumeStateStore();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, new RecordingProcessRunner(), resumeStore: store);
+
+        var first = await orchestrator.RunOnceAsync(config);
+        Assert.Equal(2, first!.TotalFiles);
+        Assert.False(File.Exists(resumeFilePath));
+        Assert.Empty(store.Load(resumeFilePath));
+
+        File.WriteAllText(Path.Combine(input, "c.mkv"), "another video");
+        await orchestrator.RunOnceAsync(config);
+        Assert.Empty(store.Load(resumeFilePath));                 // still bounded after more passes
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_OnTheSqliteQueue_WithMaintain_KeepsOnlyTheKeptSourcesRow()
+    {
+        var (config, _) = MakeSingleLaneConfig("a.mkv");
+        config.Processing.DeleteAfterConvert = DeleteAfterConvertMode.Maintain;
+        var store = new SqliteResumeStateStore();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, new RecordingProcessRunner(), resumeStore: store);
+
+        await orchestrator.RunOnceAsync(config);
+        await orchestrator.RunOnceAsync(config);
+
+        var remembered = Assert.Single(store.Load(resumeFilePath));   // one row for the one kept source, however many passes ran
+        Assert.Equal(ResumeStatus.Completed, remembered.Status);
+        Assert.NotNull(remembered.KeptSourceSize);
+    }
+
+    [Fact]
     public async Task RunOnceAsync_WithMaintain_ASourceThatWasConverted_IsNotConvertedAgainOnTheNextPass()
     {
         // Maintain leaves every source in Input. Before, the finished entry was wiped at the end of the pass and the file
