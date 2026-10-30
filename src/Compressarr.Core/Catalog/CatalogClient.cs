@@ -150,7 +150,7 @@ public sealed class CatalogClient : ICatalogClient
     {
         using var client = _httpClientFactory.CreateClient(nameof(CatalogClient));
         client.Timeout = TimeSpan.FromSeconds(30);
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Compressarr/2.2");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Compressarr/3.0");
         client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
 
         using var response = await client.GetAsync($"https://api.github.com/repos/{Owner}/{Repository}/releases/latest", cancellationToken);
@@ -170,7 +170,7 @@ public sealed class CatalogClient : ICatalogClient
     {
         using var client = _httpClientFactory.CreateClient(nameof(CatalogClient));
         client.Timeout = TimeSpan.FromSeconds(60);
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Compressarr/2.2");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Compressarr/3.0");
 
         using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();

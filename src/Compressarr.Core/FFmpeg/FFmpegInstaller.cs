@@ -40,7 +40,7 @@ public sealed class FFmpegInstaller : IFFmpegInstaller
         if (!OperatingSystem.IsWindows()) return null;
 
         using var client = _httpClientFactory.CreateClient(nameof(FFmpegInstaller));
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Compressarr/2.2");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Compressarr/3.0");
 
         var response = await client.GetAsync(ReleaseApiUrl);
         response.EnsureSuccessStatusCode();
@@ -113,7 +113,7 @@ public sealed class FFmpegInstaller : IFFmpegInstaller
             using (var client = _httpClientFactory.CreateClient(nameof(FFmpegInstaller)))
             {
                 client.Timeout = TimeSpan.FromMinutes(30);
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("Compressarr/2.2");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("Compressarr/3.0");
                 using var response = await client.GetAsync(release.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                 response.EnsureSuccessStatusCode();
 

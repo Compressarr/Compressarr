@@ -9,7 +9,7 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
-## [3.0.0] - Unreleased
+## [3.0.0] - 2026-11-01
 
 > [!TIP]
 > **What's new in 3.0, compared with 2.1.10 (the last 2.x release):** a second encoder (ffmpeg) and a profile editor, Passthrough (all of Compressarr's filing without a re-encode),
