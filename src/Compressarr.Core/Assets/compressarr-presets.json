@@ -88,7 +88,7 @@
                     "PicturePadLeft": 0,
                     "PicturePadRight": 0,
                     "PicturePadColor": "black",
-                    "PresetDescription": "Converts media files to H265 10bit with E-AC3 audio mixdown supporting 7.1 Channels. Also crops video to actual size removing black bars. Includes English subtitles and chapter markers.",
+                    "PresetDescription": "Converts media files to H265 10bit with E-AC3 audio mixdown supporting 5.1 Channels. Also crops video to actual size removing black bars. Includes English subtitles and chapter markers.",
                     "PresetName": "Compressarr SD-HD",
                     "Type": 1,
                     "SubtitleAddCC": false,
