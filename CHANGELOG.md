@@ -9,7 +9,9 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
-## [3.1.0] - Unreleased
+## [3.1.0-rc.1] - 2026-11-13
+
+> The first 3.1 pre-release (release candidate). Everything below is new since 3.0.0.
 
 > [!TIP]
 > **What's new in 3.1:** a **Videos lane** for home videos, a **Track in History** choice per lane, **processing settings per lane**, **priority rules** for the queue and a **Change all** button for it,
