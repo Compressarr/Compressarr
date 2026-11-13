@@ -3,7 +3,7 @@ namespace Compressarr.Core.Logging;
 /// <summary>One run as the Automation API lists it. <see cref="EndedAt"/> is the server's local time (older runs only know the day: the time is then 00:00:00).</summary>
 public sealed record RunSummary(
     long Id, int Number, DateTime EndedAt, int DurationSeconds, int Files, double BeforeGb, double AfterGb, int Errors, int Warnings, int Redirects,
-    int? Movies, int? Tvs, double? AvgFps, int? HandBrakeFiles, int? FfmpegFiles, int? PassthroughFiles, bool Counted, bool HasReport);
+    int? Movies, int? Tvs, double? AvgFps, int? HandBrakeFiles, int? FfmpegFiles, int? PassthroughFiles, bool Counted, bool HasReport, int Videos = 0);
 
 /// <summary>One file of a run, as stored. The file's long detail log is deliberately not here.</summary>
 public sealed record RunFileDetail(
@@ -20,7 +20,7 @@ public sealed record NameCount(string Name, int Files);
 /// <summary>The figures for a period, summed from the running totals (one small row per day), not from the runs.</summary>
 public sealed record PeriodStats(
     int Runs, int Files, double BeforeGb, double AfterGb, long Seconds, int Movies, int Tvs, int UnknownSplit, int Errors, int Warnings, int Redirects,
-    int HandBrakeFiles, int FfmpegFiles, int PassthroughFiles, double? AvgFps, IReadOnlyList<NameCount> Lanes, IReadOnlyList<NameCount> Profiles);
+    int HandBrakeFiles, int FfmpegFiles, int PassthroughFiles, double? AvgFps, IReadOnlyList<NameCount> Lanes, IReadOnlyList<NameCount> Profiles, int Videos = 0);
 
 /// <summary>Read-only questions the Automation API asks of the run history database. Implemented by <see cref="SqliteRunHistoryStore"/>.</summary>
 public interface IRunQueries

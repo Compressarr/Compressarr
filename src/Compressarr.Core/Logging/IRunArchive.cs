@@ -46,6 +46,12 @@ public interface IRunArchive
     /// fetching the report list; the total tells the History page whether the list it is showing holds every run that is new.</summary>
     (int ErrorRuns, int WarningRuns, int UnseenRuns) CountUnseen(int viewedThroughRunNumber, DateTime since);
 
+    /// <summary>Removes a file's identity from History (3.1) without touching its numbers: the name, any failure, warning or Sonarr/Radarr message (those can name the title or a
+    /// path) and the detail-log reference become "Removed" / empty, and the file counts as resolved (a run whose problem files are all scrubbed no longer appears in the unseen
+    /// errors list or the sidebar badges). Sizes, durations, counts, savings and every running total are unchanged, so no total moves and no run number is lost. Returns the detail log
+    /// path the row pointed to (so the caller can delete that file), an empty string when it pointed to none, or null when there is no such file in that run.</summary>
+    string? ScrubFile(long runId, long fileRowId);
+
     /// <summary>The files that finished successfully in the most recent <paramref name="runs"/> runs, for the speed estimate.</summary>
     IReadOnlyList<FileSample> RecentFileSamples(int runs);
 }

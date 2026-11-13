@@ -143,7 +143,7 @@ public class ApiV1ReadEndpointTests
         Assert.Equal(Sorted("total", "page", "pageSize", "items"), Keys(all));
         Assert.Equal(3, all!["total"]!.GetValue<int>());
         var items = all["items"]!.AsArray();
-        Assert.Equal(Sorted("position", "laneId", "lane", "file", "type", "status", "preset", "engine", "sizeGb", "passthrough", "resumed", "unmatched", "landsInLane"), Keys(items[0]));
+        Assert.Equal(Sorted("position", "laneId", "lane", "file", "type", "status", "preset", "engine", "priority", "sizeGb", "passthrough", "resumed", "unmatched", "landsInLane"), Keys(items[0]));
         Assert.Equal(new[] { "video", "movie", "tv" }, items.Select(i => i!["type"]!.GetValue<string>()).ToArray());
         Assert.Equal(new[] { 1, 2, 3 }, items.Select(i => i!["position"]!.GetValue<int>()).ToArray());
 
@@ -217,7 +217,7 @@ public class ApiV1ReadEndpointTests
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal(Sorted("total", "page", "pageSize", "runs"), Keys(all));
         var runs = all!["runs"]!.AsArray();
-        Assert.Equal(Sorted("id", "number", "endedAt", "durationSeconds", "files", "beforeGb", "afterGb", "savedGb", "errors", "warnings", "redirects", "movies", "tvEpisodes",
+        Assert.Equal(Sorted("id", "number", "endedAt", "durationSeconds", "files", "beforeGb", "afterGb", "savedGb", "errors", "warnings", "redirects", "movies", "videos", "tvEpisodes",
             "avgFps", "engines", "counted", "hasReport", "reportUrl"), Keys(runs[0]));
         Assert.Equal(Sorted("handbrake", "ffmpeg", "passthrough"), Keys(runs[0]!["engines"]));
         Assert.Equal(new[] { newId, midId, oldId }, runs.Select(r => r!["id"]!.GetValue<long>()).ToArray());
@@ -289,7 +289,7 @@ public class ApiV1ReadEndpointTests
 
         var (status, all, _) = await Get(host, key, "/api/v1/stats");
         Assert.Equal(HttpStatusCode.OK, status);
-        Assert.Equal(Sorted("period", "from", "to", "runs", "files", "beforeGb", "afterGb", "savedGb", "seconds", "movies", "tvEpisodes", "splitUnknown", "errors", "warnings",
+        Assert.Equal(Sorted("period", "from", "to", "runs", "files", "beforeGb", "afterGb", "savedGb", "seconds", "movies", "videos", "tvEpisodes", "splitUnknown", "errors", "warnings",
             "redirects", "avgFps", "engines", "lanes", "profiles"), Keys(all));
         Assert.Equal(Sorted("handbrake", "ffmpeg", "passthrough"), Keys(all!["engines"]));
         Assert.Equal("all", all["period"]!.GetValue<string>());
@@ -332,7 +332,7 @@ public class ApiV1ReadEndpointTests
 
         var (status, _, response) = await Get(host, key, $"/api/v1/reports/{id}");
         var html = await response.Content.ReadAsStringAsync();
-        var viaUi = await host.Client.GetStringAsync($"/api/reports/{id}");
+        var viaUi = await host.Client.GetStringAsync($"/api/reports/{id}?download=1");   // the page itself; the web UI view only adds Save/Share buttons on top
         var (_, _, download) = await Get(host, key, $"/api/v1/reports/{id}?download=1");
         var (missing, error, _) = await Get(host, key, "/api/v1/reports/99999");
 

@@ -214,7 +214,7 @@ public sealed partial class SqliteRunHistoryStore : IRunHistoryStore, IRunArchiv
 
         var result = row;
         if (row.MovieCount is null || row.TvCount is null)
-            result = result with { MovieCount = use.Count(f => f.ContentType is "Movie" or "Video"), TvCount = use.Count(f => f.ContentType == "TV Show") };
+            result = result with { MovieCount = use.Count(f => f.ContentType == "Movie"), VideoCount = use.Count(f => f.ContentType == "Video"), TvCount = use.Count(f => f.ContentType == "TV Show") };
 
         if (row.HandBrakeCount is null)
         {
@@ -312,9 +312,9 @@ public sealed partial class SqliteRunHistoryStore : IRunHistoryStore, IRunArchiv
             command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO runs (kind, counted, run_number, ended_date, ended_at, seconds, files, before_gb, after_gb, errors, warnings, redirects,
-                                  movies, tvs, avg_fps, hb_files, ff_files, pass_files, report_file)
+                                  movies, tvs, videos, avg_fps, hb_files, ff_files, pass_files, report_file)
                 VALUES ('run', @counted, @number, @date, @endedAt, @seconds, @files, @before, @after, @errors, @warnings, @redirects,
-                        @movies, @tvs, @fps, @hb, @ff, @pass, @report);
+                        @movies, @tvs, @videos, @fps, @hb, @ff, @pass, @report);
                 SELECT last_insert_rowid();
                 """;
             command.Parameters.AddWithValue("@counted", counted ? 1 : 0);
@@ -330,6 +330,7 @@ public sealed partial class SqliteRunHistoryStore : IRunHistoryStore, IRunArchiv
             command.Parameters.AddWithValue("@redirects", run.RedirectCount);
             command.Parameters.AddWithValue("@movies", (object?)run.MovieCount ?? DBNull.Value);
             command.Parameters.AddWithValue("@tvs", (object?)run.TvCount ?? DBNull.Value);
+            command.Parameters.AddWithValue("@videos", run.VideoCount ?? 0);
             command.Parameters.AddWithValue("@fps", (object?)run.AvgFps ?? DBNull.Value);
             command.Parameters.AddWithValue("@hb", (object?)run.HandBrakeCount ?? DBNull.Value);
             command.Parameters.AddWithValue("@ff", (object?)run.FfmpegCount ?? DBNull.Value);
@@ -377,7 +378,7 @@ public sealed partial class SqliteRunHistoryStore : IRunHistoryStore, IRunArchiv
         using var command = connection.CreateCommand();
         command.CommandText = $"""
             SELECT id, run_number, ended_date, seconds, files, before_gb, after_gb, errors, warnings, redirects, movies, tvs, avg_fps,
-                   hb_files, ff_files, pass_files, report_file, has_report
+                   hb_files, ff_files, pass_files, report_file, has_report, videos
             FROM runs WHERE {where} ORDER BY id
             """;
         using var reader = command.ExecuteReader();
@@ -400,6 +401,7 @@ public sealed partial class SqliteRunHistoryStore : IRunHistoryStore, IRunArchiv
                 HandBrakeCount: Int(13), FfmpegCount: Int(14), PassthroughCount: Int(15),
                 LaneCounts: known ? lanes.GetValueOrDefault(id) ?? new Dictionary<string, int>() : null,
                 PresetCounts: known ? profiles.GetValueOrDefault(id) ?? new Dictionary<string, int>() : null,
+                VideoCount: reader.GetInt32(18),
                 Id: id, HasReport: reader.GetInt32(17) != 0)));
         }
         return runs;

@@ -222,7 +222,20 @@ async function loadSettings() {
   fillForm(dto);
   settingsDirty = false;
   applySettingsValidation(dto.validationIssues);
+  await loadCustomLanesNote();
   await loadAuth();
+}
+
+// Lanes that handle their files with their own settings (Lanes page > Advanced) ignore this card; say so, and which lanes.
+async function loadCustomLanesNote() {
+  const note = document.getElementById('customLanesNote');
+  try {
+    const lanes = await (await fetch('/api/lanes')).json();
+    const custom = lanes.filter(l => l.useGlobalProcessing === false);
+    if (custom.length === 0) { note.classList.add('hidden'); return; }
+    note.textContent = (custom.length === 1 ? '1 lane uses its own processing settings and is not affected by this card: ' : custom.length + ' lanes use their own processing settings and are not affected by this card: ') + custom.map(l => l.displayName).join(', ') + '.';
+    note.classList.remove('hidden');
+  } catch { note.classList.add('hidden'); }
 }
 
 document.getElementById('saveBtn').addEventListener('click', async () => {

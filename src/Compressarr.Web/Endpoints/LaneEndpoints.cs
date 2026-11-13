@@ -24,11 +24,21 @@ public static class LaneEndpoints
             return Results.Json(config.Lanes.Select(lane => ConfigMapping.ToLaneDto(lane, Validate(lane, config, pathExpander, encoders))).ToList());
         });
 
-        app.MapPost("/api/lanes", (IConfigStore configStore, IPathExpander pathExpander, IEncoderResolver encoders) =>
+        // ?kind=videos adds a Videos lane: for home videos and other clips that are not movies or shows (flat folder, no FileBot, no Sonarr/Radarr, no posters).
+        // It starts with its own processing settings: the global ones, except that a name already taken in the destination is renamed, never overwritten.
+        app.MapPost("/api/lanes", (string? kind, IConfigStore configStore, IPathExpander pathExpander, IEncoderResolver encoders) =>
         {
+            var videos = string.Equals(kind, "videos", StringComparison.OrdinalIgnoreCase);
             var dto = configStore.Update(AppPaths.GetConfigFilePath(), config =>
             {
-                var lane = LaneConfig.CreateNew($"New Lane {config.Lanes.Count + 1}");
+                var lane = LaneConfig.CreateNew(videos ? $"New Videos Lane {config.Lanes.Count + 1}" : $"New Lane {config.Lanes.Count + 1}");
+                if (videos)
+                {
+                    lane.Kind = LaneKind.Videos;
+                    lane.Processing = LaneProcessing.CopyOfGlobal(config);
+                    lane.Processing.OnDestinationCollision = DestinationCollisionMode.Rename;
+                    lane.Processing.MoveFiles = true;
+                }
                 config.Lanes.Add(lane);
                 return ConfigMapping.ToLaneDto(lane, Validate(lane, config, pathExpander, encoders));
             });

@@ -240,12 +240,14 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         }
         _logger.ClearProblem($"lane-no-output:{lane.Id}");
 
+        // The settings that govern THIS lane's files: its own set when it has one (3.1), otherwise the global Processing block.
+        var laneConfig = LaneProcessing.ConfigFor(config, lane);
         List<FileInfo> videoFiles;
         var retriesSucceeded = 0;
 
         // Everything left unfinished from earlier passes (see RetryRecovery) is resolved before this
         // pass scans for anything new.
-        retriesSucceeded = await _retryRecovery.RecoverAsync(lane, config, inputPath, tvShowBasePath, movieBasePath, resumeState, resumeFilePath, cancellationToken);
+        retriesSucceeded = await _retryRecovery.RecoverAsync(lane, laneConfig, inputPath, tvShowBasePath, movieBasePath, resumeState, resumeFilePath, cancellationToken);
 
         // Optional pre-processing pass (FileBot) - no-ops instantly if disabled. Runs before the
         // real scan below so anything it renamed/organized is what Compressarr's own classifier
@@ -254,9 +256,11 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         // expanding the same way HandBrake's own CliPath is above (config.FileBot.CliPath can
         // carry a %ProgramFiles%-style token) - IFileBotRunner itself never expands anything, same
         // division of responsibility as the HandBrakeCLI path.
+        // A Videos lane is never sent to FileBot: it would rename home videos as if they were movies.
+        var fileBotOn = config.FileBot.Enabled && !LaneKinds.IsVideos(lane);
         var expandedFileBotSettings = new FileBotSettings
         {
-            Enabled = config.FileBot.Enabled,
+            Enabled = fileBotOn,
             CliPath = _pathExpander.Expand(config.FileBot.CliPath),
             TvEnabled = config.FileBot.TvEnabled,
             TvArgs = config.FileBot.TvArgs,
@@ -268,21 +272,25 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         // unmatched-files set and changing that shape for one caller's report-visibility need
         // wasn't worth it. Kept simple and equivalent; if IFileBotRunner's own check ever changes,
         // this one needs to move with it.
-        if (config.FileBot.Enabled && (string.IsNullOrWhiteSpace(expandedFileBotSettings.CliPath) || !File.Exists(expandedFileBotSettings.CliPath)))
+        if (fileBotOn && (string.IsNullOrWhiteSpace(expandedFileBotSettings.CliPath) || !File.Exists(expandedFileBotSettings.CliPath)))
         {
             reportProblems?.Add(ReportErrorCode.FileBotPathNotFound);
         }
         // A live UI otherwise has nothing to show between LaneStarted and the first FileStarted -
         // FileBot's own lookups can take real wall-clock time (a live TheTVDB/TMDB call), during
         // which the Monitor page would look stuck/idle without this.
-        if (config.FileBot.Enabled)
+        if (fileBotOn)
         {
             _progress.FileBotStarted(lane.Id);
             _logger.Log("Renaming files with FileBot...");
         }
-        var fileBotResult = _fileBotRunner.Run(expandedFileBotSettings, inputPath, config.Processing.VidTypes, _logger);
+        // FileBot prints the files it renames; for a lane whose History is not fully tracked those lines stay out of the log file (an error among them is kept).
+        if (fileBotOn && lane.Tracking != LaneTracking.Full) _logger.BeginFileScope();
+        FileBotRunResult fileBotResult;
+        try { fileBotResult = _fileBotRunner.Run(expandedFileBotSettings, inputPath, laneConfig.Processing.VidTypes, _logger); }
+        finally { if (fileBotOn && lane.Tracking != LaneTracking.Full) _logger.EndFileScope(discard: true); }
         var fileBotUnmatched = fileBotResult.Unmatched;
-        if (config.FileBot.Enabled)
+        if (fileBotOn)
         {
             _progress.FileBotCompleted(lane.Id);
         }
@@ -292,7 +300,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         // exactly what RunEndpoints.ComputeUpNext independently computes the same way for the
         // Monitor page's own queue display - both must never disagree about "what's next" for a
         // file nobody has ever dragged.
-        var scanned = _scanner.FindVideoFiles(inputPath, config.Processing.VidTypes, config.Processing.MinSizeBytes, config.Processing.Limit).ToList();
+        var scanned = _scanner.FindVideoFiles(inputPath, laneConfig.Processing.VidTypes, laneConfig.Processing.MinSizeBytes, laneConfig.Processing.Limit).ToList();
         var naturalOrderIndex = QueueRules.NaturalIndexMap(scanned);
 
         // FileBot above (and any earlier lane's own prep) can take real wall-clock time, during
@@ -312,7 +320,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         // Which files are tracked, in what order, and what happens when one reappears all live in
         // QueueRules - see its TrackScannedFiles for the reasoning behind each case.
         var laneHadPending = resumeState.Any(e => e.LaneId == lane.Id && e.Status == ResumeStatus.Pending);
-        var addedUntracked = QueueRules.TrackScannedFiles(resumeState, lane.Id, scanned, fileBotUnmatched, laneHadPending);
+        var addedUntracked = QueueRules.TrackScannedFiles(resumeState, lane.Id, scanned, fileBotUnmatched, laneHadPending, new QueuePriorityRules(config.Priority.Rules));
 
         if (laneHadPending)
         {
@@ -363,6 +371,33 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         string resumeFilePath,
         CancellationToken cancellationToken)
     {
+        // A lane whose History is not fully tracked (3.1) writes nothing to the log FILE about a file that converts cleanly - not its name, not a subfolder of Input - while the
+        // live log still shows everything. The lines are held until the outcome is known: a failure or a warning keeps them, because that file is then worth troubleshooting.
+        if (context.Lane.Tracking == LaneTracking.Full) return await ProcessOneFileCoreAsync(context, resumeEntry, logFilePath, timestamp, resumeState, resumeFilePath, cancellationToken);
+
+        _logger.BeginFileScope();
+        var discard = false;
+        try
+        {
+            var result = await ProcessOneFileCoreAsync(context, resumeEntry, logFilePath, timestamp, resumeState, resumeFilePath, cancellationToken);
+            discard = result.Success && string.IsNullOrEmpty(result.PostProcessWarning);
+            return result;
+        }
+        finally
+        {
+            _logger.EndFileScope(discard);
+        }
+    }
+
+    private async Task<ConversionResult> ProcessOneFileCoreAsync(
+        LaneProcessingContext context,
+        ResumeEntry resumeEntry,
+        string logFilePath,
+        string timestamp,
+        List<ResumeEntry> resumeState,
+        string resumeFilePath,
+        CancellationToken cancellationToken)
+    {
         context.FileIndex++;
         var i = context.FileIndex;
         // The total was counted when the lane was prepared; files that reached the lane after that (a lane that started empty, imports during a long pass)
@@ -381,9 +416,9 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
 
         var file = new FileInfo(resumeEntry.FullName);
 
-        var isTv = ContentClassifier.IsTvFile(file.Name);
+        var isTv = LaneKinds.IsTv(lane, file.Name);
         // What the report, History and the run log call the file; a "Video" (no season and episode and no (year) in the name) is still handled and counted as a movie.
-        var contentType = ContentClassifier.KindOf(file.Name) switch { "tv" => "TV Show", "video" => "Video", _ => "Movie" };
+        var contentType = LaneKinds.KindOf(lane, file.Name) switch { "tv" => "TV Show", "video" => "Video", _ => "Movie" };
         // A per-file preset override (set from the Monitor page's queue) wins over the lane's own
         // TvPreset/MoviePreset for this one entry only - looked up before presetName is used
         // anywhere (logging, the FileStarted progress event, the "no preset" check) so all of it
@@ -614,7 +649,8 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         tvShowBasePath = _pathExpander.Expand(lane.TvShowBasePath);
         movieBasePath = _pathExpander.Expand(lane.MovieBasePath);
         hbloc = _pathExpander.Expand(config.HandBrake.CliPath);
-        _metadata.Enabled = config.Processing.ClearTitleMetadata;
+        // Per file, from the lane that owns it (a lane can have its own title-tag setting).
+        _metadata.Enabled = LaneProcessing.For(config, lane).ClearTitleMetadata;
         context.Lane = lane;
         context.Config = config;
         context.OutputBase = outputBase;
@@ -654,7 +690,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         if (success)
         {
             var finish = await _finisher.FinishAsync(
-                new FinishRequest(config, resumeEntry, file, isTv, tempFileName, newFileName, destFolder, tvShowBasePath, movieBasePath, inputPath),
+                new FinishRequest(LaneProcessing.ConfigFor(config, lane), resumeEntry, file, isTv, tempFileName, newFileName, destFolder, tvShowBasePath, movieBasePath, inputPath, journalEntry => SaveEntryResult(journalEntry, resumeFilePath)),
                 cancellationToken);
             endSizeGb = finish.EndSizeGb;
             arrStatus = finish.ArrStatus;
@@ -707,7 +743,8 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         // never links a move failure's HandBrake log anyway, per ReportErrorCode's own design).
         // Best-effort, same as every other cleanup-only delete in this method - a locked file
         // (an antivirus scan, etc.) shouldn't fail an otherwise-successful file's processing.
-        if (success && !config.Logging.KeepSuccessfulHandBrakeLogs)
+        // (A lane that is not fully tracked never keeps a successful encode's detail log: it names the file.)
+        if (success && (!config.Logging.KeepSuccessfulHandBrakeLogs || lane.Tracking != LaneTracking.Full))
         {
             try { if (File.Exists(detailLogFile)) File.Delete(detailLogFile); }
             catch (Exception ex) { _logger.Log($"  Unable to remove HandBrake detail log '{detailLogFile}': {ex.Message}", LogSeverity.Error); }

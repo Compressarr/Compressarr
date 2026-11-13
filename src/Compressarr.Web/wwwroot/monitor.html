@@ -52,7 +52,10 @@
       </div>
     </div>
 
-    <h2 id="queueHeading">0 Files In Queue</h2>
+    <div class="queue-heading-row">
+      <h2 id="queueHeading">0 Files In Queue</h2>
+      <button type="button" id="bulkChangeBtn" class="queue-bulk-btn hidden" title="Change the profile and/or where the finished files land for many waiting files at once.">Change all...</button>
+    </div>
     <div class="queue-list" id="queueList"></div>
 
     <h2>Live Log <span class="log-hint">last 200 lines</span></h2>
@@ -66,6 +69,30 @@
       <button type="button" id="viewLogBtn" title="Opens the log in a window that does not refresh, so you can select and copy text from it.">View Log</button>
     </div>
   </main>
+
+  <div id="bulkOverlay" class="modal-overlay hidden">
+    <div class="modal" role="dialog" aria-label="Change queued files">
+      <h3>Change queued files</h3>
+      <p class="enc-note" style="margin-top:0">Applies to files that are waiting. The file being encoded, files with an error, and files that have gone keep what they have. Nothing changes position.</p>
+      <div class="field-block">
+        <label for="bulkScope">Which files</label>
+        <select id="bulkScope"></select>
+      </div>
+      <div class="field-block">
+        <label for="bulkPreset">Profile</label>
+        <select id="bulkPreset"></select>
+      </div>
+      <div class="field-block">
+        <label for="bulkDest">Finished files land in</label>
+        <select id="bulkDest"></select>
+      </div>
+      <div class="enc-note" id="bulkNote"></div>
+      <div class="modal-actions">
+        <button type="button" id="bulkCancel">Cancel</button>
+        <button type="button" id="bulkApply" class="primary">Apply</button>
+      </div>
+    </div>
+  </div>
 
   <div id="logOverlay" class="modal-overlay hidden">
     <div class="modal log-modal" role="dialog" aria-label="Log Snapshot">

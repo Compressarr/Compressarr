@@ -52,7 +52,7 @@ public class CsvRunHistoryStoreTests : AppDataTestBase
 
         Assert.Equal("WarningCount", header[12]);
         Assert.Equal("RedirectCount", header[13]);
-        Assert.Equal(22, row.Length);                // ...then the movie / TV counts and the speed, engine, lane and profile columns, blank here: unknown
+        Assert.Equal(23, row.Length);                // ...then the movie / TV counts and the speed, engine, lane and profile columns, blank here: unknown
         Assert.Equal("report.html", row[10]);
         Assert.Equal("2", row[11]);
         Assert.Equal("3", row[12]);
@@ -97,7 +97,7 @@ public class CsvRunHistoryStoreTests : AppDataTestBase
         Assert.Equal(lanes, result.LaneCounts);
         Assert.Equal(profiles, result.PresetCounts);
         var row = File.ReadAllLines(AppPaths.GetHistoryFilePath())[1].Split(',');
-        Assert.Equal(22, row.Length);                // a comma in a lane name must not add a column
+        Assert.Equal(23, row.Length);                // a comma in a lane name must not add a column
         Assert.Equal("23.45", row[16]);
         Assert.Equal("3", row[17]);
         Assert.Equal("1", row[18]);

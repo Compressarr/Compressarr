@@ -66,6 +66,48 @@ file sealed class RenamingFileBotRunner : IFileBotRunner
     }
 }
 
+file sealed class EnabledRecordingFileBotRunner : IFileBotRunner
+{
+    public List<bool> EnabledWhenAsked { get; } = new();
+    public FileBotRunResult Run(FileBotSettings settings, string inputPath, IReadOnlyList<string> vidTypes, IRunLogger logger)
+    {
+        EnabledWhenAsked.Add(settings.Enabled);
+        return FileBotRunResult.Empty;
+    }
+}
+
+/// <summary>Stands in for a power cut: the first time it is asked to dispose of a file it throws, and the exception is not one the finisher catches.</summary>
+file sealed class CrashingTrashService : ITrashService
+{
+    public int Crashes { get; private set; }
+    public void DeleteFile(string path, DeleteAfterConvertMode mode)
+    {
+        Crashes++;
+        throw new SimulatedCrashException();
+    }
+    public void DeleteFolder(string path, DeleteAfterConvertMode mode) { }
+}
+
+file sealed class SimulatedCrashException : Exception
+{
+    public SimulatedCrashException() : base("simulated crash") { }
+}
+
+/// <summary>Records what the queue file says at the moment a file is routed - the journal must already be there - then routes as usual.</summary>
+file sealed class JournalPeekingRouter : IFileRouter
+{
+    private readonly string _resumeFile;
+    private readonly FileRouter _inner = new();
+    public List<(ResumeStatus Status, string? EncodedFilePath)> SeenWhileRouting { get; } = new();
+    public JournalPeekingRouter(string resumeFile) => _resumeFile = resumeFile;
+
+    public string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null, bool flat = false)
+    {
+        foreach (var e in new JsonResumeStateStore().Load(_resumeFile)) SeenWhileRouting.Add((e.Status, e.EncodedFilePath));
+        return _inner.RouteFile(sourcePath, desiredFileName, isTv, tvShowBasePath, movieBasePath, moveFiles, collisionMode, showEdition, protection, flat);
+    }
+}
+
 file sealed class RecordingFileBotRunner : IFileBotRunner
 {
     public string? ReceivedCliPath { get; private set; }
@@ -198,7 +240,7 @@ file sealed class ThrowingFileRouter : IFileRouter
 {
     private readonly Exception _exception;
     public ThrowingFileRouter(Exception exception) => _exception = exception;
-    public string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null) => throw _exception;
+    public string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null, bool flat = false) => throw _exception;
 }
 
 file sealed record TrashCall(string Path, DeleteAfterConvertMode Mode);
@@ -4298,5 +4340,434 @@ public class ConversionOrchestratorTests : IDisposable
         Assert.Empty(resumeState);                                                                      // the queue entry is gone ...
         Assert.True(File.Exists(stray));                                                                // ... the file and its folder are not touched
         Assert.True(File.Exists(Path.Combine(elsewhere, "diary.txt")));
+    }
+
+    // ---- Per-lane processing (3.1): a lane that has its own set uses it; every other lane keeps following the global one ----
+
+    [Fact]
+    public async Task ALaneWithItsOwnMaintain_KeepsItsSource_WhileTheGlobalSettingRecycles()
+    {
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Recycle, moveFiles: false, outSameAsIn: false);
+        lane.Processing = new ProcessingSettings { DeleteAfterConvert = DeleteAfterConvertMode.Maintain, MoveFiles = false, ClearTitleMetadata = false };
+        var source = Path.Combine(input, "Movie (2020).mkv");
+        File.WriteAllText(source, "original bytes");
+        var trash = new RecordingTrashService();
+
+        var results = await RunLaneAsync(Orchestrator(config, new FakeProcessRunner(), trash), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.True(Assert.Single(results).Success);
+        Assert.Empty(trash.Calls);                                    // the lane keeps its source although Settings says Recycle
+        Assert.True(File.Exists(source));
+    }
+
+    [Fact]
+    public async Task ALaneWithItsOwnRecycle_SendsItsSourceAway_WhileTheGlobalSettingMaintains()
+    {
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Maintain, moveFiles: false, outSameAsIn: false);
+        lane.Processing = new ProcessingSettings { DeleteAfterConvert = DeleteAfterConvertMode.Recycle, MoveFiles = false, ClearTitleMetadata = false };
+        var source = Path.Combine(input, "Movie (2020).mkv");
+        File.WriteAllText(source, "original bytes");
+        var trash = new RecordingTrashService();
+
+        await RunLaneAsync(Orchestrator(config, new FakeProcessRunner(), trash), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        var call = Assert.Single(trash.Calls);
+        Assert.Equal(source, call.Path);
+        Assert.Equal(DeleteAfterConvertMode.Recycle, call.Mode);
+    }
+
+    [Fact]
+    public async Task ALaneWithoutItsOwnSettings_StillFollowsTheGlobalOnes()
+    {
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Delete, moveFiles: false, outSameAsIn: false);
+        var source = Path.Combine(input, "Movie (2020).mkv");
+        File.WriteAllText(source, "original bytes");
+        var trash = new RecordingTrashService();
+
+        await RunLaneAsync(Orchestrator(config, new FakeProcessRunner(), trash), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.Equal(DeleteAfterConvertMode.Delete, Assert.Single(trash.Calls).Mode);
+    }
+
+    [Fact]
+    public async Task ALanesOwnMinimumSizeAndFileTypes_DecideWhatItScans()
+    {
+        // The global settings would convert all three files; the lane's own minimum size and file types leave two of them alone.
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Maintain, moveFiles: false, outSameAsIn: false);
+        lane.Processing = new ProcessingSettings { MinSizeBytes = 100, VidTypes = new List<string> { "mkv" }, DeleteAfterConvert = DeleteAfterConvertMode.Maintain, MoveFiles = false, ClearTitleMetadata = false };
+        File.WriteAllText(Path.Combine(input, "Big (2020).mkv"), new string('x', 500));
+        File.WriteAllText(Path.Combine(input, "Small (2020).mkv"), "tiny");
+        File.WriteAllText(Path.Combine(input, "Other (2020).avi"), new string('x', 500));
+        var encoder = new RequestRecordingRunner();
+
+        var results = await RunLaneAsync(Orchestrator(config, encoder, new RecordingTrashService()), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.Equal("Big (2020).mkv", Assert.Single(results).FileName);
+    }
+
+    [Fact]
+    public async Task TheMetadataSwitch_FollowsTheLanesOwnSetting_PerFile()
+    {
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Maintain, moveFiles: false, outSameAsIn: false);
+        config.Processing.ClearTitleMetadata = false;
+        lane.Processing = new ProcessingSettings { ClearTitleMetadata = true, DeleteAfterConvert = DeleteAfterConvertMode.Maintain, MoveFiles = false };
+        File.WriteAllText(Path.Combine(input, "Movie (2020).mkv"), "source");
+        var metadata = new MetadataService();
+
+        var orchestrator = new ConversionOrchestrator(new PassThroughPathExpander(), new VideoFileScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), metadata,
+            new FakeProcessRunner(), new FileRouter(), new NoOpCompanionFileService(), new NoOpArrUnmonitorService(),
+            new RecordingTrashService(), new NoOpRunLogger(), new NoOpResumeStateStore(), new NoOpProgressReporter(), new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue));
+        await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.True(metadata.Enabled);                                // the lane wants the tag cleared although Settings does not
+    }
+
+    // ---- Videos lane (3.1) ----
+
+    private (LaneConfig Lane, CompressarrConfig Config, string Input, string Library) VideosLane(string movieBaseName = "Videos")
+    {
+        var library = Path.Combine(_tempDir, movieBaseName);
+        Directory.CreateDirectory(library);
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Maintain, moveFiles: true, outSameAsIn: false, movieBase: library);
+        lane.Kind = LaneKind.Videos;
+        lane.Processing = new ProcessingSettings { MoveFiles = true, DeleteAfterConvert = DeleteAfterConvertMode.Maintain, ClearTitleMetadata = false, OnDestinationCollision = DestinationCollisionMode.Rename };
+        return (lane, config, input, library);
+    }
+
+    [Fact]
+    public async Task AVideosLane_FilesEachClipStraightIntoTheDestination_WithNoFolderPerFile_AndRecordsItAsAVideo()
+    {
+        var (lane, config, input, library) = VideosLane();
+        Directory.CreateDirectory(Path.Combine(input, "Emma Birthday 2024"));
+        File.WriteAllText(Path.Combine(input, "Emma Birthday 2024", "Cake (2024).mkv"), "clip");     // even a name that looks like a movie
+
+        var results = await RunLaneAsync(Orchestrator(config, new FakeProcessRunner(), new RecordingTrashService()), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.True(result.Success);
+        Assert.Equal("Video", result.ContentType);
+        Assert.Equal("fake encoded output", File.ReadAllText(Path.Combine(library, "Cake (2024).mkv")));   // straight into the library, no "Cake (2024)" folder
+        Assert.Empty(Directory.GetDirectories(library));
+    }
+
+    [Fact]
+    public async Task AVideosLane_NeverTreatsAnEpisodeShapedNameAsTv()
+    {
+        var (lane, config, input, library) = VideosLane();
+        lane.TvPreset = "";   // a Videos lane has no TV profile
+        File.WriteAllText(Path.Combine(input, "Holiday S01E02.mkv"), "clip");
+
+        var results = await RunLaneAsync(Orchestrator(config, new FakeProcessRunner(), new RecordingTrashService()), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.Equal("Video", Assert.Single(results).ContentType);
+        Assert.True(File.Exists(Path.Combine(library, "Holiday S01E02.mkv")));
+    }
+
+    [Fact]
+    public async Task AVideosLane_TakesTheNextFreeName_WhenTheDestinationAlreadyHasTheSameClip()
+    {
+        var (lane, config, input, library) = VideosLane();
+        File.WriteAllText(Path.Combine(library, "Clip.mkv"), "an earlier clip with the same name");
+        File.WriteAllText(Path.Combine(input, "Clip.mkv"), "new clip");
+
+        await RunLaneAsync(Orchestrator(config, new FakeProcessRunner(), new RecordingTrashService()), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.Equal("an earlier clip with the same name", File.ReadAllText(Path.Combine(library, "Clip.mkv")));
+        Assert.Equal("fake encoded output", File.ReadAllText(Path.Combine(library, "Clip (2).mkv")));
+    }
+
+    [Fact]
+    public async Task AVideosLane_IsNeverHandedToFileBot_OrToSonarrAndRadarr()
+    {
+        var (lane, config, input, _) = VideosLane();
+        config.FileBot.Enabled = true;
+        File.WriteAllText(Path.Combine(input, "Clip.mkv"), "clip");
+        var fileBot = new EnabledRecordingFileBotRunner();
+        var arr = new RecordingArrUnmonitorService();
+        var orchestrator = new ConversionOrchestrator(new PassThroughPathExpander(), new VideoFileScanner(), fileBot, new FixedExtensionPresetService(), new MetadataService(),
+            new FakeProcessRunner(), new FileRouter(), new NoOpCompanionFileService(), arr,
+            new RecordingTrashService(), new NoOpRunLogger(), new NoOpResumeStateStore(), new NoOpProgressReporter(), new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue));
+
+        await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.All(fileBot.EnabledWhenAsked, enabled => Assert.False(enabled));      // FileBot was told it is off for this lane
+        Assert.Equal(0, arr.CallCount);
+    }
+
+    [Fact]
+    public async Task AStandardLane_StillGoesToSonarrAndRadarr_AndGetsAFolderPerMovie()
+    {
+        var library = Path.Combine(_tempDir, "Movies");
+        Directory.CreateDirectory(library);
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Maintain, moveFiles: true, outSameAsIn: false, movieBase: library);
+        File.WriteAllText(Path.Combine(input, "Alien (1979).mkv"), "movie");
+        var arr = new RecordingArrUnmonitorService();
+        var orchestrator = new ConversionOrchestrator(new PassThroughPathExpander(), new VideoFileScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), new MetadataService(),
+            new FakeProcessRunner(), new FileRouter(), new NoOpCompanionFileService(), arr,
+            new RecordingTrashService(), new NoOpRunLogger(), new NoOpResumeStateStore(), new NoOpProgressReporter(), new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue));
+
+        await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.Equal(1, arr.CallCount);
+        Assert.True(File.Exists(Path.Combine(library, "Alien (1979)", "Alien (1979).mkv")));
+    }
+
+    [Fact]
+    public async Task AFileLandingInAVideosLanesLibrary_IsFiledFlat_EvenFromAStandardLane()
+    {
+        var videosLibrary = Path.Combine(_tempDir, "Clips");
+        Directory.CreateDirectory(videosLibrary);
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Maintain, moveFiles: true, outSameAsIn: false, movieBase: Path.Combine(_tempDir, "Movies"));
+        Directory.CreateDirectory(Path.Combine(_tempDir, "Movies"));
+        var videos = new LaneConfig { Id = "videos", DisplayName = "Clips", Enabled = true, Kind = LaneKind.Videos, MovieBasePath = videosLibrary, Input = Path.Combine(_tempDir, "ClipsIn"), Output = Path.Combine(_tempDir, "ClipsOut") };
+        config.Lanes.Add(videos);
+        var source = Path.Combine(input, "Alien (1979).mkv");
+        File.WriteAllText(source, "movie");
+        var resumeState = new List<ResumeEntry> { new() { LaneId = "lane1", FullName = source, Status = ResumeStatus.Pending, Order = 0, DestinationLaneId = "videos" } };
+
+        await RunLaneAsync(Orchestrator(config, new FakeProcessRunner(), new RecordingTrashService()), lane, config, _tempDir, "20260101_000000", resumeState, Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.True(File.Exists(Path.Combine(videosLibrary, "Alien (1979).mkv")));
+        Assert.Empty(Directory.GetDirectories(videosLibrary));
+    }
+
+    // ---- Track in History (3.1): a clean file on a lane that is not fully tracked leaves no name in the log file ----
+
+    private async Task<string> LogOfAFileAsync(LaneTracking tracking, IEncoderRunner encoder, string fileName = "Birthday Party 2024.mkv")
+    {
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Maintain, moveFiles: false, outSameAsIn: false);
+        lane.Tracking = tracking;
+        var sub = Path.Combine(input, "Emma Birthday 2024");
+        Directory.CreateDirectory(sub);
+        File.WriteAllText(Path.Combine(sub, fileName), "clip");
+        var logFolder = Path.Combine(_tempDir, "logs");
+        var logger = new FileRunLogger();
+        var logFile = logger.Initialize(logFolder, "20260101_000000");
+        var orchestrator = new ConversionOrchestrator(new PassThroughPathExpander(), new RecursiveFolderScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), new MetadataService(),
+            encoder, new FileRouter(), new NoOpCompanionFileService(), new NoOpArrUnmonitorService(),
+            new RecordingTrashService(), logger, new NoOpResumeStateStore(), new NoOpProgressReporter(), new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue));
+        logger.Log("Scanning lane [Test Lane] - " + input);       // a pass-level line, as the run orchestrator writes
+
+        await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+        return File.ReadAllText(logFile);
+    }
+
+    [Theory]
+    [InlineData(LaneTracking.ErrorsOnly)]
+    [InlineData(LaneTracking.None)]
+    public async Task ACleanFileOnALaneThatIsNotFullyTracked_LeavesNeitherItsNameNorItsSubfolderInTheLogFile(LaneTracking tracking)
+    {
+        var log = await LogOfAFileAsync(tracking, new FakeProcessRunner());
+
+        Assert.DoesNotContain("Birthday Party", log);
+        Assert.DoesNotContain("Emma Birthday", log);
+        Assert.Contains("Scanning lane [Test Lane]", log);        // the pass-level line (lane and its Input folder) stays
+    }
+
+    [Fact]
+    public async Task ACleanFileOnAFullyTrackedLane_IsLoggedByName_AsAlways()
+    {
+        var log = await LogOfAFileAsync(LaneTracking.Full, new FakeProcessRunner());
+
+        Assert.Contains("Birthday Party 2024.mkv", log);
+    }
+
+    [Theory]
+    [InlineData(LaneTracking.ErrorsOnly)]
+    [InlineData(LaneTracking.None)]
+    public async Task AFailedFileOnALaneThatIsNotFullyTracked_IsStillLogged_BecauseItNeedsTroubleshooting(LaneTracking tracking)
+    {
+        var log = await LogOfAFileAsync(tracking, new FailingProcessRunner());
+
+        Assert.Contains("Birthday Party 2024.mkv", log);
+        Assert.Contains("FAILED", log);
+    }
+
+    [Fact]
+    public async Task ASuccessfulEncodesDetailLog_IsNeverKeptForALaneThatIsNotFullyTracked_EvenWithTheKeepSettingOn()
+    {
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Maintain, moveFiles: false, outSameAsIn: false);
+        lane.Tracking = LaneTracking.None;
+        config.Logging.KeepSuccessfulHandBrakeLogs = true;
+        File.WriteAllText(Path.Combine(input, "Clip (2020).mkv"), "clip");
+
+        var results = await RunLaneAsync(Orchestrator(config, new FakeProcessRunner(), new RecordingTrashService()), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.True(result.Success);
+        Assert.False(File.Exists(result.DetailLogFile));
+    }
+
+    [Fact]
+    public async Task TheLiveLog_StillShowsEveryLine_ForALaneThatIsNotFullyTracked()
+    {
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Maintain, moveFiles: false, outSameAsIn: false);
+        lane.Tracking = LaneTracking.None;
+        File.WriteAllText(Path.Combine(input, "Birthday Party 2024.mkv"), "clip");
+        var logger = new FileRunLogger();
+        logger.Initialize(Path.Combine(_tempDir, "logs"), "20260101_000000");
+        var live = new List<string>();
+        logger.LineWritten += (message, _) => live.Add(message);
+        var orchestrator = new ConversionOrchestrator(new PassThroughPathExpander(), new VideoFileScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), new MetadataService(),
+            new FakeProcessRunner(), new FileRouter(), new NoOpCompanionFileService(), new NoOpArrUnmonitorService(),
+            new RecordingTrashService(), logger, new NoOpResumeStateStore(), new NoOpProgressReporter(), new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue));
+
+        await RunLaneAsync(orchestrator, lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.Contains(live, line => line.Contains("Birthday Party 2024.mkv"));
+    }
+
+    // ---- H7: the crash journal (3.1) ----
+
+    private (LaneConfig Lane, CompressarrConfig Config, string Source, string Library, string ResumeFile) JournalLane(DeleteAfterConvertMode mode)
+    {
+        var library = Path.Combine(_tempDir, "Library");
+        Directory.CreateDirectory(library);
+        var (lane, config, input, _) = SafetyLane(mode, moveFiles: true, outSameAsIn: false, movieBase: library);
+        var source = Path.Combine(input, "Alien (1979).mkv");
+        File.WriteAllText(source, "the original");
+        return (lane, config, source, library, Path.Combine(_tempDir, "resume.json"));
+    }
+
+    private ConversionOrchestrator JournalOrchestrator(CompressarrConfig config, IEncoderRunner encoder, ITrashService trash, IFileRouter router, IResumeStateStore store) =>
+        new(new PassThroughPathExpander(), new VideoFileScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), new MetadataService(),
+            encoder, router, new NoOpCompanionFileService(), new NoOpArrUnmonitorService(),
+            trash, new NoOpRunLogger(), store, new NoOpProgressReporter(), new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue));
+
+    [Fact]
+    public async Task TheJournal_IsWrittenBeforeTheFileIsRouted_SoACrashFromThenOnIsNotARepeatEncode()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Maintain);
+        var router = new JournalPeekingRouter(resumeFile);
+        var store = new JsonResumeStateStore();
+
+        await RunLaneAsync(JournalOrchestrator(config, new FakeProcessRunner(), new DeletingTrashService(), router, store), lane, config, _tempDir, "20260101_000000", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        var seen = Assert.Single(router.SeenWhileRouting);
+        Assert.Equal(ResumeStatus.FinishPending, seen.Status);
+        Assert.NotNull(seen.EncodedFilePath);                       // the staged encode is on record
+        Assert.True(File.Exists(Path.Combine(library, "Alien (1979)", "Alien (1979).mkv")));
+    }
+
+    [Fact]
+    public async Task ACrashAfterTheVideoWasFiled_IsFinishedOnTheNextPass_WithoutEncodingAgain()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+
+        // First run: the power goes out when the original is about to be deleted - after the video was filed.
+        var crashing = new CrashingTrashService();
+        await Assert.ThrowsAsync<SimulatedCrashException>(() => RunLaneAsync(JournalOrchestrator(config, encoder, crashing, new FileRouter(), store), lane, config, _tempDir, "20260101_000000", store.Load(resumeFile), resumeFile, CancellationToken.None));
+
+        var journal = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.FinishPending, journal.Status);
+        Assert.Equal(Path.Combine(library, "Alien (1979)", "Alien (1979).mkv"), journal.PendingCompanionVideoDestPath);
+        Assert.True(File.Exists(source));                           // the original is still there
+        Assert.Equal(1, encoder.CallCount);
+
+        // Next start: the original is dealt with the way the setting says, and nothing is encoded again.
+        var results = await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Empty(results);
+        Assert.Equal(1, encoder.CallCount);                         // still one encode in total
+        Assert.False(File.Exists(source));                          // the original was deleted, as the setting says
+        Assert.Equal("fake encoded output", File.ReadAllText(Path.Combine(library, "Alien (1979)", "Alien (1979).mkv")));
+        Assert.DoesNotContain(store.Load(resumeFile), e => e.Status == ResumeStatus.FinishPending);
+    }
+
+    [Fact]
+    public async Task ACrashAfterTheVideoWasFiled_WithMaintain_KeepsTheOriginal_AndStillDoesNotEncodeAgain()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Maintain);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        // A crash somewhere after filing: leave the journal as it would be found.
+        store.Save(new List<ResumeEntry>
+        {
+            new() { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                    PendingCompanionSourceDirectory = Path.GetDirectoryName(source), PendingCompanionVideoDestPath = Path.Combine(library, "Alien (1979)", "Alien (1979).mkv") }
+        }, resumeFile);
+        Directory.CreateDirectory(Path.Combine(library, "Alien (1979)"));
+        File.WriteAllText(Path.Combine(library, "Alien (1979)", "Alien (1979).mkv"), "the filed video");
+
+        var results = await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Empty(results);
+        Assert.Equal(0, encoder.CallCount);
+        Assert.True(File.Exists(source));
+        Assert.Equal("the filed video", File.ReadAllText(Path.Combine(library, "Alien (1979)", "Alien (1979).mkv")));
+    }
+
+    [Fact]
+    public async Task ACrashBeforeTheVideoWasFiled_RoutesTheStagedEncode_WithoutEncodingAgain()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        var staged = Path.Combine(lane.Output, "Alien (1979).compressarr-abc123.mkv");
+        File.WriteAllText(staged, "the encode that was waiting");
+        var journal = new ResumeEntry { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                                        EncodedFilePath = staged, EncodedFileDesiredName = "Alien (1979).mkv", PendingCompanionSourceDirectory = Path.GetDirectoryName(source) };
+        ResumeKeeping.NoteEncodeStart(journal);                     // noted when the encode started, as in a real run
+        store.Save(new List<ResumeEntry> { journal }, resumeFile);
+
+        var results = await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Empty(results);
+        Assert.Equal(0, encoder.CallCount);                         // nothing was encoded again
+        Assert.Equal("the encode that was waiting", File.ReadAllText(Path.Combine(library, "Alien (1979)", "Alien (1979).mkv")));
+        Assert.False(File.Exists(staged));
+        Assert.False(File.Exists(source));                          // and the original went the way the setting says
+    }
+
+    [Fact]
+    public async Task AJournalWhoseStagedEncodeIsGone_IsDropped_AndTheSourceIsConvertedAgain()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Maintain);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        store.Save(new List<ResumeEntry>
+        {
+            new() { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                    EncodedFilePath = Path.Combine(lane.Output, "gone.mkv"), EncodedFileDesiredName = "Alien (1979).mkv" }
+        }, resumeFile);
+
+        var results = await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Single(results);                                     // nothing to finish, so the original is simply converted
+        Assert.Equal(1, encoder.CallCount);
+    }
+
+    [Fact]
+    public async Task AJournalWhoseFiledVideoIsGone_KeepsTheOriginal_InsteadOfGuessing()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        store.Save(new List<ResumeEntry>
+        {
+            new() { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                    PendingCompanionSourceDirectory = Path.GetDirectoryName(source), PendingCompanionVideoDestPath = Path.Combine(library, "Alien (1979)", "Alien (1979).mkv") }
+        }, resumeFile);
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.True(File.Exists(source));                           // never deleted on a guess
+        Assert.Equal(0, encoder.CallCount);                         // and not converted a second time
+    }
+
+    [Fact]
+    public async Task AnUninterruptedFile_LeavesNoJournalBehind()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        var store = new JsonResumeStateStore();
+
+        await RunLaneAsync(JournalOrchestrator(config, new FakeProcessRunner(), new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000000", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        var entry = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, entry.Status);
+        Assert.Null(entry.EncodedFilePath);
+        Assert.Null(entry.PendingCompanionVideoDestPath);
     }
 }

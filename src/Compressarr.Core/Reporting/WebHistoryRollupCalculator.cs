@@ -70,7 +70,8 @@ public sealed class WebHistoryRollupCalculator : IWebHistoryRollupCalculator
                 TotalTimeSeconds: rowList.Sum(r => r.ProcessHours * 3600 + r.ProcessMinutes * 60 + r.ProcessSeconds),
                 MovieCount: rowList.Sum(r => r.MovieCount ?? 0),
                 TvCount: rowList.Sum(r => r.TvCount ?? 0),
-                UnknownCount: rowList.Where(r => r.MovieCount is null).Sum(r => r.FileCount));
+                UnknownCount: rowList.Where(r => r.MovieCount is null).Sum(r => r.FileCount),
+                VideoCount: rowList.Sum(r => r.VideoCount ?? 0));
         }
 
         var todayRollup = Rollup(history.Where(r => RecordDate(r) == today));

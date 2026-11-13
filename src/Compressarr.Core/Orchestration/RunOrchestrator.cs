@@ -20,6 +20,10 @@ public sealed class RunResult
     public long ReportId { get; init; }
     public required int TotalFiles { get; init; }
 
+    /// <summary>How many of those files were recorded (History, the report, the notification): the files of lanes tracked in full, plus the failed or warned files of lanes
+    /// tracked for errors only. Never more than <see cref="TotalFiles"/>. A pass whose files were all untracked leaves no run, no report and no log file behind.</summary>
+    public int TrackedFiles { get; init; }
+
     /// <summary>Count of MoveFailed/CompanionMoveFailed/CleanupPending entries this pass's own
     /// per-lane retry loops resolved (see LaneProcessingContext.RetriesSucceeded) - distinct from TotalFiles,
     /// which only counts files that went through ProcessOneFileAsync this pass. A pass whose only
@@ -219,7 +223,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
         // ones hard to find. A pass that processed real files, resolved a stranded retry (see
         // RunResult.RetriesSucceeded), or hit a real error even while processing none (a
         // misconfigured lane, a missing HandBrakeCLI, etc), still keeps its log.
-        if ((result?.TotalFiles ?? 0) == 0 && (result?.RetriesSucceeded ?? 0) == 0 && !_logger.HasLoggedError)
+        if ((result?.TrackedFiles ?? 0) == 0 && (result?.RetriesSucceeded ?? 0) == 0 && !_logger.HasLoggedError)
         {
             try { if (File.Exists(summaryLogFilePath)) File.Delete(summaryLogFilePath); }
             catch (Exception ex) { _logger.Log($"Unable to remove empty run log '{summaryLogFilePath}': {ex.Message}", LogSeverity.Error); }
@@ -279,7 +283,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
         // added fresh Pending entries of its own.
         _conversionOrchestrator.BackfillMissingOrder(config, resumeState, resumeFilePath);
 
-        _metadata.Enabled = config.Processing.ClearTitleMetadata;
+        // (The title-tag switch is set per file from the file's own lane, in ConversionOrchestrator: a lane can have its own setting.)
 
         var laneResults = new Dictionary<string, List<ConversionResult>>();
         // Every configured lane gets an entry (even one that ends up empty), populated as
@@ -480,7 +484,12 @@ public sealed class RunOrchestrator : IRunOrchestrator
         var runTime = endTime - beginTime;
         if (runTime < TimeSpan.Zero) runTime = runTime.Negate();
 
-        var allResults = laneResults.Values.SelectMany(r => r).ToList();
+        // What was processed, and what is recorded: a lane's Tracking decides how much of its work reaches History, the report and the notifications.
+        var processedResults = laneResults.Values.SelectMany(r => r).ToList();
+        var trackedResults = config.Lanes.ToDictionary(
+            l => l.Id,
+            l => (IReadOnlyList<ConversionResult>)TrackedResults(l, laneResults.TryGetValue(l.Id, out var processed) ? processed : new List<ConversionResult>()));
+        var allResults = trackedResults.Values.SelectMany(r => r).ToList();
         var totalFiles = allResults.Count;
 
         var runCountPath = AppPaths.GetRunCountFilePath();
@@ -515,7 +524,8 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 RunNumber: runNumber, ReportFileName: keepCopy ? reportFileName : "",
                 ErrorCount: errorCount, WarningCount: warningCount,
                 RedirectCount: allResults.Count(r => r.RedirectedToLaneId is not null),
-                MovieCount: counted.Count(r => r.ContentType is "Movie" or "Video"),     // a Video is counted with the movies, so movies + TV still add up to the files
+                MovieCount: counted.Count(r => r.ContentType == "Movie"),
+                VideoCount: counted.Count(r => r.ContentType == "Video"),                  // movies + videos + TV add up to the files
                 TvCount: counted.Count(r => r.ContentType == "TV Show"),
                 AvgFps: breakdown.AvgFps,
                 HandBrakeCount: breakdown.HandBrake, FfmpegCount: breakdown.FFmpeg, PassthroughCount: breakdown.Passthrough,
@@ -568,9 +578,9 @@ public sealed class RunOrchestrator : IRunOrchestrator
             }
         }
 
-        _logger.Log(totalFiles == 0
+        _logger.Log(processedResults.Count == 0
             ? "\nCompressarr run completed. No new files to process."
-            : $"\nCompressarr run completed. {totalFiles} file(s) processed in {runTime.Hours}h {runTime.Minutes}m {runTime.Seconds}s.");
+            : $"\nCompressarr run completed. {processedResults.Count} file(s) processed in {runTime.Hours}h {runTime.Minutes}m {runTime.Seconds}s.");
 
         var (today, thisMonth, thisYear) = _rollupCalculator.Calculate(logFilePath);
 
@@ -582,10 +592,11 @@ public sealed class RunOrchestrator : IRunOrchestrator
             // Every configured lane gets a section - matching v1.1, a lane that wasn't touched
             // this pass (disabled, or enabled but nothing to do) still shows up with a "No files
             // processed." placeholder rather than being silently absent from the report.
-            Lanes = config.Lanes.Select(lane => new LaneReportSection
+            // A lane tracked as None is not in the report at all (its work is not recorded anywhere).
+            Lanes = config.Lanes.Where(lane => lane.Tracking != LaneTracking.None).Select(lane => new LaneReportSection
             {
                 LaneDisplayName = lane.DisplayName,
-                Results = laneResults.TryGetValue(lane.Id, out var results) ? results : Array.Empty<ConversionResult>(),
+                Results = trackedResults.TryGetValue(lane.Id, out var results) ? results : Array.Empty<ConversionResult>(),
                 LaneProblems = laneProblems.TryGetValue(lane.Id, out var problems) ? problems : Array.Empty<ReportErrorCode>()
             }).ToList(),
             Today = today,
@@ -706,16 +717,25 @@ public sealed class RunOrchestrator : IRunOrchestrator
             await _notificationDispatcher.DispatchAsync(config.Notifications, notifyEvent);
         }
 
-        _progress.RunCompleted(totalFiles);
+        _progress.RunCompleted(processedResults.Count);
 
         return new RunResult
         {
             Report = reportModel,
             ReportFilePath = keepCopy ? reportFilePath : "",
             ReportId = runId,
-            TotalFiles = totalFiles,
+            TotalFiles = processedResults.Count,
+            TrackedFiles = totalFiles,
             RetriesSucceeded = totalRetriesSucceeded,
-            DiskFull = allResults.Any(r => r.DiskFull)
+            DiskFull = processedResults.Any(r => r.DiskFull)
         };
     }
+
+    /// <summary>The results of one lane that go on record: all of them (Full), only the files that failed or finished with a warning (ErrorsOnly), or none (None).</summary>
+    internal static IReadOnlyList<ConversionResult> TrackedResults(LaneConfig lane, IReadOnlyList<ConversionResult> results) => lane.Tracking switch
+    {
+        LaneTracking.None => Array.Empty<ConversionResult>(),
+        LaneTracking.ErrorsOnly => results.Where(r => !r.Success || !string.IsNullOrEmpty(r.PostProcessWarning)).ToList(),
+        _ => results
+    };
 }

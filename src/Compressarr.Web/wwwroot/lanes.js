@@ -7,6 +7,68 @@ const template = document.getElementById('lane-template');
 // <option>s to already exist before setting .value, unlike the old <input list> combo.
 let presetNamesByEngine = { HandBrake: [], FFmpeg: [] };
 
+// The global Settings > Processing values: what a lane starts with when it stops following them (3.1).
+let globalProcessing = null;
+const PROC_MIN_UNITS = { KB: 1024, MB: 1024 * 1024, GB: 1024 * 1024 * 1024 };
+
+function splitList(text) { return String(text || '').split(',').map(s => s.trim()).filter(Boolean); }
+
+// Fills a lane card's own processing fields from a processing object (the lane's own, or the global one).
+function fillProcessingFields(node, p) {
+  node.querySelector('.f-procVidTypes').value = (p.vidTypes || []).join(', ');
+  node.querySelector('.f-procDelete').value = p.deleteAfterConvert || 'Recycle';
+  node.querySelector('.f-procMinUnit').value = 'MB';
+  node.querySelector('.f-procMinSize').value = (p.minSizeBytes || 0) / PROC_MIN_UNITS.MB;
+  node.querySelector('.f-procCompanions').value = (p.companionExtensions || []).join(', ');
+  node.querySelector('.f-procUnmatched').value = p.unmatchedCompanionAction || 'Recycle';
+  node.querySelector('.f-procCollision').value = p.onDestinationCollision || 'Overwrite';
+  node.querySelector('.f-procMove').checked = !!p.moveFiles;
+  node.querySelector('.f-procClearTitle').checked = !!p.clearTitleMetadata;
+}
+
+function readProcessingFields(node) {
+  const raw = parseFloat(node.querySelector('.f-procMinSize').value) || 0;
+  return {
+    vidTypes: splitList(node.querySelector('.f-procVidTypes').value),
+    deleteAfterConvert: node.querySelector('.f-procDelete').value,
+    moveFiles: node.querySelector('.f-procMove').checked,
+    clearTitleMetadata: node.querySelector('.f-procClearTitle').checked,
+    minSizeBytes: Math.round(raw * PROC_MIN_UNITS[node.querySelector('.f-procMinUnit').value]),
+    companionExtensions: splitList(node.querySelector('.f-procCompanions').value),
+    unmatchedCompanionAction: node.querySelector('.f-procUnmatched').value,
+    onDestinationCollision: node.querySelector('.f-procCollision').value
+  };
+}
+
+function sameProcessing(a, b) {
+  return JSON.stringify(a) === JSON.stringify({ ...a, ...b }) && JSON.stringify(a.vidTypes) === JSON.stringify(b.vidTypes) && JSON.stringify(a.companionExtensions) === JSON.stringify(b.companionExtensions);
+}
+
+// Shows or hides the lane's own fields and the "Custom processing" chip to match the checkbox.
+function syncProcessingSection(node) {
+  const useGlobal = node.querySelector('.f-useGlobalProc').checked;
+  node.querySelector('.lane-proc-fields').classList.toggle('hidden', useGlobal);
+  node.querySelector('.f-customChip').classList.toggle('hidden', useGlobal);
+}
+
+function wireProcessingSection(node, dto) {
+  const box = node.querySelector('.f-useGlobalProc');
+  const own = dto.processing;
+  box.checked = dto.useGlobalProcessing !== false || !own;
+  fillProcessingFields(node, own || globalProcessing || {});
+  syncProcessingSection(node);
+  box.addEventListener('change', () => {
+    if (!box.checked) {
+      // Stops following the global settings: start from what the lane has been using, so nothing changes until edited.
+      fillProcessingFields(node, globalProcessing || {});
+    } else if (globalProcessing && !sameProcessing(readProcessingFields(node), globalProcessing) &&
+               !confirm('Go back to the global settings? This lane\'s own processing settings will be discarded.')) {
+      box.checked = false;
+    }
+    syncProcessingSection(node);
+  });
+}
+
 // success truthy -> green (auto-clears after 4s), same convention as settings.js's setStatus -
 // this used to just set plain text with no color at all, which is why Lanes' own save messages
 // never turned green like Settings/Notifications did.
@@ -23,7 +85,8 @@ const LANE_FIELD_MAP = {
   movieBasePath: '.f-movieBasePath',
   tvPreset: '.f-tvPreset',
   moviePreset: '.f-moviePreset',
-  engine: '.f-engine'
+  engine: '.f-engine',
+  processing: '.f-procVidTypes'
 };
 
 // Highlights just this one card's fields - the aggregate page-level status message (if any) is
@@ -85,6 +148,8 @@ function laneCardFromDto(dto) {
   });
   node.querySelector('.f-tvShowBasePath').value = dto.tvShowBasePath;
   node.querySelector('.f-movieBasePath').value = dto.movieBasePath;
+  wireProcessingSection(node, dto);
+  wireKindAndTracking(node, dto);
 
   node.querySelector('.save-lane-btn').addEventListener('click', () => saveLane(node));
   node.querySelector('.remove-lane-btn').addEventListener('click', () => removeLane(node));
@@ -146,7 +211,11 @@ function readLaneCard(node) {
     engine: node.querySelector('.f-engine').value,
     allowHdrLoss: node.querySelector('.f-allowHdrLoss').checked,
     tvShowBasePath: node.querySelector('.f-tvShowBasePath').value,
-    movieBasePath: node.querySelector('.f-movieBasePath').value
+    movieBasePath: node.querySelector('.f-movieBasePath').value,
+    kind: node.dataset.kind || 'Standard',
+    tracking: node.querySelector('.f-tracking').value,
+    useGlobalProcessing: node.querySelector('.f-useGlobalProc').checked,
+    processing: node.querySelector('.f-useGlobalProc').checked ? null : readProcessingFields(node)
   };
 }
 
@@ -279,6 +348,47 @@ async function removeLane(node) {
   }
 }
 
+const TRACKING_NOTES = {
+  Full: '',
+  ErrorsOnly: 'Only files that fail or finish with a warning appear in History, reports and notifications. A file that converts cleanly leaves no row, no savings, no count and no file name in the log. A failed file still shows in the Monitor queue until you remove it.',
+  None: 'Nothing about this lane is recorded: no run, no History, no report, no notification, and no file names in the log. The Monitor page still shows the live progress, and a failed file stays in the queue as an error until you remove it. The queue also remembers a source that was kept (Maintain) so it is not converted twice.'
+};
+const TRACKING_CHIPS = { ErrorsOnly: 'History: errors only', None: 'History: off' };
+
+// A Videos lane: one profile and one destination (no TV column), its own chip, and the tracking choice always visible. Also the tracking select and its chip.
+function wireKindAndTracking(node, dto) {
+  const kind = dto.kind || 'Standard';
+  node.dataset.kind = kind;
+  if (kind === 'Videos') {
+    node.querySelector('.f-tvCol').classList.add('hidden');
+    node.querySelector('.f-videosChip').classList.remove('hidden');
+    node.querySelector('.f-trackingBlock').classList.remove('adv-only');
+    node.querySelector('.routing-grid').style.gridTemplateColumns = '1fr';
+    const head = node.querySelector('.routing-col:not(.f-tvCol) .routing-col-head');
+    if (head && head.lastChild) head.lastChild.textContent = ' Videos';
+  }
+  const select = node.querySelector('.f-tracking');
+  select.value = dto.tracking || 'Full';
+  const sync = () => {
+    const mode = select.value;
+    const note = node.querySelector('.f-trackingNote');
+    note.textContent = TRACKING_NOTES[mode] || '';
+    note.classList.toggle('hidden', !TRACKING_NOTES[mode]);
+    const chip = node.querySelector('.f-trackChip');
+    chip.textContent = TRACKING_CHIPS[mode] || '';
+    chip.classList.toggle('hidden', !TRACKING_CHIPS[mode]);
+  };
+  select.addEventListener('change', sync);
+  sync();
+}
+
+async function loadGlobalProcessing() {
+  try {
+    const res = await fetch('/api/settings');
+    if (res.ok) globalProcessing = await res.json();
+  } catch { /* the lane card then starts from empty fields; the lane still works */ }
+}
+
 async function populatePresetList() {
   // includePassthrough: a lane can pick "Passthrough (no re-encode)" for its TV and/or Movie preset.
   const [hb, ff] = await Promise.all([fetch('/api/presets?includePassthrough=1'), fetch('/api/presets?engine=ffmpeg&includePassthrough=1')]);
@@ -316,6 +426,16 @@ async function loadLanes() {
   }
 }
 
+document.getElementById('addVideosLaneBtn').addEventListener('click', async () => {
+  const res = await fetch('/api/lanes?kind=videos', { method: 'POST' });
+  const dto = await res.json();
+  const node = laneCardFromDto(dto);
+  lanesContainer.appendChild(node);
+  applyLaneValidation(node, dto.validationIssues);
+  node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  setStatus(`Videos lane "${dto.displayName}" added.`, true);
+});
+
 document.getElementById('addLaneBtn').addEventListener('click', async () => {
   const res = await fetch('/api/lanes', { method: 'POST' });
   const dto = await res.json();
@@ -326,6 +446,60 @@ document.getElementById('addLaneBtn').addEventListener('click', async () => {
 });
 
 document.getElementById('saveAllLanesBtn').addEventListener('click', saveAllLanes);
+
+// ---- Queue priority rules (3.1) ----
+const prioRulesEl = document.getElementById('prioRules');
+const prioStatusEl = document.getElementById('prioStatus');
+
+function prioSay(text, ok) { prioStatusEl.textContent = text; prioStatusEl.style.color = ok === false ? 'var(--err)' : ''; }
+
+function addPrioRow(rule) {
+  const row = document.createElement('div');
+  row.className = 'prio-rule-row';
+  row.dataset.id = rule.id || '';
+  row.innerHTML = `
+    <input type="text" class="prio-match" placeholder="Title contains..." />
+    <input type="number" class="prio-tmdb" placeholder="TMDb id" min="1" />
+    <select class="prio-level"><option value="Lower">Lower</option><option value="Higher">Higher</option></select>
+    <button type="button" class="prio-del" title="Delete this rule">Delete</button>`;
+  row.querySelector('.prio-match').value = rule.match || '';
+  row.querySelector('.prio-tmdb').value = rule.tmdbId || '';
+  row.querySelector('.prio-level').value = rule.priority || 'Lower';
+  row.querySelector('.prio-del').addEventListener('click', () => row.remove());
+  prioRulesEl.appendChild(row);
+}
+
+function readPrioRules() {
+  return [...prioRulesEl.querySelectorAll('.prio-rule-row')].map(r => ({
+    id: r.dataset.id || null,
+    match: r.querySelector('.prio-match').value.trim(),
+    tmdbId: parseInt(r.querySelector('.prio-tmdb').value, 10) || null,
+    priority: r.querySelector('.prio-level').value
+  })).filter(r => r.match || r.tmdbId);
+}
+
+async function loadPrioRules() {
+  try {
+    const res = await fetch('/api/queue-priority');
+    const body = await res.json();
+    prioRulesEl.innerHTML = '';
+    (body.rules || []).forEach(addPrioRow);
+    if (!(body.rules || []).length) prioRulesEl.innerHTML = '<p class="enc-note" id="prioNone">No rules yet. Every new file joins the end of the queue.</p>';
+  } catch { /* the card simply stays empty */ }
+}
+
+document.getElementById('prioAdd').addEventListener('click', () => { document.getElementById('prioNone')?.remove(); addPrioRow({}); });
+document.getElementById('prioSave').addEventListener('click', async () => {
+  const res = await fetch('/api/queue-priority', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rules: readPrioRules() }) });
+  if (res.ok) { await loadPrioRules(); prioSay('Rules saved. New files are placed by them from now on.'); }
+  else prioSay((await res.json().catch(() => ({}))).message || 'Could not save the rules.', false);
+});
+document.getElementById('prioApply').addEventListener('click', async () => {
+  const res = await fetch('/api/run/queue/priority/apply', { method: 'POST' });
+  if (res.ok) { const b = await res.json(); prioSay(b.moved ? `Re-sorted: ${b.moved} waiting file${b.moved === 1 ? '' : 's'} changed place.` : 'The waiting files were already in that order.'); }
+  else prioSay('Could not apply the rules.', false);
+});
+loadPrioRules();
 
 document.getElementById('clearChangesBtn').addEventListener('click', async () => {
   if (lanesDirty && !confirm('Discard unsaved changes and reload the last saved lanes?')) return;
@@ -350,4 +524,4 @@ window.addEventListener('beforeunload', e => {
 
 // loadLanes() (and Add Lane's own card-building) needs presetNames already populated - a
 // <select>'s .value only "sticks" once a matching <option> exists.
-populatePresetList().then(loadLanes);
+Promise.all([populatePresetList(), loadGlobalProcessing()]).then(loadLanes);

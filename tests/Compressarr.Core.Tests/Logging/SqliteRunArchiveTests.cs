@@ -65,7 +65,9 @@ public class SqliteRunArchiveTests : AppDataTestBase
         store.SaveReport(id, model);
         var rebuilt = store.LoadReport(id)!;
 
-        Assert.Equal(generator.Generate(model), generator.Generate(rebuilt));
+        // (A report read back from the archive also carries each file row's id, which the report page uses for its trash can; nothing else differs.)
+        var withoutRowIds = new System.Text.RegularExpressions.Regex(@" data-fid=""\d+""");
+        Assert.Equal(generator.Generate(model), withoutRowIds.Replace(generator.Generate(rebuilt), ""));
         Assert.Contains("ERROR 106", generator.Generate(rebuilt));           // the empty lane's problem
         Assert.Contains("average speed 23.5 fps", generator.Generate(rebuilt));
     }

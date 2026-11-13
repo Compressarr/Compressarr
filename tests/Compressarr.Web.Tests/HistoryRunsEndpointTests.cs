@@ -192,7 +192,7 @@ public class HistoryRunsEndpointTests
         Assert.StartsWith("Compressarr_History_", response.Content.Headers.ContentDisposition!.FileName!.Trim('"'));
         Assert.Equal(3, lines.Length);                                                    // the header and two runs
         Assert.StartsWith("yyyy,mm,dd,BegSize", lines[0]);
-        Assert.Equal(22, lines[0].Split(',').Length);
+        Assert.Equal(23, lines[0].Split(',').Length);
     }
 
     [Fact]
@@ -318,8 +318,9 @@ public class HistoryRunsEndpointTests
         var runs = (await Runs(host))["runs"]!.AsArray();
 
         var old = runs[0]!.AsArray();
-        Assert.Equal(21, old.Count);
-        Assert.All(old.Skip(15), v => Assert.Null(v));
+        Assert.Equal(22, old.Count);
+        Assert.All(old.Skip(15).Take(6), v => Assert.Null(v));      // speed, engines, lanes and profiles: unknown for an older run
+        Assert.Equal(0, old[21]!.GetValue<int>());                  // videos: none (an older run counted them with the movies)
         var row = runs[1]!.AsArray();
         Assert.Equal(23.45, row[15]!.GetValue<double>());
         Assert.Equal((3, 1, 1), (row[16]!.GetValue<int>(), row[17]!.GetValue<int>(), row[18]!.GetValue<int>()));
@@ -346,5 +347,144 @@ public class HistoryRunsEndpointTests
 
         Assert.Equal(9, all["fileCount"]!.GetValue<int>());
         Assert.Equal((2, 3, 4), (all["movieCount"]!.GetValue<int>(), all["tvCount"]!.GetValue<int>(), all["unknownCount"]!.GetValue<int>()));
+    }
+
+    // ---- Save and Share on a report (3.1) ----
+
+    [Fact]
+    public async Task AReportOpenedForViewing_HasSaveAndShareButtons_ButTheDownloadedFileDoesNot()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var (id, _) = RecordARun(host);
+
+        var viewed = await host.Client.GetStringAsync($"/api/reports/{id}");
+        var downloaded = await host.Client.GetStringAsync($"/api/reports/{id}?download=1");
+
+        Assert.Contains("id=\"rtSave\"", viewed);
+        Assert.Contains("id=\"rtShareBtn\"", viewed);
+        Assert.Contains("@media print", viewed);                                      // the buttons are hidden when the page is printed
+        Assert.DoesNotContain("rtShareBtn", downloaded);
+        Assert.DoesNotContain("rtSave", downloaded);
+        Assert.Contains("Fight Club (1999).mkv", downloaded);                          // an ordinary download keeps the names
+    }
+
+    [Fact]
+    public async Task AReportWithoutFileNames_ReplacesEveryNameButKeepsTheNumbers()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var (id, _) = RecordARun(host);
+
+        var viewed = await host.Client.GetStringAsync($"/api/reports/{id}?redact=1");
+        var downloaded = await host.Client.GetStringAsync($"/api/reports/{id}?download=1&redact=1");
+
+        foreach (var page in new[] { viewed, downloaded })
+        {
+            Assert.DoesNotContain("Fight Club", page);
+            Assert.Contains("Removed", page);
+            Assert.Contains("4 GB", page);                                            // the sizes are still there
+            Assert.Contains("HB 1080", page);                                         // and the profile
+        }
+        Assert.Contains("id=\"rtShareBtn\"", viewed);                                // viewing a redacted copy still offers Save/Share
+        Assert.DoesNotContain("rtShareBtn", downloaded);
+    }
+
+    [Fact]
+    public async Task ReportsSavedAsReadyMadeHtml_CannotBeSharedWithoutFileNames_SoTheyAreRefusedNotHandedOver()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var reports = Path.Combine(AppPaths.GetAppDataDirectory(), "Reports");
+        Directory.CreateDirectory(reports);
+        File.WriteAllText(Path.Combine(reports, "old.html"), "<html><body>Fight Club (1999).mkv</body></html>");
+        File.WriteAllLines(AppPaths.GetHistoryFilePath(), new[] { Header, "2026,09,11,8,3,2,0,2,0,3,old.html,0,0,0,1,1" });
+        var id = (await Runs(host))["runs"]!.AsArray()[0]![13]!.GetValue<string>();
+
+        using var viewed = await host.Client.GetAsync($"/api/reports/{id}");
+        using var redacted = await host.Client.GetAsync($"/api/reports/{id}?redact=1");
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, viewed.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, redacted.StatusCode);
+        Assert.DoesNotContain("Fight Club", await redacted.Content.ReadAsStringAsync());
+    }
+
+    // ---- the trash can on a report's file row (3.1) ----
+
+    private static string FirstFileId(string html)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(html, "data-fid=\"(\\d+)\"");
+        Assert.True(match.Success, "the report page offers a trash can for the file");
+        return match.Groups[1].Value;
+    }
+
+    [Fact]
+    public async Task TheLiveReport_OffersATrashCanPerFile_ButAFileHandedOverForKeepingHasNoScript()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var (id, _) = RecordARun(host);
+
+        var viewed = await host.Client.GetStringAsync($"/api/reports/{id}");
+        var downloaded = await host.Client.GetStringAsync($"/api/reports/{id}?download=1");
+
+        FirstFileId(viewed);
+        Assert.Contains("rt-trash", viewed);                       // the script that adds the buttons
+        Assert.DoesNotContain("rt-trash", downloaded);              // a downloaded file carries no script at all
+    }
+
+    [Fact]
+    public async Task Scrubbing_RemovesTheFilesNameFromTheReport_AndKeepsTheNumbers()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var (id, _) = RecordARun(host);
+        var fileId = FirstFileId(await host.Client.GetStringAsync($"/api/reports/{id}"));
+
+        using var scrub = await host.Client.PostAsync($"/api/reports/{id}/files/{fileId}/scrub", null);
+        var after = await host.Client.GetStringAsync($"/api/reports/{id}");
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, scrub.StatusCode);
+        Assert.DoesNotContain("Fight Club", after);
+        Assert.Contains("Removed", after);
+        Assert.Contains("4 GB", after);                             // the sizes stay
+        Assert.DoesNotContain("data-fid=", after);                  // and there is nothing left to scrub
+    }
+
+    [Fact]
+    public async Task ScrubbingAFileThatIsNotThere_Is404()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var (id, _) = RecordARun(host);
+
+        using var wrongFile = await host.Client.PostAsync($"/api/reports/{id}/files/99999/scrub", null);
+        using var wrongRun = await host.Client.PostAsync("/api/reports/99999/files/1/scrub", null);
+
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, wrongFile.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.NotFound, wrongRun.StatusCode);
+    }
+
+    [Fact]
+    public async Task ScrubbingAFile_DeletesItsDetailLog_WhenItLivesInTheLogFolder_AndLeavesOthersAlone()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var logFolder = Path.Combine(AppPaths.GetAppDataDirectory(), "Logs");
+        Directory.CreateDirectory(logFolder);
+        var inside = Path.Combine(logFolder, "Show_HBdetails.txt");
+        var outside = Path.Combine(AppPaths.GetAppDataDirectory(), "elsewhere.txt");
+        File.WriteAllText(inside, "log"); File.WriteAllText(outside, "not ours to delete");
+        var archive = host.Services.GetRequiredService<Compressarr.Core.Logging.IRunArchive>();
+        var now = DateTime.Now;
+        var id = archive.RecordRun(new Compressarr.Core.Logging.RunHistoryRecord(now.Year, now.Month, now.Day, 4, 1.5, 2, 0, 5, 0, RunNumber: 1, ErrorCount: 2));
+        archive.SaveReport(id, new Compressarr.Core.Reporting.ReportModel
+        {
+            GeneratedAt = now, RunTime = TimeSpan.FromMinutes(5), RunNumber = 1,
+            Lanes = new[] { new Compressarr.Core.Reporting.LaneReportSection { LaneDisplayName = "SD-HD", Results = new[]
+            {
+                new Compressarr.Core.Conversion.ConversionResult { LaneId = "hdsd", FileName = "a.mkv", FullName = "a.mkv", ContentType = "Movie", Success = false, DetailLogFile = inside, BeginSizeGb = 2, StartTime = now, EndTime = now },
+                new Compressarr.Core.Conversion.ConversionResult { LaneId = "hdsd", FileName = "b.mkv", FullName = "b.mkv", ContentType = "Movie", Success = false, DetailLogFile = outside, BeginSizeGb = 2, StartTime = now, EndTime = now }
+            } } }
+        });
+        var ids = System.Text.RegularExpressions.Regex.Matches(await host.Client.GetStringAsync($"/api/reports/{id}"), "data-fid=\"(\\d+)\"").Select(m => m.Groups[1].Value).ToList();
+
+        foreach (var fileId in ids) await host.Client.PostAsync($"/api/reports/{id}/files/{fileId}/scrub", null);
+
+        Assert.False(File.Exists(inside));                          // inside the log folder: deleted with the file's identity
+        Assert.True(File.Exists(outside));                          // anywhere else: never touched
     }
 }

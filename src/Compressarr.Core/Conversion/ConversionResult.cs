@@ -86,4 +86,10 @@ public sealed class ConversionResult
     public string? RedirectedToLaneId { get; init; }
     public string? RedirectedToLaneName { get; init; }
     public string? HomeLaneName { get; init; }
+
+    /// <summary>The file's row in the run archive when the result was read back from it (3.1); null for a result made during a run. The report page uses it to offer the trash can.</summary>
+    public long? ArchiveRowId { get; init; }
+
+    /// <summary>True for a file whose name and messages were removed from History (see <see cref="Compressarr.Core.Logging.IRunArchive.ScrubFile"/>). Its numbers still count.</summary>
+    public bool IsScrubbed { get; init; }
 }

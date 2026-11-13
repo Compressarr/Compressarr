@@ -12,7 +12,7 @@ public sealed partial class SqliteRunHistoryStore : IRunTotals
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT COALESCE(SUM(files), 0), COALESCE(SUM(before_gb), 0), COALESCE(SUM(after_gb), 0), COALESCE(SUM(seconds), 0),
-                   COALESCE(SUM(movies), 0), COALESCE(SUM(tvs), 0), COALESCE(SUM(unknown_files), 0)
+                   COALESCE(SUM(movies), 0), COALESCE(SUM(tvs), 0), COALESCE(SUM(unknown_files), 0), COALESCE(SUM(videos), 0)
             FROM daily_totals WHERE (@from IS NULL OR day >= @from) AND (@to IS NULL OR day <= @to)
             """;
         command.Parameters.AddWithValue("@from", from is { } f ? f.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : DBNull.Value);
@@ -26,6 +26,7 @@ public sealed partial class SqliteRunHistoryStore : IRunTotals
             TotalTimeSeconds: reader.GetInt64(3),
             MovieCount: reader.GetInt32(4),
             TvCount: reader.GetInt32(5),
-            UnknownCount: reader.GetInt32(6));
+            UnknownCount: reader.GetInt32(6),
+            VideoCount: reader.GetInt32(7));
     }
 }

@@ -231,6 +231,83 @@ let queueEtaFormat = 'DateTime';
 
 const PRESET_DEFAULT_VALUE = '__lane_default__';
 
+// A small arrow when a priority rule puts this file's show ahead of or behind the rest (3.1). Nothing for a normal file.
+function queuePriorityBadge(item) {
+  if (!item.priority) return '';
+  return item.priority > 0
+    ? '<span class="queue-badge prio-up" title="A priority rule queues this show ahead of the rest.">&#9650; Raised</span>'
+    : '<span class="queue-badge prio-down" title="A priority rule queues this show behind the rest.">&#9660; Lowered</span>';
+}
+
+// --- Change all: preset and/or landing lane for many waiting files in one step (3.1) -----------
+const BULK_KEEP = '__keep__';
+const BULK_ALL = '__all__';
+
+function bulkEligibleItems() { return latestItems.filter(i => !i.isError); }
+
+function openBulkChange() {
+  const items = bulkEligibleItems();
+  const laneIds = [...new Set(items.map(i => i.laneId))];
+  const nameOf = id => (queueLanes.find(l => l.id === id) || {}).displayName || id;
+  const scope = document.getElementById('bulkScope');
+  scope.innerHTML = `<option value="${BULK_ALL}">All ${items.length} waiting file${items.length === 1 ? '' : 's'}</option>` +
+    (laneIds.length > 1 ? laneIds.map(id => `<option value="${escapeHtml(id)}">Only lane: ${escapeHtml(nameOf(id))} (${items.filter(i => i.laneId === id).length})</option>`).join('') : '');
+  const profiles = [...new Set([...(presetNamesByEngine.HandBrake || []), ...(presetNamesByEngine.FFmpeg || [])])];
+  document.getElementById('bulkPreset').innerHTML =
+    `<option value="${BULK_KEEP}">Leave each file's profile as it is</option>` +
+    `<option value="${PRESET_DEFAULT_VALUE}">Use each lane's own profile</option>` +
+    profiles.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+  document.getElementById('bulkDest').innerHTML =
+    `<option value="${BULK_KEEP}">Leave where each file lands as it is</option>` +
+    `<option value="">Each file's own lane</option>` +
+    queueLanes.map(l => `<option value="${escapeHtml(l.id)}">Land in: ${escapeHtml(l.displayName)}${l.enabled ? '' : ' (disabled)'}</option>`).join('');
+  document.getElementById('bulkNote').textContent = '';
+  document.getElementById('bulkOverlay').classList.remove('hidden');
+}
+
+async function applyBulkChange() {
+  const scope = document.getElementById('bulkScope').value;
+  const preset = document.getElementById('bulkPreset').value;
+  const dest = document.getElementById('bulkDest').value;
+  const note = document.getElementById('bulkNote');
+  const setPreset = preset !== BULK_KEEP;
+  const setDestination = dest !== BULK_KEEP;
+  if (!setPreset && !setDestination) { note.textContent = 'Choose a profile and/or a landing lane to change.'; return; }
+
+  const items = bulkEligibleItems().filter(i => scope === BULK_ALL || i.laneId === scope).map(i => ({ laneId: i.laneId, fullName: i.fullName }));
+  if (items.length === 0) { note.textContent = 'There are no waiting files to change.'; return; }
+  const button = document.getElementById('bulkApply');
+  button.disabled = true;
+  try {
+    const res = await fetch('/api/run/queue/bulk-edit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        items,
+        setPreset,
+        preset: preset === PRESET_DEFAULT_VALUE ? '' : (setPreset ? preset : null),
+        setDestination,
+        destinationLaneId: setDestination ? dest : null
+      })
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) { note.textContent = body.message || 'Could not change the queue.'; return; }
+    const parts = [`Changed ${body.changed} file${body.changed === 1 ? '' : 's'}`];
+    if (body.incompatiblePreset) parts.push(`${body.incompatiblePreset} left alone because their lane's encoder does not have that profile`);
+    if (body.skipped) parts.push(`${body.skipped} skipped (no longer waiting)`);
+    document.getElementById('bulkOverlay').classList.add('hidden');
+    if (typeof setStatusMessage === 'function') setStatusMessage(parts.join('; ') + '.', 'success');
+    else note.textContent = parts.join('; ') + '.';
+    poll();
+  } finally {
+    button.disabled = false;
+  }
+}
+
+document.getElementById('bulkChangeBtn').addEventListener('click', openBulkChange);
+document.getElementById('bulkCancel').addEventListener('click', () => document.getElementById('bulkOverlay').classList.add('hidden'));
+document.getElementById('bulkApply').addEventListener('click', applyBulkChange);
+
 const QUEUE_ICON_GRIP = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="6" r="1.6"></circle><circle cx="16" cy="6" r="1.6"></circle><circle cx="8" cy="12" r="1.6"></circle><circle cx="16" cy="12" r="1.6"></circle><circle cx="8" cy="18" r="1.6"></circle><circle cx="16" cy="18" r="1.6"></circle></svg>';
 const QUEUE_ICON_DOTS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="12" cy="19" r="1.8"></circle></svg>';
 
@@ -359,6 +436,7 @@ function renderQueue(items) {
   // rendered below it - including while the list is frozen mid-drag (see the guard further down).
   const count = displayItems.length;
   document.getElementById('queueHeading').textContent = `${count} File${count === 1 ? '' : 's'} In Queue`;
+  document.getElementById('bulkChangeBtn').classList.toggle('hidden', !latestItems.some(i => !i.isError));
   // A row whose item disappeared from the server snapshot (completed, removed elsewhere) shouldn't
   // leave a dangling open popover referencing it.
   const keys = new Set(displayItems.map(queueKey));
@@ -411,6 +489,7 @@ function renderQueueList() {
       ${queuePosterHtml(item)}
       <span class="queue-badge ${queueBadgeClass(item)}">${item.isSkipped ? 'Skipped' : queueBadgeLabel(item)}</span>
       ${item.isFileBotUnmatched ? '<span class="queue-badge unmatched">Unmatched</span>' : ''}
+      ${queuePriorityBadge(item)}
       <div class="queue-lane">${escapeHtml(item.laneDisplayName)}${queueEngineChip(item)}${queueDestinationMarker(item)}</div>
 
       <div class="queue-file">${kindIconHtml(item.kind)}${escapeHtml(item.fileName)}</div>
@@ -481,6 +560,8 @@ function renderQueueList() {
       pop.innerHTML = `
         <div class="queue-popover-item" data-act="skip">${item.isSkipped ? 'Unskip' : 'Skip'}</div>
         ${item.isCustomPreset ? `<div class="queue-popover-item" data-act="use-lane-preset">Use Lane Preset</div>` : ''}
+        <div class="queue-popover-item" data-act="prio-higher">${item.priority > 0 ? 'Priority: raised (set normal)' : 'Raise priority for this show'}</div>
+        <div class="queue-popover-item" data-act="prio-lower">${item.priority < 0 ? 'Priority: lowered (set normal)' : 'Lower priority for this show'}</div>
         <div class="queue-popover-item" data-act="move-top">Move to top</div>
         <div class="queue-popover-item" data-act="move-bottom">Move to bottom</div>
         <div class="queue-popover-item danger" data-act="remove">Remove from queue</div>
@@ -501,6 +582,14 @@ function renderQueueList() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ laneId: item.laneId, fullName: item.fullName, preset: null })
+          });
+        } else if (act === 'prio-higher' || act === 'prio-lower') {
+          // A rule for this show's title (or its TMDb id tag): new episodes are then queued accordingly. Choosing the current level again clears it.
+          const wanted = act === 'prio-higher' ? (item.priority > 0 ? 'Normal' : 'Higher') : (item.priority < 0 ? 'Normal' : 'Lower');
+          await fetch('/api/run/queue/priority-rule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ laneId: item.laneId, fullName: item.fullName, priority: wanted })
           });
         } else if (act === 'move-top' || act === 'move-bottom') {
           await moveQueueItem(item, act === 'move-top');

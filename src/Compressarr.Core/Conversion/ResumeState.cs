@@ -35,7 +35,14 @@ public enum ResumeStatus
     /// real gap found via code review: without a status to track this, the entry was left
     /// Completed and nothing ever came back to finish the deferred cleanup, potentially leaving an
     /// empty source folder behind forever.</summary>
-    CleanupPending
+    CleanupPending,
+
+    /// <summary>The crash journal (3.1): written while a finished encode is being filed, before the final status is known. If Compressarr stops in the middle (a crash, a power
+    /// cut, a kill), this is what is found on the next start, and the retry logic picks the job up at the stage it reached instead of re-encoding it: before the video was
+    /// routed (EncodedFilePath is set, PendingCompanionVideoDestPath is not) the encoded file is routed as for a failed move; after it was routed (PendingCompanionVideoDestPath
+    /// is set) the source is dealt with, then the companions, the Sonarr/Radarr rescan and the folder cleanup. Always replaced by one of the other statuses when filing completes.
+    /// Appended last so an older build, which does not know it, reads the entry as Pending.</summary>
+    FinishPending
 }
 
 /// <summary>The rules for a source that was converted and deliberately left where it was (Settings > Processing > Maintain).</summary>
@@ -496,6 +503,30 @@ public static class ResumeQueueOrder
 {
     public static int NextOrder(IEnumerable<ResumeEntry> resumeState) =>
         resumeState.Where(e => e.Order.HasValue).Select(e => e.Order!.Value).DefaultIfEmpty(-1).Max() + 1;
+
+    /// <summary>
+    /// Gives a newly arrived file its place in the queue, honouring the priority rules (3.1). With no rules this is exactly <see cref="NextOrder"/>: the very end. With rules
+    /// the file goes to the end of its own tier: after the last waiting file of its tier or a higher one, so a lowered show's backlog stays behind everything newer, a
+    /// raised show's files go ahead of the rest, and files of the same tier keep their arrival order. Positions after it shift down by one; nothing is renumbered
+    /// otherwise, and a file the user placed by hand is never moved by a rule here (only new arrivals are placed).
+    /// </summary>
+    public static void Place(List<ResumeEntry> resumeState, ResumeEntry entry, Compressarr.Core.Queue.QueuePriorityRules rules)
+    {
+        if (rules.IsEmpty) { entry.Order = NextOrder(resumeState); return; }
+
+        var tier = rules.TierOf(entry.FullName);
+        var waiting = resumeState.Where(e => !ReferenceEquals(e, entry) && e.Status == ResumeStatus.Pending && !e.Removed && e.Order.HasValue).ToList();
+        if (waiting.Count == 0) { entry.Order = NextOrder(resumeState); return; }
+
+        var sameOrHigher = waiting.Where(e => rules.TierOf(e.FullName) >= tier).Select(e => e.Order!.Value).ToList();
+        var insertAt = sameOrHigher.Count > 0 ? sameOrHigher.Max() + 1 : waiting.Min(e => e.Order!.Value);
+
+        foreach (var other in resumeState)
+        {
+            if (!ReferenceEquals(other, entry) && other.Order is { } order && order >= insertAt) other.Order = order + 1;
+        }
+        entry.Order = insertAt;
+    }
 }
 
 /// <summary>Implemented by a queue store that can be unavailable (the database that holds the queue cannot be opened): the engine checks it before a pass and pauses instead of
@@ -568,7 +599,7 @@ public sealed class JsonResumeStateStore : IResumeStateStore
 
     public void DeleteIfComplete(List<ResumeEntry> state, string path)
     {
-        var hasOutstanding = state.Any(e => e.Status is ResumeStatus.Pending or ResumeStatus.Error or ResumeStatus.MoveFailed or ResumeStatus.CompanionMoveFailed or ResumeStatus.CleanupPending);
+        var hasOutstanding = state.Any(e => e.Status is ResumeStatus.Pending or ResumeStatus.Error or ResumeStatus.MoveFailed or ResumeStatus.CompanionMoveFailed or ResumeStatus.CleanupPending or ResumeStatus.FinishPending);
         if (hasOutstanding || !File.Exists(path)) return;
 
         // Nothing left to do - but a converted file whose source was kept must stay remembered, or it is converted again.

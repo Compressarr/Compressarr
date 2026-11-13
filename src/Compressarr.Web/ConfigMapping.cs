@@ -127,7 +127,26 @@ internal static class ConfigMapping
 
     public static LaneDto ToLaneDto(LaneConfig lane, List<ValidationIssueDto> validationIssues) => new(
         lane.Id, lane.DisplayName, lane.Enabled, lane.Input, lane.Output,
-        lane.TvPreset, lane.MoviePreset, lane.TvShowBasePath, lane.MovieBasePath, validationIssues, lane.Engine.ToString(), lane.AllowHdrLoss);
+        lane.TvPreset, lane.MoviePreset, lane.TvShowBasePath, lane.MovieBasePath, validationIssues, lane.Engine.ToString(), lane.AllowHdrLoss,
+        UseGlobalProcessing: lane.Processing is null, Processing: lane.Processing is { } own ? ToLaneProcessingDto(own) : null,
+        Kind: lane.Kind.ToString(), Tracking: lane.Tracking.ToString());
+
+    public static LaneProcessingDto ToLaneProcessingDto(ProcessingSettings p) => new(
+        p.VidTypes, p.DeleteAfterConvert.ToString(), p.MoveFiles, p.ClearTitleMetadata, p.MinSizeBytes,
+        p.CompanionExtensions, p.UnmatchedCompanionAction.ToString(), p.OnDestinationCollision.ToString());
+
+    /// <summary>A lane's own settings from what the page sent. The two settings a lane does not own (limit, output next to input) keep the global defaults here and are ignored by the engine.</summary>
+    public static ProcessingSettings FromLaneProcessingDto(LaneProcessingDto dto) => new()
+    {
+        VidTypes = dto.VidTypes,
+        DeleteAfterConvert = Enum.Parse<DeleteAfterConvertMode>(dto.DeleteAfterConvert),
+        MoveFiles = dto.MoveFiles,
+        ClearTitleMetadata = dto.ClearTitleMetadata,
+        MinSizeBytes = dto.MinSizeBytes,
+        CompanionExtensions = dto.CompanionExtensions,
+        UnmatchedCompanionAction = Enum.Parse<DeleteAfterConvertMode>(dto.UnmatchedCompanionAction),
+        OnDestinationCollision = Enum.Parse<DestinationCollisionMode>(dto.OnDestinationCollision)
+    };
 
     public static void ApplyLaneDto(LaneConfig lane, LaneDto dto)
     {
@@ -143,6 +162,12 @@ internal static class ConfigMapping
         if (Enum.TryParse<EncoderEngine>(dto.Engine, ignoreCase: true, out var engine)) lane.Engine = engine;
         // Same for the HDR choice: not sent, not changed.
         if (dto.AllowHdrLoss is { } allowHdrLoss) lane.AllowHdrLoss = allowHdrLoss;
+        // Kind and tracking: not sent, not changed.
+        if (Enum.TryParse<LaneKind>(dto.Kind, ignoreCase: true, out var kind)) lane.Kind = kind;
+        if (Enum.TryParse<LaneTracking>(dto.Tracking, ignoreCase: true, out var tracking)) lane.Tracking = tracking;
+        // The lane's own processing settings: "use global" removes them, an explicit set replaces them, and a client that sends neither leaves them alone.
+        if (dto.UseGlobalProcessing == true) lane.Processing = null;
+        else if (dto.UseGlobalProcessing == false && dto.Processing is { } processing) lane.Processing = FromLaneProcessingDto(processing);
     }
 
     /// <summary>A channel as the page sees it: the notifier's secret fields (<paramref name="secretKeys"/>) come back as the mask when saved (never the value).</summary>

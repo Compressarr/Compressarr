@@ -43,6 +43,8 @@ const ovGb = gb => gb >= 1000 ? (gb / 1000).toFixed(2) + ' TB' : gb.toFixed(2) +
 const ovPct = x => x.b > 0 ? Math.round((1 - x.a / x.b) * 1000) / 10 : 0;
 const ovHours = s => Math.floor(s / 3600) + 'h ' + String(Math.floor(s % 3600 / 60)).padStart(2, '0') + 'm';
 const ovMovies = n => n + (n === 1 ? ' movie' : ' movies');
+const ovVideos = n => n + (n === 1 ? ' video' : ' videos');
+const OV_AMBER = '#d99a2b';   // videos (a Videos lane's files)
 const ovDayName = t => OV_MONTHS[new Date(t).getUTCMonth()] + ' ' + new Date(t).getUTCDate();
 const ovWeekStart = t => t - ((new Date(t).getUTCDay() + 6) % 7) * OV_DAY;
 const ovDot = c => `<i class="ov-dot" style="background:${c}"></i>`;
@@ -66,7 +68,7 @@ function ovSum(rs) {
   return {
     f: rs.reduce((x, r) => x + r.f, 0), b: rs.reduce((x, r) => x + r.b, 0), a: rs.reduce((x, r) => x + r.a, 0),
     s: rs.reduce((x, r) => x + r.s, 0), v: rs.reduce((x, r) => x + r.v, 0), runs: rs.length,
-    mv: rs.reduce((x, r) => x + (r.mv ?? 0), 0), tv: rs.reduce((x, r) => x + (r.tv ?? 0), 0),
+    mv: rs.reduce((x, r) => x + (r.mv ?? 0), 0), tv: rs.reduce((x, r) => x + (r.tv ?? 0), 0), vid: rs.reduce((x, r) => x + (r.vid ?? 0), 0),
     unk: rs.reduce((x, r) => x + (r.mv === null ? r.f : 0), 0)
   };
 }
@@ -175,9 +177,9 @@ const OV_CARDS = [
       viz: c.p === 'today' ? ovRunBars(ovHourBlocks()) : ovBucketBars(c, 'runs', 'var(--accent)') }) },
   { id: 'files', def: true, icon: 'files', label: 'Files Compressed', make: c => ({
       value: ovN(c.tot.f),
-      sub: c.tot.mv + c.tot.tv === 0 && c.tot.f ? 'movies and TV are counted separately from now on'
-         : ovDot('var(--accent)') + ovMovies(c.tot.mv) + ' &middot; ' + ovDot(OV_PURPLE) + c.tot.tv + ' TV' + (c.tot.unk ? ' &middot; ' + ovDot(OV_GREY) + c.tot.unk + ' not split' : ''),
-      viz: ovSeg([{ v: c.tot.mv, c: 'var(--accent)', t: c.tot.mv + ' movies' }, { v: c.tot.tv, c: OV_PURPLE, t: c.tot.tv + ' TV files' }, { v: c.tot.unk, c: OV_GREY, t: c.tot.unk + ' files from runs with no movie/TV split (older runs)' }]) }) },
+      sub: c.tot.mv + c.tot.tv + c.tot.vid === 0 && c.tot.f ? 'movies and TV are counted separately from now on'
+         : ovDot('var(--accent)') + ovMovies(c.tot.mv) + (c.tot.vid ? ' &middot; ' + ovDot(OV_AMBER) + ovVideos(c.tot.vid) : '') + ' &middot; ' + ovDot(OV_PURPLE) + c.tot.tv + ' TV' + (c.tot.unk ? ' &middot; ' + ovDot(OV_GREY) + c.tot.unk + ' not split' : ''),
+      viz: ovSeg([{ v: c.tot.mv, c: 'var(--accent)', t: c.tot.mv + ' movies' }, { v: c.tot.vid, c: OV_AMBER, t: c.tot.vid + ' videos' }, { v: c.tot.tv, c: OV_PURPLE, t: c.tot.tv + ' TV files' }, { v: c.tot.unk, c: OV_GREY, t: c.tot.unk + ' files from runs with no movie/TV split (older runs)' }]) }) },
   { id: 'bestmo', def: true, icon: 'bestmo', make: c => {
       // the "best" stat follows the period: a month for All time / Last year, a week for 30 days, a day for 7 days, a run for Today
       const unit = c.p === 'all' || c.p === 'year' ? 'Month' : c.p === 'd30' ? 'Week' : c.p === 'd7' ? 'Day' : 'Run';
@@ -205,12 +207,14 @@ const OV_CARDS = [
   // ---- more stats ----
   { id: 'saved', def: false, icon: 'saved', label: 'Space Saved', make: c => ({
       value: ovGb(c.tot.v), sub: '<b>' + ovPct(c.tot) + '%</b> smaller', viz: ovBucketBars(c, 'v', 'var(--ok)') }) },
-  { id: 'split', def: false, icon: 'split', label: 'Movies vs TV', make: c => {
-      const known = c.tot.mv + c.tot.tv, share = x => (x < 10 || x > 90) ? x.toFixed(1) : String(Math.round(x));
-      const pm = known ? c.tot.mv / known * 100 : 0, pt = known ? 100 - pm : 0;
-      return { value: known ? share(pm) + '% / ' + share(pt) + '%' : '-',
-               sub: known ? ovDot(OV_ORCHID) + 'movies &middot; ' + ovDot(OV_TEAL) + 'TV' + (c.tot.unk ? '<span class="ov-note">of ' + ovN(known) + ' known files</span>' : '') : 'no split recorded yet',
-               viz: known ? ovSeg([{ v: c.tot.mv, c: OV_ORCHID, t: c.tot.mv + ' movies (' + share(pm) + '%)' }, { v: c.tot.tv, c: OV_TEAL, t: c.tot.tv + ' TV files (' + share(pt) + '%)' }]) : '' }; } },
+  { id: 'split', def: false, icon: 'split', label: 'Movies, TV and Videos', make: c => {
+      const known = c.tot.mv + c.tot.tv + c.tot.vid, share = x => (x < 10 || x > 90) ? x.toFixed(1) : String(Math.round(x));
+      const pm = known ? c.tot.mv / known * 100 : 0, pv = known ? c.tot.vid / known * 100 : 0, pt = known ? 100 - pm - pv : 0;
+      // Without videos it reads exactly as it always did: movies / TV.
+      const value = c.tot.vid ? share(pm) + '% / ' + share(pt) + '% / ' + share(pv) + '%' : share(pm) + '% / ' + share(pt) + '%';
+      return { value: known ? value : '-',
+               sub: known ? ovDot(OV_ORCHID) + 'movies &middot; ' + ovDot(OV_TEAL) + 'TV' + (c.tot.vid ? ' &middot; ' + ovDot(OV_AMBER) + 'videos' : '') + (c.tot.unk ? '<span class="ov-note">of ' + ovN(known) + ' known files</span>' : '') : 'no split recorded yet',
+               viz: known ? ovSeg([{ v: c.tot.mv, c: OV_ORCHID, t: c.tot.mv + ' movies (' + share(pm) + '%)' }, { v: c.tot.tv, c: OV_TEAL, t: c.tot.tv + ' TV files (' + share(pt) + '%)' }, { v: c.tot.vid, c: OV_AMBER, t: c.tot.vid + ' videos (' + share(pv) + '%)' }]) : '' }; } },
   { id: 'avg', def: false, icon: 'avg', label: 'Average Saved / File', make: c => {
       const f = c.tot.f || 1;
       return { value: c.tot.f ? ovGb(c.tot.v / f) : '-', sub: ovDot('var(--accent)') + (c.tot.f ? ovGb(c.tot.a / f) : '-') + ' kept &middot; ' + ovDot('var(--ok)') + (c.tot.f ? ovGb(c.tot.v / f) : '-') + ' saved',
@@ -359,10 +363,10 @@ function ovRenderStrip(tiles) {
 
 // ---- the period table (the server's own rollups) ---------------------------------------------------------------------------------------------
 function ovSplitText(b) {
-  const mv = b.movieCount || 0, tv = b.tvCount || 0, unk = b.unknownCount || 0;
+  const mv = b.movieCount || 0, tv = b.tvCount || 0, vid = b.videoCount || 0, unk = b.unknownCount || 0;
   if (!b.fileCount) return '';
-  if (!mv && !tv) return 'not split';
-  return ovMovies(mv) + ' &middot; ' + tv + ' TV' + (unk ? ' &middot; ' + unk + ' not split' : '');
+  if (!mv && !tv && !vid) return 'not split';
+  return ovMovies(mv) + (vid ? ' &middot; ' + ovVideos(vid) : '') + ' &middot; ' + tv + ' TV' + (unk ? ' &middot; ' + unk + ' not split' : '');
 }
 function ovTableRow(label, period, b) {
   const saved = b.beforeGb > 0 ? Math.round((1 - b.afterGb / b.beforeGb) * 1000) / 10 : 0;
@@ -497,7 +501,7 @@ async function loadOverview() {
     const [nowDate, nowTime = '23:59'] = (runs.now || runs.today).split('T'), [ny, nm, nd] = nowDate.split('-').map(Number), [nh, nmin] = nowTime.split(':').map(Number);
     ovNow = Date.UTC(ny, nm - 1, nd, nh, nmin);   // the server's wall clock, as milliseconds, like every other date here
     // fps, hb, ff, pass, lanes and profiles are null for a run recorded before they existed; those files are left out of the cards that use them.
-    ovRuns = runs.runs.map(([y, m, d, b, a, f, s, n, e, w, r, mv, tv, report, endMinute, fps, hb, ff, pass, lanes, profiles]) => ({ y, m, d, b, a, f, s, n, e, w, r, mv, tv, report, t: Date.UTC(y, m - 1, d), v: b - a,
+    ovRuns = runs.runs.map(([y, m, d, b, a, f, s, n, e, w, r, mv, tv, report, endMinute, fps, hb, ff, pass, lanes, profiles, vid]) => ({ y, m, d, b, a, f, s, n, e, w, r, mv, tv, vid: vid ?? 0, report, t: Date.UTC(y, m - 1, d), v: b - a,
       end: endMinute === null || endMinute === undefined ? null : Date.UTC(y, m - 1, d) + endMinute * 60000,
       fps: fps ?? null, hb: hb ?? null, ff: ff ?? null, pass: pass ?? null, lanes: lanes ?? null, profiles: profiles ?? null }));
   } catch {

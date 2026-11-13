@@ -103,6 +103,10 @@ internal sealed class RetryRecovery
             ResumeResults.Remove(_resumeStore, strayEntries, resumeFilePath);
         }
 
+        // The crash journal (3.1): a file whose filing was interrupted (Compressarr stopped while routing it, dealing with its source, moving its companions or waiting for
+        // Sonarr/Radarr) is turned back into the retry status for the stage it reached, so the loops below finish it - no re-encode.
+        ResolveInterruptedFinishes(lane, config, inputPath, resumeState, resumeFilePath);
+
         // A CompanionMoveFailed entry whose companions' own source folder is gone (removed by
         // hand, or the whole thing cleaned up some other way between runs) has nothing left to
         // retry - same reasoning as deadEntries above, checked against
@@ -146,7 +150,7 @@ internal sealed class RetryRecovery
             // deterministic (pre-fix), so the fallback is exactly as good as this field always was.
             var encodedFilePath = entry.EncodedFilePath;
             var desiredFileName = entry.EncodedFileDesiredName ?? Path.GetFileName(encodedFilePath);
-            var retryIsTv = ContentClassifier.IsTvFile(desiredFileName);
+            var retryIsTv = LaneKinds.IsTv(lane, desiredFileName);
             var retrySucceeded = false;
             var currentPath = encodedFilePath;
 
@@ -279,7 +283,8 @@ internal sealed class RetryRecovery
                 // Same edition rule as the first attempt, worked out from the original source path (which is still recorded when the file itself is gone).
                 var retryShowEdition = retryIsTv ? PlexTags.EditionOfSourceShowFolder(entry.FullName, inputPath, ContentClassifier.GetEpisodeInfo(desiredFileName).ShowName) : null;
                 retryDestPath = _fileRouter.RouteFile(encodedFilePath, desiredFileName, retryIsTv, retryLibraries.TvShowBasePath, retryLibraries.MovieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision, retryShowEdition,
-                    new SourceProtection(entry.FullName, config.Processing.DeleteAfterConvert, ResumeKeeping.SourceUnchangedSinceEncode(entry, encodedFilePath) && !sourceOutsideInput, _trash));
+                    new SourceProtection(entry.FullName, config.Processing.DeleteAfterConvert, ResumeKeeping.SourceUnchangedSinceEncode(entry, encodedFilePath) && !sourceOutsideInput, _trash),
+                    LaneKinds.IsVideos(retryLibraries.RedirectedTo ?? lane));
                 ResolveRetry(retryDestPath ?? RestInPlace(encodedFilePath) ?? encodedFilePath);
                 _logger.Log($"  Retried move for '{desiredFileName}' - succeeded.");
                 CleanUpRetriedSourceSafely();
@@ -334,7 +339,7 @@ internal sealed class RetryRecovery
             // - nothing to finalize yet.
             if (retrySucceeded)
             {
-                arrCleanupSafe = (await _cleanup.ConfirmRescanAsync(config, desiredFileName, retryIsTv, " on move retry", logDeferred: true, cancellationToken)).Safe;
+                arrCleanupSafe = (await _cleanup.ConfirmRescanAsync(config, desiredFileName, retryIsTv, " on move retry", logDeferred: true, cancellationToken, skipArr: LaneKinds.IsVideos(lane))).Safe;
 
                 // Only now, after Sonarr/Radarr has had the chance to rescan the source folder
                 // while it still physically existed AND that rescan was positively confirmed to
@@ -395,7 +400,7 @@ internal sealed class RetryRecovery
                 _logger.Log($"  Retried companion file move for '{Path.GetFileName(videoDestPath)}' - succeeded.");
 
                 var desiredFileName = Path.GetFileName(videoDestPath);
-                var companionRetryIsTv = ContentClassifier.IsTvFile(desiredFileName);
+                var companionRetryIsTv = LaneKinds.IsTv(lane, desiredFileName);
 
                 // Re-triggers the same unmonitor+rescan call the video's own first pass already
                 // made - deliberately, not a bug: Sonarr/Radarr's own API already treats a repeat
@@ -403,7 +408,7 @@ internal sealed class RetryRecovery
                 // way this retry can get a FRESH, positively-confirmed signal that it's now safe
                 // to remove the source folder, without needing to persist the original pass's
                 // rescan outcome across a run boundary.
-                var arrCleanupSafe = (await _cleanup.ConfirmRescanAsync(config, desiredFileName, companionRetryIsTv, " on companion retry", logDeferred: true, cancellationToken)).Safe;
+                var arrCleanupSafe = (await _cleanup.ConfirmRescanAsync(config, desiredFileName, companionRetryIsTv, " on companion retry", logDeferred: true, cancellationToken, skipArr: LaneKinds.IsVideos(lane))).Safe;
 
                 if (arrCleanupSafe)
                 {
@@ -487,10 +492,10 @@ internal sealed class RetryRecovery
             }
 
             var desiredFileName = Path.GetFileName(videoDestPath);
-            var cleanupRetryIsTv = ContentClassifier.IsTvFile(desiredFileName);
+            var cleanupRetryIsTv = LaneKinds.IsTv(lane, desiredFileName);
 
             // logDeferred is off: this loop logs its own, deduplicated "still deferred" line below.
-            var rescan = await _cleanup.ConfirmRescanAsync(config, desiredFileName, cleanupRetryIsTv, " on cleanup retry", logDeferred: false, cancellationToken);
+            var rescan = await _cleanup.ConfirmRescanAsync(config, desiredFileName, cleanupRetryIsTv, " on cleanup retry", logDeferred: false, cancellationToken, skipArr: LaneKinds.IsVideos(lane));
             var arrCleanupSafe = rescan.Safe;
             var reasonKey = rescan.Outcome?.ToString() ?? rescan.FailureMessage!;
 
@@ -558,6 +563,64 @@ internal sealed class RetryRecovery
             entry.LastRetryFailureMessage = null;
             ResumeResults.Save(_resumeStore, entry, resumeFilePath);
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Picks up the files whose filing was interrupted (see <see cref="ResumeStatus.FinishPending"/>). A file that was only staged (its encoded output waits in Output) goes back to
+    /// the failed-move path, which routes it and finishes the rest. A file whose video was already routed has its source dealt with the way the setting says (only when it is still
+    /// the file that was converted, and inside Input), then goes to the companion path, which moves the companions, confirms the Sonarr/Radarr rescan and tidies the folder.
+    /// Nothing is encoded again.
+    /// </summary>
+    private void ResolveInterruptedFinishes(LaneConfig lane, CompressarrConfig config, string inputPath, List<ResumeEntry> resumeState, string resumeFilePath)
+    {
+        var interrupted = resumeState.Where(e => e.LaneId == lane.Id && e.Status == ResumeStatus.FinishPending).ToList();
+        foreach (var entry in interrupted)
+        {
+            var name = Path.GetFileName(entry.FullName);
+            if (string.IsNullOrEmpty(entry.PendingCompanionVideoDestPath))
+            {
+                // Before the video was routed.
+                if (entry.EncodedFilePath is not null && File.Exists(entry.EncodedFilePath))
+                {
+                    _logger.Log($"Finishing '{name}', which was interrupted before it was filed - routing the encoded file now (no re-encode).");
+                    entry.Status = ResumeStatus.MoveFailed;
+                    ResumeResults.Save(_resumeStore, entry, resumeFilePath);
+                }
+                else
+                {
+                    _logger.Log($"'{name}' was interrupted while it was being filed and its encoded file is no longer there - it will be converted again if its source is still in Input.", LogSeverity.Error);
+                    resumeState.Remove(entry);
+                    ResumeResults.Remove(_resumeStore, new[] { entry }, resumeFilePath);
+                }
+                continue;
+            }
+
+            // After the video was routed: only the aftermath is left.
+            var routed = entry.PendingCompanionVideoDestPath;
+            if (!File.Exists(routed))
+            {
+                // The filed video is not there any more (moved or renamed by Sonarr/Radarr or by hand). It cannot be shown that the source was converted, so it is kept, and not converted again.
+                _logger.Log($"'{name}' was interrupted after it was filed, but the filed video is no longer at '{routed}', so the original was kept as it is.", LogSeverity.Error);
+                ResumeKeeping.NoteSourceKept(entry);
+                entry.PendingCompanionSourceDirectory = null;
+                entry.PendingCompanionVideoDestPath = null;
+                entry.Status = ResumeStatus.Completed;
+                ResumeResults.Save(_resumeStore, entry, resumeFilePath);
+                continue;
+            }
+
+            _logger.Log($"Finishing '{name}', which was interrupted after it was filed - dealing with its original, companions and cleanup now (no re-encode).");
+            var policy = config.Processing.DeleteAfterConvert;
+            var sameAsRouted = string.Equals(entry.FullName, routed, StringComparison.OrdinalIgnoreCase);
+            if (policy != DeleteAfterConvertMode.Maintain && !sameAsRouted && File.Exists(entry.FullName) && PathContainment.IsStrictlyInside(entry.FullName, inputPath))
+            {
+                if (ResumeKeeping.CheckSource(entry) == ResumeKeeping.SourceCheck.Unchanged) FileOutcomeHelpers.DisposeSource(_trash, entry.FullName, policy);
+                else _logger.Log($"  The original '{name}' could not be confirmed to be the file that was converted, so it was kept.");
+            }
+            entry.Status = ResumeStatus.CompanionMoveFailed;
+            entry.PendingCompanionSourceDirectory ??= Path.GetDirectoryName(entry.FullName);
+            ResumeResults.Save(_resumeStore, entry, resumeFilePath);
         }
     }
 }

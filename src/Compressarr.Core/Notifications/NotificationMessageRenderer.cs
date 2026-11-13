@@ -99,7 +99,8 @@ public static class NotificationMessageRenderer
         yield return ("{machine}", machineName ?? "");
         yield return ("{run_number}", report.RunNumber.ToString());
         yield return ("{files}", report.TotalFiles.ToString());
-        yield return ("{movie_count}", report.MovieCount.ToString());     // movie_count + tv_count = files
+        yield return ("{movie_count}", report.MovieCount.ToString());     // movie_count + video_count + tv_count = files
+        yield return ("{video_count}", report.VideoCount.ToString());
         yield return ("{tv_count}", report.TvCount.ToString());
         yield return ("{saved_gb}", savedGb.ToString("0.##"));
         yield return ("{saved_pct}", savedPct.ToString("0.##"));

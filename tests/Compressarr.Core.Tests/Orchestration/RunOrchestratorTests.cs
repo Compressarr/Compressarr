@@ -1570,4 +1570,121 @@ public class RunOrchestratorTests : IDisposable
         Assert.Empty(processRunner.ProcessedInOrder);
         Assert.Single(Directory.GetFiles(config.Lanes[0].Output, "*.mkv"));
     }
+
+    // ---- Track in History (3.1): what a lane's tracking lets reach History, the report and the notification ----
+
+    private sealed class FailsForRunner : IEncoderRunner
+    {
+        private readonly string _failFor;
+        public FailsForRunner(string failFor) => _failFor = failFor;
+        public Task<EncodeResult> RunAsync(EncodeRequest request, Action<EncodeProgress>? onProgress, CancellationToken cancellationToken)
+        {
+            var fails = Path.GetFileName(request.SourcePath).Contains(_failFor, StringComparison.OrdinalIgnoreCase);
+            if (!fails) File.WriteAllText(request.OutputPath, "fake encoded output");
+            Directory.CreateDirectory(Path.GetDirectoryName(request.DetailLogFile)!);
+            File.WriteAllText(request.DetailLogFile, "detail");
+            return Task.FromResult(new EncodeResult(Success: !fails, DetailLogFile: request.DetailLogFile));
+        }
+    }
+
+    private (CompressarrConfig Config, string ReportFolder) TwoLanes(LaneTracking secondLane, params string[] secondLaneFiles)
+    {
+        var inA = Path.Combine(_tempDir, "A_In"); var inB = Path.Combine(_tempDir, "B_In");
+        Directory.CreateDirectory(inA); Directory.CreateDirectory(inB);
+        Directory.CreateDirectory(Path.Combine(_tempDir, "A_Out")); Directory.CreateDirectory(Path.Combine(_tempDir, "B_Out"));
+        File.WriteAllText(Path.Combine(inA, "Tracked Movie (2020).mkv"), "video");
+        foreach (var name in secondLaneFiles) File.WriteAllText(Path.Combine(inB, name), "video");
+
+        var config = new CompressarrConfig { Processing = new ProcessingSettings { MoveFiles = false, ClearTitleMetadata = false } };
+        config.HandBrake.CliPath = Path.Combine(_tempDir, "HandBrakeCLI.exe");
+        config.HandBrake.PresetsPath = Path.Combine(_tempDir, "presets.json");
+        config.Logging.LogFilePath = Path.Combine(_tempDir, "Logs");
+        config.Report.ReportPath = Path.Combine(_tempDir, "Reports");
+        config.Lanes.Add(MakeLane("a", "Tracked Lane", inA, Path.Combine(_tempDir, "A_Out")));
+        var second = MakeLane("b", "Private Lane", inB, Path.Combine(_tempDir, "B_Out"));
+        second.Tracking = secondLane;
+        config.Lanes.Add(second);
+        return (config, config.Report.ReportPath);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_ALaneTrackedAsNone_IsProcessedButNeverRecorded()
+    {
+        var (config, reports) = TwoLanes(LaneTracking.None, "Private Clip (2021).mkv");
+        var history = new NoOpHistoryStore();
+        var (orchestrator, _) = BuildOrchestrator(config, new RecordingProcessRunner(), historyStore: history);
+
+        var result = await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(2, result!.TotalFiles);                       // both files were converted
+        Assert.Equal(1, result.TrackedFiles);                      // only one is on record
+        var record = Assert.Single(history.Appended);
+        Assert.Equal(1, record.FileCount);
+        var reportHtml = File.ReadAllText(Assert.Single(Directory.GetFiles(reports, "*.html")));
+        Assert.Contains("Tracked Movie (2020).mkv", reportHtml);
+        Assert.DoesNotContain("Private Clip", reportHtml);
+        Assert.DoesNotContain("Private Lane", reportHtml);          // the lane is not in the report at all
+        Assert.Single(result.Report.Lanes);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_APassWhoseOnlyFilesAreUntracked_LeavesNoRunNoReportAndNoNotification()
+    {
+        var (config, reports) = TwoLanes(LaneTracking.None, "Private Clip (2021).mkv");
+        File.Delete(Path.Combine(_tempDir, "A_In", "Tracked Movie (2020).mkv"));
+        var history = new NoOpHistoryStore();
+        var (orchestrator, _) = BuildOrchestrator(config, new RecordingProcessRunner(), historyStore: history);
+
+        var result = await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(1, result!.TotalFiles);
+        Assert.Equal(0, result.TrackedFiles);
+        Assert.Empty(history.Appended);                             // no run number is used up
+        Assert.True(!Directory.Exists(reports) || Directory.GetFiles(reports, "*.html").Length == 0);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_ALaneTrackedForErrorsOnly_RecordsTheFailedFile_AndLeavesTheCleanOneOut()
+    {
+        var (config, reports) = TwoLanes(LaneTracking.ErrorsOnly, "Fine Clip (2021).mkv", "Broken Clip (2022).mkv");
+        var history = new NoOpHistoryStore();
+        var (orchestrator, _) = BuildOrchestrator(config, new FailsForRunner("Broken"), historyStore: history);
+
+        var result = await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(3, result!.TotalFiles);
+        Assert.Equal(2, result.TrackedFiles);                       // the tracked lane's file, and the broken one
+        var record = Assert.Single(history.Appended);
+        Assert.Equal(1, record.ErrorCount);
+        var reportHtml = File.ReadAllText(Assert.Single(Directory.GetFiles(reports, "*.html")));
+        Assert.Contains("Broken Clip (2022).mkv", reportHtml);
+        Assert.DoesNotContain("Fine Clip", reportHtml);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_ALaneTrackedForErrorsOnly_WithNoFailure_AddsNothingToTheRun()
+    {
+        var (config, _) = TwoLanes(LaneTracking.ErrorsOnly, "Fine Clip (2021).mkv");
+        var history = new NoOpHistoryStore();
+        var (orchestrator, _) = BuildOrchestrator(config, new RecordingProcessRunner(), historyStore: history);
+
+        var result = await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(1, result!.TrackedFiles);
+        Assert.Equal(1, Assert.Single(history.Appended).FileCount);  // only the fully tracked lane's file
+    }
+
+    [Fact]
+    public void TrackedResults_FollowsTheLanesTracking()
+    {
+        ConversionResult R(bool ok, string? warning = null) => new()
+        {
+            LaneId = "l", FileName = "f", FullName = "f", ContentType = "Movie", Success = ok, PostProcessWarning = warning
+        };
+        var results = new[] { R(true), R(false), R(true, "a warning") };
+
+        Assert.Equal(3, RunOrchestrator.TrackedResults(new LaneConfig { Tracking = LaneTracking.Full }, results).Count);
+        Assert.Equal(2, RunOrchestrator.TrackedResults(new LaneConfig { Tracking = LaneTracking.ErrorsOnly }, results).Count);   // the failure and the warning
+        Assert.Empty(RunOrchestrator.TrackedResults(new LaneConfig { Tracking = LaneTracking.None }, results));
+    }
 }

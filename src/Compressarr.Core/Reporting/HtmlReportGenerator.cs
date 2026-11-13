@@ -17,6 +17,9 @@ public interface IHtmlReportGenerator
 
 public sealed class HtmlReportGenerator : IHtmlReportGenerator
 {
+    /// <summary>Where the web UI puts the Save and Share buttons when it serves a report for viewing. An HTML comment, so a saved or downloaded copy shows nothing there.</summary>
+    public const string ToolbarMarker = "<!--COMPRESSARR_REPORT_TOOLBAR-->";
+
     private const string LogoResourceName = "Compressarr.Core.Assets.CompressarrLogo.png";
     private const string FaviconResourceName = "Compressarr.Core.Assets.CompressarrFavicon.ico";
 
@@ -118,6 +121,7 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
     font-size: 1.25rem; line-height: 1; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.15);
   }}
   .close-btn:hover {{ background: #f0f0f0; color: #1c1c1c; }}
+  @media print {{ .close-btn {{ display: none; }} }}
 </style>
 </head>
 <body>
@@ -128,6 +132,7 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
      via a plain link (which is how every report link in this app opens one) depending on the
      browser - harmless either way, just not guaranteed universally. -->
 <button type=""button"" class=""close-btn"" title=""Close this tab"" onclick=""window.close()"">&times;</button>
+{ToolbarMarker}
 <div class=""header"">
   {logoTag}
   <h1>Compressarr Report</h1>
@@ -275,7 +280,9 @@ public sealed class HtmlReportGenerator : IHtmlReportGenerator
             // this content type - not just when it succeeded/failed.
             var arrStatus = string.IsNullOrEmpty(r.ArrStatus) ? "—" : r.ArrStatus;
 
-            sb.Append($"    <tr{rowClass}>");
+            // The file's row in the run archive, when the report was built from it (and the file has not been scrubbed): the report page adds its trash can to these rows.
+            var rowId = r.ArchiveRowId is { } archiveId && !r.IsScrubbed ? $" data-fid=\"{archiveId}\"" : "";
+            sb.Append($"    <tr{rowClass}{rowId}>");
             sb.Append($"<td>{WebUtility.HtmlEncode(r.FileName)}</td>");
             sb.Append($"<td>{WebUtility.HtmlEncode(r.ContentType)}</td>");
             var encoderTag = string.IsNullOrEmpty(r.EncoderLabel) ? "" : $" <span class=\"enc-tag\">{WebUtility.HtmlEncode(r.EncoderLabel)}</span>";

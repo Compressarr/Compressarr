@@ -35,8 +35,22 @@ public sealed class FileRunLogger : IRunLogger
         return _summaryLogFile;
     }
 
+    // Lines held back from the log file while a file of a not-fully-tracked lane is processed (see IRunLogger.BeginFileScope).
+    private List<(string Message, LogSeverity Severity)>? _held;
+    private readonly object _heldLock = new();
+
     public void Log(string message, LogSeverity severity = LogSeverity.Info)
     {
+        lock (_heldLock)
+        {
+            if (_held is not null)
+            {
+                _held.Add((message, severity));
+                LineWritten?.Invoke(message, severity);       // the live log always shows it
+                return;
+            }
+        }
+
         if (severity == LogSeverity.Error) HasLoggedError = true;
 
         if (_summaryLogFile is not null)
@@ -45,6 +59,31 @@ public sealed class FileRunLogger : IRunLogger
         }
 
         LineWritten?.Invoke(message, severity);
+    }
+
+    public void BeginFileScope()
+    {
+        lock (_heldLock) _held = new List<(string, LogSeverity)>();
+    }
+
+    public void EndFileScope(bool discard)
+    {
+        List<(string Message, LogSeverity Severity)>? held;
+        lock (_heldLock)
+        {
+            held = _held;
+            _held = null;
+        }
+        if (held is null) return;
+
+        // An error line is always worth keeping, even for a file that was otherwise meant to leave no trace.
+        if (discard && !held.Any(l => l.Severity == LogSeverity.Error)) return;
+
+        foreach (var (message, severity) in held)
+        {
+            if (severity == LogSeverity.Error) HasLoggedError = true;
+            if (_summaryLogFile is not null) File.AppendAllText(_summaryLogFile, message + Environment.NewLine);
+        }
     }
 
     public void LogProblem(string key, string message)

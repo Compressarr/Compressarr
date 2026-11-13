@@ -47,8 +47,11 @@ internal sealed class SourceCleanupCoordinator
     /// <param name="logDeferred">Whether to log "Source folder cleanup deferred..." when the rescan wasn't
     /// confirmed (the cleanup-retry loop logs its own, deduplicated, line instead).</param>
     public async Task<RescanConfirmation> ConfirmRescanAsync(
-        CompressarrConfig config, string fileName, bool isTv, string context, bool logDeferred, CancellationToken cancellationToken)
+        CompressarrConfig config, string fileName, bool isTv, string context, bool logDeferred, CancellationToken cancellationToken, bool skipArr = false)
     {
+        // A Videos lane is never handed to Sonarr or Radarr: there is nothing to unmonitor, and the source folder may be tidied up straight away.
+        if (skipArr) return new RescanConfirmation(true, null, ArrRescanOutcome.NotEnabled, null);
+
         try
         {
             var result = await _arrUnmonitor.UnmonitorAsync(config, fileName, isTv, cancellationToken);

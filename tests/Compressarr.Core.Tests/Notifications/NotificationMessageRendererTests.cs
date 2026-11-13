@@ -103,7 +103,7 @@ public class NotificationMessageRendererTests
     };
 
     [Fact]
-    public void Render_AVideo_IsCountedWithTheMovies_SoMoviesAndTvStillAddUpToTheFiles()
+    public void Render_AVideo_IsCountedOnItsOwn_SoMoviesVideosAndTvAddUpToTheFiles()
     {
         ConversionResult File_(string type) => new()
         {
@@ -117,9 +117,9 @@ public class NotificationMessageRendererTests
             Lanes = new[] { new LaneReportSection { LaneDisplayName = "Mixed", Results = new[] { File_("Movie"), File_("Video"), File_("TV Show") } } }
         };
 
-        var rendered = NotificationMessageRenderer.Render("{movie_count}+{tv_count}={files}", NotificationOutcome.Success, report, "");
+        var rendered = NotificationMessageRenderer.Render("{movie_count}+{video_count}+{tv_count}={files}", NotificationOutcome.Success, report, "");
 
-        Assert.Equal("2+1=3", rendered);
+        Assert.Equal("1+1+1=3", rendered);
     }
 
     [Fact]

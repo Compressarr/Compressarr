@@ -52,7 +52,25 @@ public interface IQueueService
     /// <summary>Clears a failed file's Error entry (only that status) so the next scan can pick it up
     /// fresh. Returns how many entries were removed.</summary>
     int RemoveError(string laneId, string fullName);
+
+    /// <summary>Changes the preset and/or the landing lane of many queued files in one step (3.1) - the same two per-file edits as
+    /// <see cref="OverridePreset"/> and <see cref="SetDestination"/>, applied across the submitted list under one lock. Only waiting (Pending) files are touched: the
+    /// file being encoded, a failed or held file, and a file that no longer exists keep what they have and are counted as skipped. Position never changes.
+    /// <paramref name="presetAllowed"/> says whether a lane's encoder can run a profile; a file whose lane cannot is skipped (and counted separately) rather than given a profile
+    /// it would fail with.</summary>
+    BulkQueueResult BulkEdit(CompressarrConfig config, IReadOnlyList<(string LaneId, string FullName)> items, BulkQueueEdit edit, Func<LaneConfig, string, bool>? presetAllowed = null);
+
+    /// <summary>Re-sorts the files already waiting by the configured priority rules (see <see cref="QueueRules.ApplyPriorityToWaiting"/>). Returns how many changed position.
+    /// New arrivals are placed by the rules on their own; this is the one-off "apply to what is already waiting".</summary>
+    int ApplyPriorityToWaiting(CompressarrConfig config);
 }
+
+/// <summary>What a bulk queue change does. Each half is applied only when its flag is set, so "change just the landing lane" leaves every file's preset alone.
+/// An empty/blank <see cref="Preset"/> clears the per-file override back to the lane's own profile; an empty <see cref="DestinationLaneId"/> clears the landing lane.</summary>
+public sealed record BulkQueueEdit(bool SetPreset, string? Preset, bool SetDestination, string? DestinationLaneId);
+
+/// <summary>How a bulk queue change went. <see cref="Result"/> is Ok unless the request itself was wrong (an unknown destination lane), in which case nothing changed.</summary>
+public sealed record BulkQueueResult(QueueEditResult Result, int Changed, int Skipped, int IncompatiblePreset);
 
 /// <summary>How long the queue display may reuse a lane's folder listing. Every status poll (the Monitor page every 1.5 s per open tab, Home Assistant, scripts) builds the list from a
 /// recursive scan of every lane's Input folder; on a share holding thousands of files that is real disk and network traffic competing with the encode. Zero = scan every time.</summary>
@@ -167,6 +185,52 @@ public sealed class QueueService : IQueueService
 
         return Edit(config, laneId, fullName, entry => entry.DestinationLaneId = wanted);
     }
+
+    public BulkQueueResult BulkEdit(CompressarrConfig config, IReadOnlyList<(string LaneId, string FullName)> items, BulkQueueEdit edit, Func<LaneConfig, string, bool>? presetAllowed = null)
+    {
+        var wantedDestination = string.IsNullOrWhiteSpace(edit.DestinationLaneId) ? null : edit.DestinationLaneId;
+        if (edit.SetDestination && wantedDestination is not null && config.Lanes.All(l => l.Id != wantedDestination))
+        {
+            return new BulkQueueResult(QueueEditResult.UnknownDestinationLane, 0, items.Count, 0);
+        }
+        var wantedPreset = string.IsNullOrWhiteSpace(edit.Preset) ? null : edit.Preset;
+
+        var counts = _resumeStore.Update(AppPaths.GetResumeFilePath(), resumeState =>
+        {
+            // As every single-file edit does: pin what is on screen first, so touching some files can never let an untouched one jump ahead.
+            QueueRules.LockInVisibleOrder(config, resumeState, _pathExpander, _scanner);
+
+            var changed = 0;
+            var skipped = 0;
+            var incompatible = 0;
+            var seen = new HashSet<(string, string)>();
+            foreach (var (laneId, fullName) in items)
+            {
+                if (!seen.Add((laneId, fullName.ToLowerInvariant()))) continue;   // the same file listed twice counts once
+
+                var lane = config.Lanes.FirstOrDefault(l => l.Id == laneId);
+                if (lane is null) { skipped++; continue; }
+                if (edit.SetPreset && wantedPreset is not null && presetAllowed is not null && !presetAllowed(lane, wantedPreset)) { incompatible++; continue; }
+
+                var entry = QueueRules.FindOrCreatePendingEntry(resumeState, lane.Id, fullName, _pathExpander.Expand(lane.Input));
+                if (entry is null) { skipped++; continue; }
+
+                if (edit.SetPreset) entry.PresetOverride = wantedPreset;
+                if (edit.SetDestination) entry.DestinationLaneId = wantedDestination == lane.Id ? null : wantedDestination;
+                changed++;
+            }
+            return (changed, skipped, incompatible);
+        });
+
+        return new BulkQueueResult(QueueEditResult.Ok, counts.changed, counts.skipped, counts.incompatible);
+    }
+
+    public int ApplyPriorityToWaiting(CompressarrConfig config) =>
+        _resumeStore.Update(AppPaths.GetResumeFilePath(), resumeState =>
+        {
+            QueueRules.LockInVisibleOrder(config, resumeState, _pathExpander, _scanner);   // pin what is on screen first, then sort it
+            return QueueRules.ApplyPriorityToWaiting(resumeState, new QueuePriorityRules(config.Priority.Rules));
+        });
 
     public int RemoveError(string laneId, string fullName) =>
         _resumeStore.Update(AppPaths.GetResumeFilePath(), resumeState => resumeState.RemoveAll(e =>

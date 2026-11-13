@@ -42,7 +42,7 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
     {
         "yyyy", "mm", "dd", "BegSize", "EndSize", "FileCount", "ProcessHours", "ProcessMinutes", "ProcessSeconds",
         "RunNumber", "ReportFileName", "ErrorCount", "WarningCount", "RedirectCount", "MovieCount", "TvCount",
-        "AvgFps", "HandBrakeCount", "FfmpegCount", "PassthroughCount", "LaneCounts", "PresetCounts"
+        "AvgFps", "HandBrakeCount", "FfmpegCount", "PassthroughCount", "LaneCounts", "PresetCounts", "VideoCount"
     };
 
     public void AppendRun(string legacyLogFolder, RunHistoryRecord record)
@@ -90,7 +90,8 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
             record.FfmpegCount?.ToString(CultureInfo.InvariantCulture) ?? "",
             record.PassthroughCount?.ToString(CultureInfo.InvariantCulture) ?? "",
             RunBreakdown.Encode(record.LaneCounts),
-            RunBreakdown.Encode(record.PresetCounts)
+            RunBreakdown.Encode(record.PresetCounts),
+            record.VideoCount?.ToString(CultureInfo.InvariantCulture) ?? ""
         };
         return string.Join(",", fields);
     }
@@ -151,7 +152,8 @@ public sealed class CsvRunHistoryStore : IRunHistoryStore
                 FfmpegCount: OptionalCount(parts, 18),
                 PassthroughCount: OptionalCount(parts, 19),
                 LaneCounts: parts.Length > 20 ? RunBreakdown.Decode(parts[20]) : null,
-                PresetCounts: parts.Length > 21 ? RunBreakdown.Decode(parts[21]) : null));
+                PresetCounts: parts.Length > 21 ? RunBreakdown.Decode(parts[21]) : null,
+                VideoCount: OptionalCount(parts, 22)));
             }
             catch (Exception ex) when (ex is FormatException or OverflowException)
             {

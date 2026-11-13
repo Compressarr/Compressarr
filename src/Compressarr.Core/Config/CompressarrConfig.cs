@@ -56,6 +56,18 @@ public sealed class CompressarrConfig
     public FileBotSettings FileBot { get; set; } = new();
     public UiStateSettings UiState { get; set; } = new();
     public ScheduleSettings Schedule { get; set; } = new();
+
+    /// <summary>Queue-priority rules (3.1): which shows go earlier or later in the queue when their files first arrive. Empty by default, which keeps the plain arrival order.</summary>
+    public Compressarr.Core.Queue.PrioritySettings Priority { get; set; } = new();
+
+    /// <summary>A copy of this configuration that differs only in its <see cref="Processing"/> block. Everything else (lanes, encoders, Arrs...) is shared with
+    /// the original, so it is a view for one lane's processing, never something to save. Use <see cref="LaneProcessing.ConfigFor"/>.</summary>
+    internal CompressarrConfig WithProcessing(ProcessingSettings processing)
+    {
+        var copy = (CompressarrConfig)MemberwiseClone();
+        copy.Processing = processing;
+        return copy;
+    }
 }
 
 /// <summary>Small, purely client-driven UI state that happens to need server-side persistence
@@ -181,6 +193,38 @@ public sealed class LaneConfig
     /// reported (ERROR 114) rather than re-encoded and replaced. It never covers a Dolby Vision profile 5 file, which would show
     /// wrong colours. ffmpeg lanes have the equivalent setting on the profile.</summary>
     public bool AllowHdrLoss { get; set; }
+
+    /// <summary>What kind of lane this is (3.1). Standard is a lane for movies and shows, as always. Videos is for home videos and other clips that are not
+    /// movies or shows: every file in it is a "video", filed straight into the lane's destination path with no per-file folder, never sent to FileBot, Sonarr/Radarr
+    /// or a poster lookup. A build older than 3.1 ignores the property and treats the lane as a standard one.</summary>
+    public LaneKind Kind { get; set; } = LaneKind.Standard;
+
+    /// <summary>How much of this lane's work is kept in History, reports and the log (3.1). Full is everything, as always.</summary>
+    public LaneTracking Tracking { get; set; } = LaneTracking.Full;
+
+    /// <summary>This lane's own file-handling settings (3.1). Null = the lane follows Settings &gt; Processing, which is what every lane had before 3.1.
+    /// When set it is the lane's complete set: later changes on the Settings page do not reach it. Read it only through <see cref="LaneProcessing"/>.
+    /// A build older than 3.1 ignores the property and uses the global settings for the lane.</summary>
+    public ProcessingSettings? Processing { get; set; }
+}
+
+/// <summary>The kinds of lane (3.1).</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+public enum LaneKind
+{
+    Standard,
+    Videos
+}
+
+/// <summary>How much of a lane's work is tracked (3.1). <see cref="Full"/> is everything. <see cref="ErrorsOnly"/> records only files that failed or finished with a
+/// warning: successes leave no row in History or the report, no savings or counts, no notification and no file name in the log. <see cref="None"/> records nothing at
+/// all: no run, no stats, no report, no notification, no file names in the log. A file that fails still shows in the Monitor queue as an error either way.</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+public enum LaneTracking
+{
+    Full,
+    ErrorsOnly,
+    None
 }
 
 /// <summary>The encoders a lane can use.</summary>

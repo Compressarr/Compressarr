@@ -7,7 +7,7 @@ public sealed partial class SqliteRunHistoryStore : IRunQueries
 {
     private const string RunColumns = """
         id, run_number, ended_date, ended_at, seconds, files, before_gb, after_gb, errors, warnings, redirects, movies, tvs, avg_fps,
-        hb_files, ff_files, pass_files, counted, has_report
+        hb_files, ff_files, pass_files, counted, has_report, videos
         """;
 
     private static string Day(DateTime value) => value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -127,7 +127,7 @@ public sealed partial class SqliteRunHistoryStore : IRunQueries
                 SELECT COALESCE(SUM(runs), 0), COALESCE(SUM(files), 0), COALESCE(SUM(before_gb), 0), COALESCE(SUM(after_gb), 0), COALESCE(SUM(seconds), 0),
                        COALESCE(SUM(movies), 0), COALESCE(SUM(tvs), 0), COALESCE(SUM(unknown_files), 0), COALESCE(SUM(errors), 0), COALESCE(SUM(warnings), 0),
                        COALESCE(SUM(redirects), 0), COALESCE(SUM(hb_files), 0), COALESCE(SUM(ff_files), 0), COALESCE(SUM(pass_files), 0),
-                       COALESCE(SUM(fps_weighted), 0), COALESCE(SUM(fps_seconds), 0)
+                       COALESCE(SUM(fps_weighted), 0), COALESCE(SUM(fps_seconds), 0), COALESCE(SUM(videos), 0)
                 FROM daily_totals WHERE {window};
                 """;
             Bind(command);
@@ -139,7 +139,8 @@ public sealed partial class SqliteRunHistoryStore : IRunQueries
                 Runs = reader.GetInt32(0), Files = reader.GetInt32(1), BeforeGb = Math.Round(reader.GetDouble(2), 3), AfterGb = Math.Round(reader.GetDouble(3), 3),
                 Seconds = reader.GetInt64(4), Movies = reader.GetInt32(5), Tvs = reader.GetInt32(6), UnknownSplit = reader.GetInt32(7), Errors = reader.GetInt32(8),
                 Warnings = reader.GetInt32(9), Redirects = reader.GetInt32(10), HandBrakeFiles = reader.GetInt32(11), FfmpegFiles = reader.GetInt32(12),
-                PassthroughFiles = reader.GetInt32(13), AvgFps = fpsSeconds > 0 ? Math.Round(reader.GetDouble(14) / fpsSeconds, 1) : null
+                PassthroughFiles = reader.GetInt32(13), AvgFps = fpsSeconds > 0 ? Math.Round(reader.GetDouble(14) / fpsSeconds, 1) : null,
+                Videos = reader.GetInt32(16)
             };
         }
 
@@ -166,6 +167,6 @@ public sealed partial class SqliteRunHistoryStore : IRunQueries
             Id: reader.GetInt64(0), Number: reader.GetInt32(1), EndedAt: endedAt, DurationSeconds: reader.GetInt32(4), Files: reader.GetInt32(5),
             BeforeGb: Math.Round(reader.GetDouble(6), 3), AfterGb: Math.Round(reader.GetDouble(7), 3), Errors: reader.GetInt32(8), Warnings: reader.GetInt32(9),
             Redirects: reader.GetInt32(10), Movies: Int(11), Tvs: Int(12), AvgFps: reader.IsDBNull(13) ? null : Math.Round(reader.GetDouble(13), 1),
-            HandBrakeFiles: Int(14), FfmpegFiles: Int(15), PassthroughFiles: Int(16), Counted: reader.GetInt32(17) != 0, HasReport: reader.GetInt32(18) != 0);
+            HandBrakeFiles: Int(14), FfmpegFiles: Int(15), PassthroughFiles: Int(16), Counted: reader.GetInt32(17) != 0, HasReport: reader.GetInt32(18) != 0, Videos: reader.GetInt32(19));
     }
 }

@@ -39,7 +39,8 @@ public static class HistoryEndpoints
         // tv|null, reportFile|null, endMinute|null]. A null movies/tv means the run's split is unknown. reportFile is only filled for the
         // most recent runs (the ones the page can link to) and only when the report still exists. endMinute is the minute of the day the
         // run ended (see RunTimes.EndMinuteOfDay), for the Today chart's three-hour blocks. Then avgFps|null, handBrakeFiles|null, ffmpegFiles|null,
-        // passedThroughFiles|null, lanes|null and profiles|null (each [[name, files], ...]); null means the run predates them. The same "every file failed, nothing produced" rows the
+        // passedThroughFiles|null, lanes|null and profiles|null (each [[name, files], ...]); null means the run predates them. Last, videos (a Videos lane's files,
+        // counted on their own since 3.1; 0 for an older run, which counted them with the movies). The same "every file failed, nothing produced" rows the
         // period totals skip are left out here too, so the cards and the table always agree. today is the server's date, which the
         // period windows (Today, Last 7 days...) are measured from - the same windows /api/history uses.
         app.MapGet("/api/history/runs", (
@@ -68,7 +69,8 @@ public static class HistoryEndpoints
                     : r.HasReport ? r.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)
                     : !string.IsNullOrEmpty(r.ReportFileName) && File.Exists(Path.Combine(reportPath, r.ReportFileName)) ? r.ReportFileName : null,
                 RunTimes.EndMinuteOfDay(r),
-                r.AvgFps, r.HandBrakeCount, r.FfmpegCount, r.PassthroughCount, Pairs(r.LaneCounts), Pairs(r.PresetCounts)
+                r.AvgFps, r.HandBrakeCount, r.FfmpegCount, r.PassthroughCount, Pairs(r.LaneCounts), Pairs(r.PresetCounts),
+                r.VideoCount ?? 0
             }).ToList();
 
             var now = DateTime.Now;
@@ -221,10 +223,28 @@ public static class HistoryEndpoints
         // A report. A number is a run's id in the run archive: the report is built from its rows now (or, for a run imported from before 3.0, the
         // html it was saved with is served as it was). Anything else is the name of a saved copy in the report folder, as before. ?download=1
         // hands the same page over as a file to keep or send: it is self-contained (styles and logo inline).
-        app.MapGet("/api/reports/{key}", (string key, string? download, IConfigStore configStore, IPathExpander pathExpander, IRunArchive archive, IHtmlReportGenerator generator) =>
+        // The trash can on a report's file row (3.1): scrubs that file from History - its name, path and messages become "Removed" - while every number stays. The HandBrake detail
+        // log it pointed to is deleted too (best effort, only inside the log folder). Saved report copies, log files and notifications already sent are not touched.
+        app.MapPost("/api/reports/{runId:long}/files/{fileId:long}/scrub", (long runId, long fileId, IConfigStore configStore, IPathExpander pathExpander, IRunArchive archive) =>
+        {
+            var detailLog = archive.ScrubFile(runId, fileId);
+            if (detailLog is null) return Results.NotFound();
+            if (detailLog.Length > 0)
+            {
+                try
+                {
+                    var logFolder = pathExpander.Expand(configStore.Load(AppPaths.GetConfigFilePath()).Logging.LogFilePath);
+                    if (Compressarr.Core.Routing.PathContainment.IsStrictlyInside(detailLog, logFolder) && File.Exists(detailLog)) File.Delete(detailLog);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { /* the row is scrubbed either way */ }
+            }
+            return Results.Json(new { scrubbed = true });
+        });
+
+        app.MapGet("/api/reports/{key}", (string key, string? download, string? redact, IConfigStore configStore, IPathExpander pathExpander, IRunArchive archive, IHtmlReportGenerator generator) =>
         {
             if (long.TryParse(key, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var runId))
-                return RunReport(runId, download is "1" or "true", archive, generator) ?? Results.NotFound();
+                return RunReport(runId, download is "1" or "true", archive, generator, redact is "1" or "true", withToolbar: true) ?? Results.NotFound();
 
             var config = configStore.Load(AppPaths.GetConfigFilePath());
             var reportPath = pathExpander.Expand(config.Report.ReportPath);
@@ -237,13 +257,18 @@ public static class HistoryEndpoints
 
     /// <summary>A run's report page (built from its rows, or the html an old run was saved with), or null when the run has none. <paramref name="download"/> hands it over as a file.
     /// Shared by the web UI's <c>/api/reports/{id}</c> and the Automation API's <c>/api/v1/reports/{id}</c>.</summary>
-    internal static IResult? RunReport(long runId, bool download, IRunArchive archive, IHtmlReportGenerator generator)
+    internal static IResult? RunReport(long runId, bool download, IRunArchive archive, IHtmlReportGenerator generator, bool redact = false, bool withToolbar = false)
     {
         var legacy = archive.LoadLegacyReportHtml(runId);
         var model = legacy is null ? archive.LoadReport(runId) : null;
         if (legacy is null && model is null) return null;
 
-        var bytes = legacy ?? System.Text.Encoding.UTF8.GetBytes(generator.Generate(model!));
+        // redact: the same report with every file name, path and message replaced (see ReportRedactor). A report that was saved as ready-made HTML (a run imported
+        // from before 3.0) cannot be redacted, so asking for that is refused rather than handing over names.
+        if (redact && model is null) return Results.BadRequest(new { message = "This report was saved by an older version and cannot be shared without file names." });
+        var bytes = legacy ?? System.Text.Encoding.UTF8.GetBytes(generator.Generate(redact ? ReportRedactor.Redact(model!) : model!));
+        // The buttons go on a page opened for viewing, never into a file handed over for keeping.
+        if (withToolbar && !download) bytes = ReportToolbar.AddTo(bytes);
         var name = $"Compressarr_Report_{runId}.html";
         return download
             ? Results.File(bytes, "text/html; charset=utf-8", model is null ? name : $"Compressarr_{model.GeneratedAt:yyyy-MM-dd_HH-mm-ss}_Report.html")

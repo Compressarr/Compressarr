@@ -48,6 +48,9 @@ public sealed record RunHistoryRecord(
     /// as for a run of only copies, which have no profile). Written as the last two columns.</summary>
     IReadOnlyDictionary<string, int>? LaneCounts = null,
     IReadOnlyDictionary<string, int>? PresetCounts = null,
+    /// <summary>How many of the counted files were videos (a Videos lane's files, 3.1) - counted on their own, so MovieCount + VideoCount + TvCount add up to FileCount when the split is
+    /// known. Null = not recorded (stored as 0): runs from before 3.1 counted a video with the movies. Written as the last column.</summary>
+    int? VideoCount = null,
     /// <summary>The run's id in the archive (the report's address) and whether its report can be opened. Filled in when read back from the database; 0 / false from the CSV store.</summary>
     long Id = 0,
     bool HasReport = false)

@@ -24,6 +24,9 @@ public sealed record ReorderQueueRequest(List<ReorderQueueItem> Items);
 public sealed record PresetOverrideRequest(string LaneId, string FullName, string? Preset);
 public sealed record DestinationRequest(string LaneId, string FullName, string? DestinationLaneId);
 
+/// <summary>Change the preset and/or the landing lane for every listed queue item at once (the Monitor page's "Change all" on the In Queue list).</summary>
+public sealed record BulkQueueEditRequest(List<ReorderQueueItem> Items, bool SetPreset, string? Preset, bool SetDestination, string? DestinationLaneId);
+
 public static class RunEndpoints
 {
     private static IResult ToResult(QueueEditResult result) =>
@@ -126,6 +129,21 @@ public static class RunEndpoints
                 : ToResult(result);
         });
 
+        // "Change all" on the In Queue list: preset and/or landing lane for every listed waiting file in one request. Files that cannot take the change
+        // (being encoded, failed, a profile their lane's encoder does not have) are left as they are and counted in the answer.
+        app.MapPost("/api/run/queue/bulk-edit", (BulkQueueEditRequest request, IConfigStore configStore, IQueueService queue, IEncoderResolver encoders) =>
+        {
+            if (!request.SetPreset && !request.SetDestination) return Results.BadRequest(new { message = "Nothing to change." });
+            var config = configStore.Load(AppPaths.GetConfigFilePath());
+            var result = queue.BulkEdit(config,
+                request.Items.Select(i => (i.LaneId, i.FullName)).ToList(),
+                new BulkQueueEdit(request.SetPreset, request.Preset, request.SetDestination, request.DestinationLaneId),
+                (lane, preset) => PassthroughPreset.Is(preset) || encoders.PresetsFor(lane.Engine).PresetExists(preset));
+            return result.Result == QueueEditResult.UnknownDestinationLane
+                ? Results.BadRequest(new { message = "That lane no longer exists." })
+                : Results.Json(new { changed = result.Changed, skipped = result.Skipped, incompatiblePreset = result.IncompatiblePreset });
+        });
+
         app.MapPost("/api/run/pause", (IActiveEncodeProcess activeProcess) =>
         {
             activeProcess.Pause();
@@ -192,9 +210,10 @@ public static class RunEndpoints
             // asked about it. Answered from memory - a title not looked up yet is queued in the background and shows up on a later poll.
             var posterSettings = config.Posters;
             var upNextShown = posterSettings.Enabled
-                ? upNext.Select(i => i with { PosterKey = posters.GetPosterId(posterSettings, i.FileName) }).ToList()
+                ? upNext.Select(i => i.IsVideosLane ? i : i with { PosterKey = posters.GetPosterId(posterSettings, i.FileName) }).ToList()   // a Videos lane's file names are never sent to TMDb
                 : upNext;
-            var currentPosterKey = posterSettings.Enabled && snapshot.IsRunning && snapshot.FileName is not null
+            var currentLane = config.Lanes.FirstOrDefault(l => l.DisplayName == snapshot.LaneDisplayName);
+            var currentPosterKey = posterSettings.Enabled && snapshot.IsRunning && snapshot.FileName is not null && !LaneKinds.IsVideos(currentLane)
                 ? posters.GetPosterId(posterSettings, snapshot.FileName)
                 : null;
 
@@ -220,7 +239,7 @@ public static class RunEndpoints
                 laneDisplayName = snapshot.LaneDisplayName,
                 engine = (config.Lanes.FirstOrDefault(l => l.DisplayName == snapshot.LaneDisplayName)?.Engine ?? EncoderEngine.HandBrake).ToString(),
                 fileName = snapshot.FileName,
-                kind = snapshot.FileName is null ? null : ContentClassifier.KindOf(snapshot.FileName),
+                kind = snapshot.FileName is null ? null : LaneKinds.KindOf(currentLane, snapshot.FileName),
                 presetName = snapshot.PresetName,
                 isPassthrough = PassthroughPreset.Is(snapshot.PresetName),
                 landsInLaneName,

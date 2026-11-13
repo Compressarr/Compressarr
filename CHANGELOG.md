@@ -9,6 +9,50 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
+## [3.1.0] - Unreleased
+
+> [!TIP]
+> **What's new in 3.1:** a **Videos lane** for home videos, a **Track in History** choice per lane, **processing settings per lane**, **priority rules** for the queue and a **Change all** button for it,
+> **Save and Share** on reports (with a copy that has no file names), a **trash can** that removes a file's name from History, and a **crash journal** so a power cut while a file is being filed no longer
+> loses its place. Nothing changes until you use them: a lane that follows the global settings, tracks everything and has no priority rule behaves exactly as in 3.0.
+
+### Added
+
+- **Videos lane.** Lanes page > **Add videos lane**. For home videos and other clips that are not movies or shows: every file in it is a "video", filed straight into the lane's destination path under its own
+  name (no per-file folder), and never sent to FileBot, Sonarr, Radarr or TMDb (no poster lookup). It has one profile and one destination, and starts with its own processing settings: the global ones, except that a
+  clip whose name is already taken in the destination is renamed (`Clip (2).mkv`), never overwritten. A file from another lane can land in a Videos lane's library with "Lands in" and is filed flat too.
+- **Videos are a true third stat.** History, the report, the notifications and the API count videos on their own: movies + videos + TV = files (a new `{video_count}` notification token, a `videos` figure in
+  the API's runs and stats, a Videos segment on the History cards and the period table, and a trailing `VideoCount` column in the CSV export). Runs recorded before 3.1 counted a video with the movies and keep doing so.
+  The History database gains the columns by itself on first start (schema version 2); installing 3.0 over it again cannot read them, as with every database change.
+- **Track in History (per lane).** Lanes page > Advanced (always shown on a Videos lane): **Full tracking** (as always), **Errors and warnings only** or **None**. With errors only, a file that converts cleanly leaves no row in
+  History or the report, no savings, no count, no notification and no file name in the log; a file that fails or finishes with a warning is recorded as usual. With None a lane records nothing: no run (a run number is not used up),
+  no report section, no notification. The live log on the Monitor page still shows everything; only the log *file* leaves the file names out (an error keeps its lines, so a failure can still be troubleshot), and a
+  successful encode's HandBrake detail log is never kept for such a lane. A failed file stays in the Monitor queue as an error until you remove it, and the queue still remembers a kept source (Maintain) so it is not converted twice.
+- **Processing settings per lane.** Lanes page > Advanced > *Processing for this lane*: untick **Use the global settings** and the lane gets its own copy of Settings > Processing (delete mode, move, collision, minimum size,
+  video types, title tag, companion extensions and unmatched action). The per-run file limit and "write output to the same folder as input" stay global. A lane with its own settings shows a **Custom processing** chip, the
+  Settings page names the lanes that ignore it, and duplicating a lane copies its settings. One resolver (`LaneProcessing`) decides, so the scan, the move, the clean-up and the Monitor queue agree.
+- **Queue priority.** Lanes page > *Queue priority*: rules that place a show higher or lower when its files first arrive. A rule matches when the show or movie title contains your text, or when the file or its folder
+  carries a TMDb id (`{tmdb-1396}`, `[tmdbid-1396]`; nothing is looked up online). New arrivals go to the end of their own level, so a show that arrives with 30 episodes and is set to *Lower* waits behind newer content
+  while its own episodes keep their order; a file you moved by hand stays where you put it and the file being encoded always finishes first. **Apply to waiting files** re-sorts what is already queued once. Each queue row has
+  a *Raise / Lower priority for this show* item in its menu (which makes the rule for you), a Raised / Lowered badge, and `/api/v1/queue` shows `priority` (`higher`, `lower`, `normal`).
+- **Change all (Monitor > In Queue).** One dialog changes the **profile** and/or where the finished files **land** for every waiting file, or only one lane's. Files being encoded, failed files and files the lane's encoder cannot
+  run the profile for keep what they have; nothing changes position.
+- **Report Save and Share.** A report opened in the browser has **Save** (the file) and **Share** (copy the link, share with an app, email a summary, **save a copy without file names** or view it that way: every file
+  name, path and message becomes "Removed" while counts, sizes, savings, codes and profiles stay). The buttons are not in a saved file and are hidden when printing.
+- **Trash can on a report's file row.** Removes that file from History: its name, path and any failure, warning or Sonarr/Radarr message become "Removed" and the HandBrake detail log it pointed to is deleted. Its sizes,
+  time and savings stay in every total, so no total moves and no run number is lost. A run whose problem files have all been removed drops out of the *unseen errors* list and the sidebar badges. Saved report copies, log
+  files and notifications already sent are not changed.
+- **Crash journal.** While a finished encode is being filed, Compressarr now records how far it got (the encode is waiting; or the video is in its library and the original, companions, Sonarr/Radarr and clean-up are
+  left). If it stops in the middle, the next pass finishes the job from that point instead of encoding again: a waiting encode is routed, a filed video gets its original dealt with the way the setting says (only if it is
+  still the file that was converted), its companions moved, the rescan confirmed and the folder tidied. This closes the 3.0 known limit about a crash between filing a result and recording it. (Not covered: with *Move
+  converted files* off the result already sits in Output and nothing further is journalled. A build older than 3.1 reads an interrupted entry as ordinary work to do.)
+- Catalog: **Compressarr SD-HD (No Cropping)** now has an ffmpeg version too, and the HD Quality profile's description no longer claims 7.1 channels (E-AC3 carries at most 5.1). Published separately in the preset catalog.
+
+### Changed
+
+- The built-in Compressarr SD-HD profile's description says 5.1 channels, not 7.1 (text only; the mixdown setting is unchanged).
+- A History CSV export has one more trailing column (`VideoCount`); the API's `/runs` and `/stats` carry `videos`, and `/queue` carries `priority`. All additive.
+
 ## [3.0.0] - 2026-11-01
 
 > [!TIP]

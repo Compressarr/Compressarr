@@ -7,7 +7,7 @@ namespace Compressarr.Core.Logging;
 /// totals kept next to the runs. See docs/design-sqlite-history.md.</summary>
 internal static class HistoryDatabase
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     /// <summary>Opens the file (creating it). Not pooled: a pooled connection keeps the file open, which would block replacing it on a restore
     /// and deleting it in a test; a local file opens in about a millisecond, and the archive is touched a few times per run.</summary>
@@ -57,7 +57,23 @@ internal static class HistoryDatabase
             Execute(connection, "PRAGMA user_version = 1;", transaction);
             transaction.Commit();
         }
+
+        if (version < 2)
+        {
+            using var transaction = connection.BeginTransaction();
+            Execute(connection, SchemaV2, transaction);
+            Execute(connection, "PRAGMA user_version = 2;", transaction);
+            transaction.Commit();
+        }
     }
+
+    /// <summary>3.1: videos are counted on their own (a Videos lane's files), and a file can be scrubbed (its name and messages replaced by "Removed" while its numbers stay).
+    /// Runs recorded before this have no videos: they were counted with the movies, as they always were.</summary>
+    private const string SchemaV2 = """
+        ALTER TABLE run_files ADD COLUMN scrubbed INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE runs ADD COLUMN videos INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE daily_totals ADD COLUMN videos INTEGER NOT NULL DEFAULT 0;
+        """;
 
     private const string SchemaV1 = """
         CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -223,12 +239,12 @@ internal static class HistoryDatabase
         {
             command.Transaction = transaction;
             command.CommandText = """
-                INSERT INTO daily_totals (day, runs, files, before_gb, after_gb, seconds, movies, tvs, unknown_files, errors, warnings, redirects,
+                INSERT INTO daily_totals (day, runs, files, before_gb, after_gb, seconds, movies, tvs, videos, unknown_files, errors, warnings, redirects,
                                           hb_files, ff_files, pass_files, fps_weighted, fps_seconds)
-                VALUES (@day, 1, @files, @before, @after, @seconds, @movies, @tvs, @unknown, @errors, @warnings, @redirects, @hb, @ff, @pass, @fpsw, @fpss)
+                VALUES (@day, 1, @files, @before, @after, @seconds, @movies, @tvs, @videos, @unknown, @errors, @warnings, @redirects, @hb, @ff, @pass, @fpsw, @fpss)
                 ON CONFLICT (day) DO UPDATE SET
                     runs = runs + 1, files = files + excluded.files, before_gb = before_gb + excluded.before_gb, after_gb = after_gb + excluded.after_gb,
-                    seconds = seconds + excluded.seconds, movies = movies + excluded.movies, tvs = tvs + excluded.tvs,
+                    seconds = seconds + excluded.seconds, movies = movies + excluded.movies, tvs = tvs + excluded.tvs, videos = videos + excluded.videos,
                     unknown_files = unknown_files + excluded.unknown_files, errors = errors + excluded.errors, warnings = warnings + excluded.warnings,
                     redirects = redirects + excluded.redirects, hb_files = hb_files + excluded.hb_files, ff_files = ff_files + excluded.ff_files,
                     pass_files = pass_files + excluded.pass_files, fps_weighted = fps_weighted + excluded.fps_weighted,
@@ -241,6 +257,7 @@ internal static class HistoryDatabase
             command.Parameters.AddWithValue("@seconds", seconds);
             command.Parameters.AddWithValue("@movies", run.MovieCount ?? 0);
             command.Parameters.AddWithValue("@tvs", run.TvCount ?? 0);
+            command.Parameters.AddWithValue("@videos", run.VideoCount ?? 0);
             command.Parameters.AddWithValue("@unknown", run.MovieCount is null ? run.FileCount : 0);
             command.Parameters.AddWithValue("@errors", run.ErrorCount);
             command.Parameters.AddWithValue("@warnings", run.WarningCount);

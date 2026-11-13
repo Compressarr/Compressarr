@@ -40,22 +40,24 @@ public interface IFileRouter
     /// (PlexTags.EditionOfSourceShowFolder): a TV episode is then filed in the edition's show folder. Ignored for movies and for a name that
     /// already carries an edition.
     ///
-    /// protection: see <see cref="SourceProtection"/>; null when the caller has no source that could be overwritten.</summary>
+    /// protection: see <see cref="SourceProtection"/>; null when the caller has no source that could be overwritten.
+    ///
+    /// flat: file straight into the movie base path under its own name, with no per-file folder (a Videos lane's library). Only for a non-TV file.</summary>
     string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles,
-        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null);
+        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null, bool flat = false);
 }
 
 /// <summary>Ported from Move-CompressarrMovieFile/Move-CompressarrTVFile/Move-CompressarrRoutedFile.</summary>
 public sealed class FileRouter : IFileRouter
 {
     public string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles,
-        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null)
+        DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null, bool flat = false)
     {
         if (!moveFiles) return null;
 
         return isTv
             ? MoveTvFile(sourcePath, desiredFileName, tvShowBasePath, collisionMode, showEdition, protection)
-            : MoveMovieFile(sourcePath, desiredFileName, movieBasePath, collisionMode, protection);
+            : MoveMovieFile(sourcePath, desiredFileName, movieBasePath, collisionMode, protection, flat);
     }
 
     /// <summary>Like <see cref="ResolveCollision"/>, with the source protected: when the destination is the source itself, Overwrite does not simply replace it (see
@@ -140,11 +142,20 @@ public sealed class FileRouter : IFileRouter
         return destPath;
     }
 
-    public string? MoveMovieFile(string sourcePath, string desiredFileName, string outputBase, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, SourceProtection? protection = null)
+    public string? MoveMovieFile(string sourcePath, string desiredFileName, string outputBase, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, SourceProtection? protection = null, bool flat = false)
     {
         if (string.IsNullOrWhiteSpace(outputBase))
         {
             throw new InvalidOperationException($"Compressarr: cannot move '{sourcePath}' - Movie base path is not configured for this lane.");
+        }
+
+        // A Videos lane's library is one flat folder: the file goes straight into it under its own name.
+        if (flat)
+        {
+            RequireBaseFolder(outputBase, "Videos");
+            var flatDest = ResolveDestination(Path.Combine(outputBase, desiredFileName), collisionMode, protection);
+            File.Move(sourcePath, flatDest, overwrite: true);
+            return flatDest;
         }
 
         var movieFolderName = ContentClassifier.GetMovieFolderName(desiredFileName);

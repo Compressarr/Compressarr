@@ -129,7 +129,7 @@ public sealed class SqliteResumeStateStore : IResumeStateStore, IQueueAvailabili
     {
         if (!Ready(path)) { RefuseWhileUnavailable(); _json.DeleteIfComplete(state, path); return; }
 
-        var hasOutstanding = state.Any(e => e.Status is ResumeStatus.Pending or ResumeStatus.Error or ResumeStatus.MoveFailed or ResumeStatus.CompanionMoveFailed or ResumeStatus.CleanupPending);
+        var hasOutstanding = state.Any(e => e.Status is ResumeStatus.Pending or ResumeStatus.Error or ResumeStatus.MoveFailed or ResumeStatus.CompanionMoveFailed or ResumeStatus.CleanupPending or ResumeStatus.FinishPending);
         if (hasOutstanding) return;
 
         // Nothing left to do - but a converted file whose source was kept must stay remembered, or it is converted again.

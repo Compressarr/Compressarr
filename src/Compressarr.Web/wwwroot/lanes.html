@@ -23,9 +23,27 @@
       <button id="saveAllLanesBtn" class="primary" title="Save all lanes"><svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>Save all</button>
       <button id="clearChangesBtn" title="Discard unsaved changes and reload the saved lanes"><svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>Clear changes</button>
       <span class="tb-sep"></span>
+      <button id="addVideosLaneBtn" title="Add a lane for home videos and other clips that are not movies or shows: no TV, no per-file folders, nothing sent to FileBot, Sonarr, Radarr or TMDb."><svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg><span class="btn-label">Add videos lane</span></button>
       <button id="addLaneBtn" title="Add a new lane"><svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>Add lane</button>
     </div>
     <div id="lanes"></div>
+
+    <div class="card" id="priorityCard" style="margin-top: 18px">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+        <h2>Queue priority</h2>
+      </div>
+      <div class="card-body">
+        <p class="enc-note" style="margin-top:0">When a file first arrives, a rule places it ahead of (Higher) or behind (Lower) the files that are waiting. Files of the same level keep their arrival order, a file you move by hand stays where you put it, and the file being encoded always finishes first. A rule matches when the show or movie title contains the text, or when the file or its folder carries that TMDb id, for example <code>{tmdb-1396}</code>. The first matching rule wins.</p>
+        <div id="prioRules"></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; align-items:center">
+          <button type="button" id="prioAdd">Add rule</button>
+          <button type="button" id="prioSave" class="primary">Save rules</button>
+          <button type="button" id="prioApply" title="Re-sort the files that are waiting right now by these rules (new arrivals are always placed by them).">Apply to waiting files</button>
+          <span class="enc-note" id="prioStatus" style="margin:0"></span>
+        </div>
+      </div>
+    </div>
   </main>
 
   <template id="lane-template">
@@ -36,6 +54,9 @@
           <span class="knob"></span>
         </label>
         <input type="text" class="f-displayName lane-name-input" placeholder="Lane name" />
+        <span class="lane-chip lane-chip-kind f-videosChip hidden" title="A Videos lane is for home videos and other clips: every file is a video, filed flat into the destination path, and never sent to FileBot, Sonarr, Radarr or TMDb.">Videos lane</span>
+        <span class="lane-chip f-trackChip hidden" title="This lane keeps less in History than the others. Turn on Advanced to change it."></span>
+        <span class="lane-chip f-customChip hidden" title="This lane handles its files with its own settings, not the global Settings &gt; Processing ones. Turn on Advanced to see or change them.">Custom processing</span>
         <div class="lane-head-spacer"></div>
         <div class="lane-head-actions">
           <button class="save-lane-btn icon-btn save">
@@ -83,11 +104,64 @@
         </div>
         <div class="lane-encoder-note f-hdrLossNote adv-off-only hidden">HDR files may lose their HDR on this lane.</div>
 
+
+        <div class="lane-tracking f-trackingBlock adv-only">
+          <div class="routing-heading">Track in History</div>
+          <div class="field-block">
+            <select class="f-tracking">
+              <option value="Full">Full tracking (everything, as always)</option>
+              <option value="ErrorsOnly">Errors and warnings only</option>
+              <option value="None">None (nothing recorded)</option>
+            </select>
+            <div class="lane-encoder-note f-trackingNote"></div>
+          </div>
+        </div>
+
+        <div class="lane-processing adv-only">
+          <div class="routing-heading">Processing for this lane</div>
+          <div class="check-row"><input type="checkbox" class="f-useGlobalProc" checked /><label>Use the global settings (Settings &gt; Processing)<span class="help-tag" tabindex="0" title="Ticked: this lane handles its files exactly as Settings &gt; Processing says. Unticked: the lane has its own complete set below, copied from the global settings at that moment; later changes on the Settings page do not reach it. The per-run file limit and Write output to same folder as input always stay global.">?<span class="help-tip">Ticked: this lane handles its files exactly as Settings &gt; Processing says. Unticked: the lane has its own complete set below, copied from the global settings at that moment; later changes on the Settings page do not reach it. The per-run file limit and Write output to same folder as input always stay global.</span></span></label></div>
+          <div class="lane-proc-fields hidden">
+            <div class="two-col">
+              <div class="field-block">
+                <label>Video extensions (comma-separated)<span class="help-tag" tabindex="0" title="File extensions this lane scans for, without dots, comma-separated (e.g. mkv, avi, mp4).">?<span class="help-tip">File extensions this lane scans for, without dots, comma-separated (e.g. mkv, avi, mp4).</span></span></label>
+                <input type="text" class="f-procVidTypes" />
+              </div>
+              <div class="field-block">
+                <label>Original file after convert<span class="help-tag" tabindex="0" title="What happens to this lane&#39;s source files once conversion succeeds: keep them, delete them, or send them to the Recycle Bin.">?<span class="help-tip">What happens to this lane&#39;s source files once conversion succeeds: keep them, delete them, or send them to the Recycle Bin.</span></span></label>
+                <select class="f-procDelete"><option value="Maintain">Maintain</option><option value="Delete">Delete</option><option value="Recycle">Recycle</option></select>
+              </div>
+              <div class="field-block">
+                <label>Minimum size<span class="help-tag" tabindex="0" title="Skip files smaller than this size on this lane. 0 means no minimum.">?<span class="help-tip">Skip files smaller than this size on this lane. 0 means no minimum.</span></span></label>
+                <div class="field-with-btn">
+                  <input type="number" class="f-procMinSize" min="0" step="any" />
+                  <select class="f-procMinUnit"><option value="KB">KB</option><option value="MB" selected>MB</option><option value="GB">GB</option></select>
+                </div>
+              </div>
+              <div class="field-block">
+                <label>Companion file extensions (comma-separated)<span class="help-tag" tabindex="0" title="File extensions moved alongside a video on this lane - subtitles, artwork, etc - without dots, comma-separated.">?<span class="help-tip">File extensions moved alongside a video on this lane - subtitles, artwork, etc - without dots, comma-separated.</span></span></label>
+                <input type="text" class="f-procCompanions" />
+              </div>
+              <div class="field-block">
+                <label>Unmatched companion file handling<span class="help-tag" tabindex="0" title="What happens, on this lane, to a file that shares a video&#39;s name but isn&#39;t on the companion list, and to anything left over once a folder&#39;s last video is gone.">?<span class="help-tip">What happens, on this lane, to a file that shares a video&#39;s name but isn&#39;t on the companion list, and to anything left over once a folder&#39;s last video is gone.</span></span></label>
+                <select class="f-procUnmatched"><option value="Maintain">Maintain</option><option value="Delete">Delete</option><option value="Recycle">Recycle</option></select>
+              </div>
+              <div class="field-block">
+                <label>On destination collision<span class="help-tag" tabindex="0" title="What happens on this lane if a converted file&#39;s destination already has a file at that exact path: Overwrite replaces it, Skip leaves the new file in Output, Rename appends (2), (3), etc.">?<span class="help-tip">What happens on this lane if a converted file&#39;s destination already has a file at that exact path: Overwrite replaces it, Skip leaves the new file in Output, Rename appends (2), (3), etc.</span></span></label>
+                <select class="f-procCollision"><option value="Overwrite">Overwrite</option><option value="Skip">Skip</option><option value="Rename">Rename</option></select>
+              </div>
+            </div>
+            <div class="field-block" style="margin-top: 2px">
+              <div class="check-row"><input type="checkbox" class="f-procMove" /><label>Move converted files into show/movie folders<span class="help-tag" tabindex="0" title="After conversion, move this lane&#39;s files into the lane&#39;s TV/Movie destination paths.">?<span class="help-tip">After conversion, move this lane&#39;s files into the lane&#39;s TV/Movie destination paths.</span></span></label></div>
+              <div class="check-row"><input type="checkbox" class="f-procClearTitle" /><label>Clear title metadata<span class="help-tag" tabindex="0" title="Strips the embedded title tag from this lane&#39;s converted files so a media server reads the filename instead.">?<span class="help-tip">Strips the embedded title tag from this lane&#39;s converted files so a media server reads the filename instead.</span></span></label></div>
+            </div>
+          </div>
+        </div>
+
         <div class="routing-heading">Content routing</div>
         <div class="routing-grid">
           <div class="routing-col">
             <div class="routing-col-head">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="7" y2="7"></line><line x1="2" y1="17" x2="7" y2="17"></line><line x1="17" y1="17" x2="22" y2="17"></line><line x1="17" y1="7" x2="22" y2="7"></line></svg>
+              <svg class="f-movieIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="7" y2="7"></line><line x1="2" y1="17" x2="7" y2="17"></line><line x1="17" y1="17" x2="22" y2="17"></line><line x1="17" y1="7" x2="22" y2="7"></line></svg>
               Movie
             </div>
             <div class="field-block">
@@ -102,7 +176,7 @@
               </div>
             </div>
           </div>
-          <div class="routing-col">
+          <div class="routing-col f-tvCol">
             <div class="routing-col-head">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect><polyline points="17 2 12 7 7 2"></polyline></svg>
               TV

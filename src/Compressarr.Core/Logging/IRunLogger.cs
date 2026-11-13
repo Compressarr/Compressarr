@@ -65,4 +65,13 @@ public interface IRunLogger
     void FileStart(string laneDisplayName, int index, int total, string fileName, double sizeGb, string contentType, string preset);
 
     void FileComplete(string fileName, double beginSizeGb, double endSizeGb, TimeSpan duration, bool success, string? detailLogFile);
+
+    /// <summary>Starts holding this file's log lines back from the log FILE (3.1): they still reach the live log as they happen, but are only written to the file when
+    /// <see cref="EndFileScope"/> says to keep them. Used for a lane whose history is not fully tracked: a file that converts cleanly must leave no file name behind in the log.
+    /// The default does nothing (a logger that does not support it simply writes everything, as before).</summary>
+    void BeginFileScope() { }
+
+    /// <summary>Ends the scope started by <see cref="BeginFileScope"/>. With <paramref name="discard"/> the held lines are dropped, unless one of them was an error (those are always
+    /// kept); otherwise they are written to the log file now.</summary>
+    void EndFileScope(bool discard) { }
 }

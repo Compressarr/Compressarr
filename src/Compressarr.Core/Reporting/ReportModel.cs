@@ -17,8 +17,9 @@ public sealed class LaneReportSection
 
 /// <summary>TotalTimeSeconds defaults to 0 (rather than being required) so existing call sites
 /// that only care about file counts/sizes don't all need updating.</summary>
-/// <summary>MovieCount + TvCount are the files of runs whose split is known; UnknownCount is the files of runs whose split is not (older runs).</summary>
-public sealed record HistoryRollup(int FileCount, double BeforeGb, double AfterGb, double TotalTimeSeconds = 0, int MovieCount = 0, int TvCount = 0, int UnknownCount = 0);
+/// <summary>MovieCount + VideoCount + TvCount are the files of runs whose split is known; UnknownCount is the files of runs whose split is not (older runs). A run from before 3.1 counted
+/// its videos with the movies.</summary>
+public sealed record HistoryRollup(int FileCount, double BeforeGb, double AfterGb, double TotalTimeSeconds = 0, int MovieCount = 0, int TvCount = 0, int UnknownCount = 0, int VideoCount = 0);
 
 public sealed class ReportModel
 {
@@ -54,8 +55,9 @@ public sealed class ReportModel
 
     public int TotalFiles => Lanes.Sum(l => l.Results.Count);
 
-    /// <summary>Every file in the run by kind, counted the same way as <see cref="TotalFiles"/>, so the two add up to it.</summary>
-    public int MovieCount => Lanes.Sum(l => l.Results.Count(r => r.ContentType is "Movie" or "Video"));   // a Video is counted with the movies
+    /// <summary>Every file in the run by kind, counted the same way as <see cref="TotalFiles"/>, so the three add up to it.</summary>
+    public int MovieCount => Lanes.Sum(l => l.Results.Count(r => r.ContentType == "Movie"));
+    public int VideoCount => Lanes.Sum(l => l.Results.Count(r => r.ContentType == "Video"));
     public int TvCount => Lanes.Sum(l => l.Results.Count(r => r.ContentType == "TV Show"));
     public int ErrorCount => Lanes.Sum(l => l.Results.Count(r => !r.Success));
 

@@ -126,7 +126,8 @@ public sealed partial class SqliteRunHistoryStore
         {
             command.CommandText = """
                 SELECT lane_ord, lane_id, name, content_type, preset, encoder_label, passthrough, before_gb, after_gb, started_at, ended_at, success, avg_fps,
-                       error_code, failure_reason, warning_text, warning_codes, arr_status, detail_log, disk_full, redirected_to_lane_id, redirected_to_lane, home_lane
+                       error_code, failure_reason, warning_text, warning_codes, arr_status, detail_log, disk_full, redirected_to_lane_id, redirected_to_lane, home_lane,
+                       id, scrubbed
                 FROM run_files WHERE run_id = @id ORDER BY id
                 """;
             command.Parameters.AddWithValue("@id", runId);
@@ -162,7 +163,9 @@ public sealed partial class SqliteRunHistoryStore
                     DiskFull = reader.GetInt32(19) != 0,
                     RedirectedToLaneId = Text(20),
                     RedirectedToLaneName = Text(21),
-                    HomeLaneName = Text(22)
+                    HomeLaneName = Text(22),
+                    ArchiveRowId = reader.GetInt64(23),
+                    IsScrubbed = reader.GetInt32(24) != 0
                 };
                 if (!filesBySection.TryGetValue(ord, out var list)) filesBySection[ord] = list = new List<ConversionResult>();
                 list.Add(result);
@@ -228,8 +231,46 @@ public sealed partial class SqliteRunHistoryStore
 
     public IReadOnlyList<ReportListEntry> ListReports(DateTime since) => QueryReports("", since, null, null);
 
+    // A run with problems whose problem files have all been scrubbed (3.1) is resolved: it drops out of the problem lists and the sidebar badges.
+    // (A run with no stored files, such as one imported from an old saved report, has nothing to scrub and keeps counting.)
+    private const string ResolvedByScrub = """
+        (EXISTS (SELECT 1 FROM run_files f WHERE f.run_id = runs.id AND (f.success = 0 OR f.warning_text IS NOT NULL))
+         AND NOT EXISTS (SELECT 1 FROM run_files f WHERE f.run_id = runs.id AND (f.success = 0 OR f.warning_text IS NOT NULL) AND f.scrubbed = 0))
+        """;
+
     public IReadOnlyList<ReportListEntry> ListProblemReports(int? newerThanRunNumber, DateTime since, int limit) =>
-        QueryReports("AND (errors > 0 OR warnings > 0)", since, newerThanRunNumber, limit);
+        QueryReports($"AND (errors > 0 OR warnings > 0) AND NOT {ResolvedByScrub}", since, newerThanRunNumber, limit);
+
+    public string? ScrubFile(long runId, long fileRowId)
+    {
+        if (!Ready(null)) return null;
+        using var connection = HistoryDatabase.Open(_databasePath());
+        using var transaction = connection.BeginTransaction();
+        string? detailLog;
+        using (var read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = "SELECT detail_log FROM run_files WHERE id = @file AND run_id = @run";
+            read.Parameters.AddWithValue("@file", fileRowId);
+            read.Parameters.AddWithValue("@run", runId);
+            var found = read.ExecuteScalar();
+            if (found is null) return null;                                   // no such file in that run
+            detailLog = found is DBNull ? "" : (string)found;
+        }
+
+        Run(connection, transaction, """
+            UPDATE run_files SET
+                name = 'Removed',
+                failure_reason = CASE WHEN failure_reason IS NULL THEN NULL ELSE 'Removed' END,
+                warning_text   = CASE WHEN warning_text   IS NULL THEN NULL ELSE 'Removed' END,
+                arr_status     = CASE WHEN arr_status     IS NULL THEN NULL ELSE 'Removed' END,
+                detail_log = NULL,
+                scrubbed = 1
+            WHERE id = @file AND run_id = @run
+            """, ("@file", fileRowId), ("@run", runId));
+        transaction.Commit();
+        return detailLog;
+    }
 
     private IReadOnlyList<ReportListEntry> QueryReports(string extraCondition, DateTime since, int? newerThanRunNumber, int? limit)
     {
@@ -271,8 +312,8 @@ public sealed partial class SqliteRunHistoryStore
         if (!Ready(null)) return (0, 0, 0);
         using var connection = HistoryDatabase.Open(_databasePath());
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT COALESCE(SUM(errors > 0), 0), COALESCE(SUM(warnings > 0), 0), COUNT(*) FROM runs
+        command.CommandText = $"""
+            SELECT COALESCE(SUM(errors > 0 AND NOT {ResolvedByScrub}), 0), COALESCE(SUM(warnings > 0 AND NOT {ResolvedByScrub}), 0), COUNT(*) FROM runs
             WHERE kind = 'run' AND has_report = 1 AND run_number > @viewed AND ended_date >= @since
             """;
         command.Parameters.AddWithValue("@viewed", viewedThroughRunNumber);

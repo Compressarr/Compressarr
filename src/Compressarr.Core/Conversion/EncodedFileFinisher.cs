@@ -25,7 +25,8 @@ internal sealed record FinishRequest(
     string DestFolder,
     string TvShowBasePath,
     string MovieBasePath,
-    string InputPath);
+    string InputPath,
+    Action<ResumeEntry>? Journal = null);
 
 /// <summary>What finishing a file produced, for the orchestrator to put into the file's result.</summary>
 internal sealed record FinishOutcome(
@@ -119,6 +120,15 @@ internal sealed class EncodedFileFinisher
         // stay independent for as long as this file's final disposition is still unresolved.
         var desiredFileName = Path.GetFileName(newFileName);
 
+        // The crash journal (3.1), stage 1: the encoded file is written and waiting under its staging name. Recorded BEFORE anything is moved, so a crash from here on is
+        // found on the next start as an encode that only needs filing, never as a job to encode again.
+        resumeEntry.Status = ResumeStatus.FinishPending;
+        resumeEntry.EncodedFilePath = tempFileName;
+        resumeEntry.EncodedFileDesiredName = desiredFileName;
+        resumeEntry.PendingCompanionSourceDirectory = file.DirectoryName;
+        resumeEntry.PendingCompanionVideoDestPath = null;
+        request.Journal?.Invoke(resumeEntry);
+
         // Resolves the SAME OnDestinationCollision policy real routing already gets before
         // resting the file in Output under its clean human-readable name - previously this
         // always overwrote unconditionally, regardless of what the user configured, so two
@@ -157,11 +167,22 @@ internal sealed class EncodedFileFinisher
             var libraries = LaneDestination.Resolve(config, _pathExpander, resumeEntry, tvShowBasePath, movieBasePath);
             // A TV file whose own name carries no edition still lands in the edition's show folder when its source show folder had the tag.
             var showEdition = isTv ? PlexTags.EditionOfSourceShowFolder(file.FullName, inputPath, ContentClassifier.GetEpisodeInfo(desiredFileName).ShowName) : null;
+            // A Videos lane's library (the lane the file lands in) is one flat folder.
+            var flat = LaneKinds.IsVideos(libraries.RedirectedTo ?? config.Lanes.FirstOrDefault(l => l.Id == resumeEntry.LaneId));
             routedDestPath = _fileRouter.RouteFile(tempFileName, desiredFileName, isTv, libraries.TvShowBasePath, libraries.MovieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision, showEdition,
-                new SourceProtection(file.FullName, config.Processing.DeleteAfterConvert, ResumeKeeping.SourceUnchangedSinceEncode(resumeEntry) && !sourceOutsideInput, _trash));
+                new SourceProtection(file.FullName, config.Processing.DeleteAfterConvert, ResumeKeeping.SourceUnchangedSinceEncode(resumeEntry) && !sourceOutsideInput, _trash), flat);
             // Only a file that really reached a library counts as redirected - one resting in Output
             // (MoveFiles off, a Skip) or stuck on a failed move landed nowhere yet.
-            if (routedDestPath is not null) redirectedTo = libraries.RedirectedTo;
+            if (routedDestPath is not null)
+            {
+                redirectedTo = libraries.RedirectedTo;
+                // Stage 2: the video is in its library. What is left is dealing with the source, the companions, Sonarr/Radarr and the folder cleanup - none of which
+                // needs the encoded file any more.
+                resumeEntry.EncodedFilePath = null;
+                resumeEntry.EncodedFileDesiredName = null;
+                resumeEntry.PendingCompanionVideoDestPath = routedDestPath;
+                request.Journal?.Invoke(resumeEntry);
+            }
             currentPath = routedDestPath is not null
                 ? routedDestPath
                 // MoveFiles is false - nothing further to route to, so unlike the moveFailed
@@ -317,7 +338,7 @@ internal sealed class EncodedFileFinisher
         var cleanupFailed = false;
         if (!moveFailed)
         {
-            var rescan = await _cleanup.ConfirmRescanAsync(config, file.Name, isTv, "", logDeferred: true, cancellationToken);
+            var rescan = await _cleanup.ConfirmRescanAsync(config, file.Name, isTv, "", logDeferred: true, cancellationToken, skipArr: LaneKinds.IsVideos(config.Lanes.FirstOrDefault(l => l.Id == resumeEntry.LaneId)));
             arrCleanupSafe = rescan.Safe;
             if (rescan.FailureMessage is not null)
             {
@@ -375,9 +396,17 @@ internal sealed class EncodedFileFinisher
         // empty source folder behind forever. CleanupPending tracks exactly that remaining
         // work, retried by its own loop in PrepareLaneAsync (whether the rescan wasn't
         // confirmed, or the cleanup call itself threw once it was - see cleanupFailed above).
+        // The journal's fields are only kept for an outcome that still needs them (below); everything else is finished with them.
+        if (!moveFailed)
+        {
+            resumeEntry.EncodedFilePath = null;
+            resumeEntry.EncodedFileDesiredName = null;
+        }
+
         if (moveFailed)
         {
             resumeEntry.Status = ResumeStatus.MoveFailed;
+            resumeEntry.PendingCompanionVideoDestPath = null;
             resumeEntry.EncodedFilePath = currentPath;
             resumeEntry.EncodedFileDesiredName = desiredFileName;
         }
@@ -395,6 +424,8 @@ internal sealed class EncodedFileFinisher
         }
         else
         {
+            resumeEntry.PendingCompanionSourceDirectory = null;
+            resumeEntry.PendingCompanionVideoDestPath = null;
             ResumeKeeping.MarkCompleted(resumeEntry, config.Processing.DeleteAfterConvert);
         }
 

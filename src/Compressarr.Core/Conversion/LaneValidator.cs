@@ -36,8 +36,13 @@ public static class LaneValidator
             issues.Add(new ValidationIssue("input", folderConflict.Describe()));
         }
 
+        if (lane.Processing is { } own && own.VidTypes.Count(t => !string.IsNullOrWhiteSpace(t)) == 0)
+        {
+            issues.Add(new ValidationIssue("processing", "This lane's own processing settings need at least one video file type."));
+        }
+
         var outputBase = pathExpander.Expand(lane.Output);
-        if (string.IsNullOrWhiteSpace(outputBase) && !config.Processing.OutSameAsIn)
+        if (string.IsNullOrWhiteSpace(outputBase) && !LaneProcessing.For(config, lane).OutSameAsIn)
         {
             issues.Add(new ValidationIssue("output", "Output folder is required, unless 'write output to same folder as input' is enabled in Settings."));
         }
@@ -45,13 +50,20 @@ public static class LaneValidator
         // Where finished files are moved to (only when Settings > Move converted files is on). Compressarr never creates a missing
         // library folder - the move fails instead - so a destination that is not there is flagged, the way a missing Input is.
         // This only marks the field on the Lanes page; a run is not stopped by it.
-        if (config.Processing.MoveFiles)
+        if (LaneProcessing.For(config, lane).MoveFiles)
         {
-            FlagMissingDestination(issues, "tvShowBasePath", "TV destination path", lane.TvShowBasePath, pathExpander);
-            FlagMissingDestination(issues, "movieBasePath", "Movie destination path", lane.MovieBasePath, pathExpander);
+            if (!LaneKinds.IsVideos(lane)) FlagMissingDestination(issues, "tvShowBasePath", "TV destination path", lane.TvShowBasePath, pathExpander);
+            FlagMissingDestination(issues, "movieBasePath", LaneKinds.IsVideos(lane) ? "Destination path" : "Movie destination path", lane.MovieBasePath, pathExpander);
         }
 
-        if (string.IsNullOrWhiteSpace(lane.TvPreset) && string.IsNullOrWhiteSpace(lane.MoviePreset))
+        if (LaneKinds.IsVideos(lane))
+        {
+            // One profile (stored as the movie profile) and one destination: nothing is a show.
+            if (string.IsNullOrWhiteSpace(lane.MoviePreset)) issues.Add(new ValidationIssue("moviePreset", "A Videos lane needs a profile."));
+            else if (!PassthroughPreset.Is(lane.MoviePreset) && !presets.PresetExists(lane.MoviePreset))
+                issues.Add(new ValidationIssue("moviePreset", $"Profile '{lane.MoviePreset}' was not found in Compressarr's profiles - files in this lane will be skipped."));
+        }
+        else if (string.IsNullOrWhiteSpace(lane.TvPreset) && string.IsNullOrWhiteSpace(lane.MoviePreset))
         {
             // Either field resolves this - both are flagged so the fix is obvious regardless of
             // which one the user ends up filling in.

@@ -12,13 +12,13 @@ namespace Compressarr.Core.Queue;
 /// name in different subfolders (e.g. two different shows' own "episode.mkv"). Code-review finding:
 /// matching on FileName alone let a skip/remove/preset-override/reorder request silently target the
 /// wrong one of two same-named files, or fail ambiguously.</summary>
-public sealed record UpNextItem(string LaneId, string LaneDisplayName, string FileName, string FullName, double SizeGb, string? Preset, bool IsResumed, bool IsError, bool IsSkipped, bool IsCustomPreset, bool IsFileBotUnmatched, string? DestinationLaneId = null, string? DestinationLaneName = null, bool DestinationMissing = false, EncoderEngine Engine = EncoderEngine.HandBrake, string? PosterKey = null)
+public sealed record UpNextItem(string LaneId, string LaneDisplayName, string FileName, string FullName, double SizeGb, string? Preset, bool IsResumed, bool IsError, bool IsSkipped, bool IsCustomPreset, bool IsFileBotUnmatched, string? DestinationLaneId = null, string? DestinationLaneName = null, bool DestinationMissing = false, EncoderEngine Engine = EncoderEngine.HandBrake, string? PosterKey = null, int Priority = 0, bool IsVideosLane = false)
 {
     /// <summary>True when this file's preset is Passthrough (it will be copied, not re-encoded); the Monitor page shows a badge.</summary>
     public bool IsPassthrough => PassthroughPreset.Is(Preset);
 
     /// <summary>"tv", "movie" or "video" (see ContentClassifier.KindOf): the Monitor page shows it as an icon. A "video" is handled like a movie (same preset choice).</summary>
-    public string Kind => ContentClassifier.KindOf(FileName);
+    public string Kind => IsVideosLane ? "video" : ContentClassifier.KindOf(FileName);
 }
 
 /// <summary>What the queue display needs to know about the run currently in progress: the full path
@@ -100,7 +100,7 @@ public static class QueueRules
     /// already on screen.</summary>
     public static void LockInVisibleOrder(CompressarrConfig config, List<ResumeEntry> resumeState, IPathExpander pathExpander, IVideoFileScanner scanner)
     {
-        var nextOrder = ResumeQueueOrder.NextOrder(resumeState);
+        var priority = new QueuePriorityRules(config.Priority.Rules);
 
         foreach (var lane in config.Lanes)
         {
@@ -114,7 +114,7 @@ public static class QueueRules
             List<FileInfo> scannedFiles;
             try
             {
-                scannedFiles = scanner.FindVideoFiles(inputPath, config.Processing.VidTypes, config.Processing.MinSizeBytes, config.Processing.Limit).ToList();
+                scannedFiles = scanner.FindVideoFiles(inputPath, LaneProcessing.For(config, lane).VidTypes, LaneProcessing.For(config, lane).MinSizeBytes, LaneProcessing.For(config, lane).Limit).ToList();
             }
             catch
             {
@@ -138,14 +138,16 @@ public static class QueueRules
             {
                 if (item.Entry is not null)
                 {
-                    item.Entry.Order = nextOrder++;
+                    ResumeQueueOrder.Place(resumeState, item.Entry, priority);
                 }
                 else
                 {
                     // CreatedByQueueEdit: this is bookkeeping for a brand-new file, not interrupted
                     // work - without it the Monitor page would label it "Resumed" whenever its lane
                     // already has other tracked entries.
-                    resumeState.Add(new ResumeEntry { LaneId = lane.Id, FullName = item.NewFullName!, Status = ResumeStatus.Pending, CreatedByQueueEdit = true, Order = nextOrder++ });
+                    var created = new ResumeEntry { LaneId = lane.Id, FullName = item.NewFullName!, Status = ResumeStatus.Pending, CreatedByQueueEdit = true };
+                    ResumeQueueOrder.Place(resumeState, created, priority);
+                    resumeState.Add(created);
                 }
             }
         }
@@ -182,6 +184,7 @@ public static class QueueRules
         out bool sawUntracked)
     {
         sawUntracked = false;
+        var priority = new QueuePriorityRules(config.Priority.Rules);
 
         var candidates = new List<(UpNextItem Item, int LaneOrderIndex, int? Order, int NaturalIndex)>();
         var errorItems = new List<UpNextItem>();
@@ -208,7 +211,7 @@ public static class QueueRules
             // untracked ("New") files and Pending entries that only exist because a skip/preset-
             // override/remove action touched them (FindOrCreatePendingEntry, ResumeEntry.
             // CreatedByQueueEdit) but were never actually dragged.
-            var scannedFiles = scanner.FindVideoFiles(inputPath, config.Processing.VidTypes, config.Processing.MinSizeBytes, config.Processing.Limit)
+            var scannedFiles = scanner.FindVideoFiles(inputPath, LaneProcessing.For(config, lane).VidTypes, LaneProcessing.For(config, lane).MinSizeBytes, LaneProcessing.For(config, lane).Limit)
                 .Where(f => !trackedPaths.Contains(f.FullName) || pendingByPath.ContainsKey(f.FullName))
                 .ToList();
             var naturalIndex = NaturalIndexMap(scannedFiles);
@@ -258,14 +261,14 @@ public static class QueueRules
                 var isResumed = entry is not null && !entry.CreatedByQueueEdit && laneIsResumed;
                 var isSkipped = entry?.Skipped ?? false;
                 var hasOverride = !string.IsNullOrWhiteSpace(entry?.PresetOverride);
-                var preset = hasOverride ? entry!.PresetOverride : (ContentClassifier.IsTvFile(file.Name) ? lane.TvPreset : lane.MoviePreset);
+                var preset = hasOverride ? entry!.PresetOverride : (LaneKinds.IsTv(lane, file.Name) ? lane.TvPreset : lane.MoviePreset);
                 var sizeGb = Math.Round(file.Length / (double)BytesPerGb, 3);
                 var isFileBotUnmatched = entry?.FileBotUnmatched ?? false;
                 // A "lands in another lane" assignment, shown as a marker on the row. An assignment to a
                 // lane that has since been deleted is flagged rather than hidden - the file will wait in
                 // Output until the user picks somewhere to land it.
                 var (destinationId, destinationName, destinationMissing) = DescribeDestination(config, lane, entry);
-                var item = new UpNextItem(lane.Id, lane.DisplayName, file.Name, file.FullName, sizeGb, preset, isResumed, IsError: false, isSkipped, hasOverride, isFileBotUnmatched, destinationId, destinationName, destinationMissing, lane.Engine);
+                var item = new UpNextItem(lane.Id, lane.DisplayName, file.Name, file.FullName, sizeGb, preset, isResumed, IsError: false, isSkipped, hasOverride, isFileBotUnmatched, destinationId, destinationName, destinationMissing, lane.Engine, Priority: priority.TierOf(file.FullName), IsVideosLane: LaneKinds.IsVideos(lane));
                 candidates.Add((item, laneOrderIndex, entry?.Order, naturalIndex[file.FullName]));
             }
 
@@ -279,9 +282,9 @@ public static class QueueRules
                 // status endpoint.
                 if (!fileInfo.Exists) continue;
 
-                var preset = ContentClassifier.IsTvFile(fileInfo.Name) ? lane.TvPreset : lane.MoviePreset;
+                var preset = LaneKinds.IsTv(lane, fileInfo.Name) ? lane.TvPreset : lane.MoviePreset;
                 var sizeGb = Math.Round(fileInfo.Length / (double)BytesPerGb, 3);
-                errorItems.Add(new UpNextItem(lane.Id, lane.DisplayName, fileInfo.Name, fileInfo.FullName, sizeGb, preset, IsResumed: false, IsError: true, IsSkipped: false, IsCustomPreset: false, IsFileBotUnmatched: false, Engine: lane.Engine));
+                errorItems.Add(new UpNextItem(lane.Id, lane.DisplayName, fileInfo.Name, fileInfo.FullName, sizeGb, preset, IsResumed: false, IsError: true, IsSkipped: false, IsCustomPreset: false, IsFileBotUnmatched: false, Engine: lane.Engine, IsVideosLane: LaneKinds.IsVideos(lane)));
             }
 
             laneOrderIndex++;
@@ -330,24 +333,26 @@ public static class QueueRules
     ///   re-encoded the same file from scratch on every poll). Re-entering the queue is a new
     ///   arrival, so it's restamped at the end instead of keeping its old low Order, which made a
     ///   re-added file jump above everything already waiting.</summary>
-    public static bool TrackScannedFiles(List<ResumeEntry> resumeState, string laneId, IEnumerable<FileInfo> scanned, ISet<string> fileBotUnmatched, bool laneHadPending)
+    public static bool TrackScannedFiles(List<ResumeEntry> resumeState, string laneId, IEnumerable<FileInfo> scanned, ISet<string> fileBotUnmatched, bool laneHadPending, QueuePriorityRules? priority = null)
     {
         var addedUntracked = false;
+        priority ??= QueuePriorityRules.None;
 
         foreach (var f in scanned)
         {
             var existing = resumeState.FirstOrDefault(e => e.LaneId == laneId && e.FullName == f.FullName);
             if (existing is null)
             {
-                resumeState.Add(new ResumeEntry
+                var created = new ResumeEntry
                 {
                     LaneId = laneId,
                     FullName = f.FullName,
                     Status = ResumeStatus.Pending,
                     FileBotUnmatched = fileBotUnmatched.Contains(f.FullName),
-                    CreatedByQueueEdit = laneHadPending,
-                    Order = ResumeQueueOrder.NextOrder(resumeState)
-                });
+                    CreatedByQueueEdit = laneHadPending
+                };
+                ResumeQueueOrder.Place(resumeState, created, priority);
+                resumeState.Add(created);
                 addedUntracked = true;
             }
             else if (ResumeKeeping.IsConvertedAndUnchanged(existing, f))
@@ -357,14 +362,33 @@ public static class QueueRules
             else if (!laneHadPending
                 && !existing.HeldAfterFailure
                 && existing.Status is not ResumeStatus.Pending
-                && existing.Status is not ResumeStatus.MoveFailed and not ResumeStatus.CompanionMoveFailed and not ResumeStatus.CleanupPending)
+                && existing.Status is not ResumeStatus.MoveFailed and not ResumeStatus.CompanionMoveFailed and not ResumeStatus.CleanupPending and not ResumeStatus.FinishPending)
             {
                 existing.Status = ResumeStatus.Pending;
-                existing.Order = ResumeQueueOrder.NextOrder(resumeState);
+                ResumeQueueOrder.Place(resumeState, existing, priority);
             }
         }
 
         return addedUntracked;
+    }
+
+    /// <summary>Re-sorts the waiting files by tier: raised shows first, then normal, then lowered, keeping the existing order within each tier (3.1). This is the explicit
+    /// "apply to files already waiting" action; the file being encoded is already running and is not affected. It uses only the positions the waiting files already hold, so
+    /// nothing outside them shifts. Returns how many files changed position.</summary>
+    public static int ApplyPriorityToWaiting(List<ResumeEntry> resumeState, QueuePriorityRules rules)
+    {
+        var waiting = resumeState.Where(e => e.Status == ResumeStatus.Pending && !e.Removed && e.Order.HasValue).OrderBy(e => e.Order!.Value).ToList();
+        var positions = waiting.Select(e => e.Order!.Value).ToList();
+        var sorted = waiting.OrderByDescending(e => rules.TierOf(e.FullName)).ToList();   // LINQ ordering is stable: each tier keeps its current order
+
+        var moved = 0;
+        for (var i = 0; i < sorted.Count; i++)
+        {
+            if (sorted[i].Order == positions[i]) continue;
+            sorted[i].Order = positions[i];
+            moved++;
+        }
+        return moved;
     }
 
     /// <summary>A lane's scan results as FullName -> position in the scan (case-insensitive). This is
@@ -531,7 +555,7 @@ public static class QueueRules
                 {
                     var inputPath = pathExpander.Expand(lane.Input);
                     naturalIndex = !string.IsNullOrWhiteSpace(inputPath) && Directory.Exists(inputPath)
-                        ? NaturalIndexMap(scanner.FindVideoFiles(inputPath, config.Processing.VidTypes, config.Processing.MinSizeBytes, config.Processing.Limit))
+                        ? NaturalIndexMap(scanner.FindVideoFiles(inputPath, LaneProcessing.For(config, lane).VidTypes, LaneProcessing.For(config, lane).MinSizeBytes, LaneProcessing.For(config, lane).Limit))
                         : new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 }
                 catch (Exception ex)
