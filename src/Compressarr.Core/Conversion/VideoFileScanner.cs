@@ -89,6 +89,10 @@ public sealed class VideoFileScanner : IVideoFileScanner
 
                 if (attrs.HasFlag(FileAttributes.ReparsePoint)) continue;
 
+                // An original set aside for a same-path replacement (see FileOutcomeHelpers.PublishOverSource) is a full-size video that has already been converted, waiting to be
+                // removed: it is never new work, and queueing it would encode the same film again.
+                if (Path.GetFileName(subDir).StartsWith(FileOutcomeHelpers.ParkedOriginalFolderPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+
                 var canonical = TryGetCanonicalPath(subDir);
                 if (canonical is not null && !visited.Add(canonical)) continue;
 

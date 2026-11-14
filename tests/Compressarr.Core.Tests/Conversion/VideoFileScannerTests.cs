@@ -27,6 +27,20 @@ public class VideoFileScannerTests : IDisposable
     }
 
     [Fact]
+    public void FindVideoFiles_SkipsAnOriginalParkedForAReplacement_ItIsNeverNewWork()
+    {
+        var film = Path.Combine(_tempDir, "Movie (2020)");
+        var parked = Path.Combine(film, FileOutcomeHelpers.ParkedOriginalFolderPrefix + "0123456789abcdef");
+        Directory.CreateDirectory(parked);
+        File.WriteAllText(Path.Combine(film, "Movie (2020).mkv"), "the published encode");
+        File.WriteAllText(Path.Combine(parked, "Movie (2020).mkv"), "the converted original, waiting to be removed");
+
+        var results = _scanner.FindVideoFiles(_tempDir, new[] { "mkv" }, minSizeBytes: 0, limit: 0);
+
+        Assert.Equal(Path.Combine(film, "Movie (2020).mkv"), Assert.Single(results).FullName);
+    }
+
+    [Fact]
     public void FindVideoFiles_LimitCapsHowManyFilesAreReturned_AndZeroMeansNoLimit()
     {
         // Settings' "Max files per run" - a folder that suddenly fills up shouldn't be picked up

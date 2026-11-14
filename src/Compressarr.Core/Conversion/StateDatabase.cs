@@ -8,7 +8,7 @@ namespace Compressarr.Core.Conversion;
 /// statements are shared with <see cref="HistoryDatabase"/>.</summary>
 internal static class StateDatabase
 {
-    public const int CurrentVersion = 8;
+    public const int CurrentVersion = 11;
     public const string FileName = "compressarr.state.db";
 
     /// <summary>The database that goes with a resume-file path: the app's own <c>compressarr.resume.json</c> maps to <c>compressarr.state.db</c> in the
@@ -112,6 +112,54 @@ internal static class StateDatabase
             HistoryDatabase.Execute(connection, "PRAGMA user_version = 8;", transaction);
             transaction.Commit();
         }
+
+        if (version < 10)
+        {
+            using var transaction = connection.BeginTransaction();
+            AddMissingColumns(connection, transaction, JournalColumns);
+            HistoryDatabase.Execute(connection, "PRAGMA user_version = 10;", transaction);
+            transaction.Commit();
+        }
+
+        if (version < 11)
+        {
+            using var transaction = connection.BeginTransaction();
+            AddMissingColumns(connection, transaction, ParkedColumns);
+            HistoryDatabase.Execute(connection, "PRAGMA user_version = 11;", transaction);
+            transaction.Commit();
+        }
+    }
+
+    // v11: the exact path an original was parked at while its replacement is published (see ResumeEntry.ParkedOriginalPath). A step of its own: version 10 was already carried by an earlier build.
+    private static readonly (string Name, string Definition)[] ParkedColumns =
+    {
+        ("parked_original_path", "TEXT NULL")
+    };
+
+    // v10: the crash journal records the encoded output's size and content digest before it is moved (so a restart can tell this job's output from a different file at the same destination),
+    // and whether it was being published in the Output folder rather than moved into a library. Adds only what is missing, because unreleased builds of this change reported version 9 with
+    // other layouts: the original 3.1.0-rc.1 (version 8, none of them), and a test build (version 9, a size and a time but no digest). Its old timestamp column is left alone and unused: a row with
+    // a size but no digest is simply an unverified record, so the original is kept.
+    private static readonly (string Name, string Definition)[] JournalColumns =
+    {
+        ("encoded_file_size", "INTEGER NULL"),
+        ("encoded_file_digest", "TEXT NULL"),
+        ("filed_in_output", "INTEGER NOT NULL DEFAULT 0")
+    };
+
+    private static void AddMissingColumns(SqliteConnection connection, SqliteTransaction transaction, (string Name, string Definition)[] columns)
+    {
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "PRAGMA table_info(queue);";
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) existing.Add(reader.GetString(1));
+        }
+
+        foreach (var (name, definition) in columns)
+            if (!existing.Contains(name)) HistoryDatabase.Execute(connection, $"ALTER TABLE queue ADD COLUMN {name} {definition};", transaction);
     }
 
     // v8: the source's creation time and a content fingerprint when its encode started, to tell a replaced source from the one that was converted even when size and time match.

@@ -73,7 +73,7 @@ public sealed partial class QueuePriorityRules
     {
         var fileName = Path.GetFileName(fullName);
         var title = Normalize(PosterNameParser.Parse(fileName)?.Title ?? Path.GetFileNameWithoutExtension(fileName));
-        var tags = TmdbTag().Matches(fullName).Select(m => int.Parse(m.Groups["id"].Value)).ToHashSet();
+        var tags = TmdbIdsIn(fullName).ToHashSet();
 
         foreach (var (match, tmdb, tier) in _rules)
         {
@@ -105,6 +105,13 @@ public sealed partial class QueuePriorityRules
         PosterNameParser.Parse(fileName)?.Title ?? Path.GetFileNameWithoutExtension(fileName);
 
     /// <summary>The first TMDb id tagged in a path, or null.</summary>
-    public static int? TmdbIdIn(string fullName) =>
-        TmdbTag().Match(fullName) is { Success: true } m ? int.Parse(m.Groups["id"].Value) : null;
+    public static int? TmdbIdIn(string fullName) => TmdbIdsIn(fullName).Cast<int?>().FirstOrDefault();
+
+    /// <summary>Every TMDb id tagged in a path. A number too large to be an id (a name with {tmdb-99999999999} in it) is not one: it is ignored, never an error - this runs for every queued
+    /// file, and one odd name must not stop the queue from being prepared or shown.</summary>
+    private static IEnumerable<int> TmdbIdsIn(string fullName)
+    {
+        foreach (Match m in TmdbTag().Matches(fullName))
+            if (int.TryParse(m.Groups["id"].Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var id)) yield return id;
+    }
 }

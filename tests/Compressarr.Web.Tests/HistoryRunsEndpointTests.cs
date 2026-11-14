@@ -487,4 +487,45 @@ public class HistoryRunsEndpointTests
         Assert.False(File.Exists(inside));                          // inside the log folder: deleted with the file's identity
         Assert.True(File.Exists(outside));                          // anywhere else: never touched
     }
+
+    // ---- the 3.1.0-rc.1 review: M3, M4 ----
+
+    [Fact]
+    public async Task TheViewWithoutFileNames_CarriesTheRedactionIntoItsSaveAndShareLinks()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var (id, _) = RecordARun(host);
+
+        var plain = await host.Client.GetStringAsync($"/api/reports/{id}");
+        var redacted = await host.Client.GetStringAsync($"/api/reports/{id}?redact=1");
+
+        // The buttons build their links from this flag: on the redacted view Save downloads the redacted file and Copy link, Share and Email point at the redacted view.
+        Assert.Contains("var redacted = false;", plain);
+        Assert.Contains("var redacted = true;", redacted);
+        Assert.DoesNotContain("/*REDACTED*/", redacted);
+        // The Save link itself is final in the served markup, so it is safe with scripting off: it already asks for the download without file names.
+        Assert.Contains("id=\"rtSave\" href=\"?download=1&amp;redact=1\"", redacted);
+        Assert.Contains("id=\"rtSave\" href=\"?download=1\"", plain);
+        Assert.DoesNotContain("{{REDACT}}", redacted);
+        Assert.Contains("var base = location.href.split('?')[0] + (redacted ? '?redact=1' : '')", redacted);
+        Assert.DoesNotContain("Fight Club", redacted);
+    }
+
+    [Fact]
+    public async Task ASavedReportFile_AskedForWithoutFileNames_IsRefused_NotHandedOverWithTheNames()
+    {
+        await using var host = await QueueHost.StartAsync(Lane1);
+        var folder = Path.Combine(AppPaths.GetAppDataDirectory(), "Reports");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "Compressarr_2026-10-24_07-09-21_Report.html"), "<html><body>Fight Club (1999).mkv</body></html>");
+
+        using var plain = await host.Client.GetAsync("/api/reports/Compressarr_2026-10-24_07-09-21_Report.html");
+        using var redacted = await host.Client.GetAsync("/api/reports/Compressarr_2026-10-24_07-09-21_Report.html?redact=1");
+        using var redactedDownload = await host.Client.GetAsync("/api/reports/Compressarr_2026-10-24_07-09-21_Report.html?download=1&redact=true");
+
+        Assert.Equal(System.Net.HttpStatusCode.OK, plain.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, redacted.StatusCode);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, redactedDownload.StatusCode);
+        Assert.DoesNotContain("Fight Club", await redacted.Content.ReadAsStringAsync());
+    }
 }

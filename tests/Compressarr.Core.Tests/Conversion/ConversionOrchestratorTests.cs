@@ -88,6 +88,36 @@ file sealed class CrashingTrashService : ITrashService
     public void DeleteFolder(string path, DeleteAfterConvertMode mode) { }
 }
 
+/// <summary>A queue store that cannot write the journal's "about to move to this destination" row (the database is full, locked, gone): everything else is written as usual.</summary>
+file sealed class FailOnDestinationJournalStore : IResumeStateStore
+{
+    private readonly JsonResumeStateStore _inner = new();
+    public List<ResumeEntry> Load(string path) => _inner.Load(path);
+    public void Save(List<ResumeEntry> state, string path) => _inner.Save(state, path);
+    public void DeleteIfComplete(List<ResumeEntry> state, string path) => _inner.DeleteIfComplete(state, path);
+    public T Update<T>(string path, Func<List<ResumeEntry>, T> mutate) => _inner.Update(path, list =>
+    {
+        var result = mutate(list);
+        if (list.Any(e => e.Status == ResumeStatus.FinishPending && !string.IsNullOrEmpty(e.PendingCompanionVideoDestPath))) throw new IOException("the queue database could not be written");
+        return result;
+    });
+}
+
+/// <summary>A trash service that cannot remove anything (the file is locked by a scanner, say).</summary>
+file sealed class FailingTrashService : ITrashService
+{
+    public void DeleteFile(string path, DeleteAfterConvertMode mode) => throw new IOException("the file is locked");
+    public void DeleteFolder(string path, DeleteAfterConvertMode mode) { }
+}
+
+/// <summary>What the production trash service does when it cannot remove a file (locked, no permission): it logs the failure and RETURNS NORMALLY, leaving the file where it was.</summary>
+file sealed class SwallowingTrashService : ITrashService
+{
+    public int Calls { get; private set; }
+    public void DeleteFile(string path, DeleteAfterConvertMode mode) => Calls++;
+    public void DeleteFolder(string path, DeleteAfterConvertMode mode) { }
+}
+
 file sealed class SimulatedCrashException : Exception
 {
     public SimulatedCrashException() : base("simulated crash") { }
@@ -99,12 +129,19 @@ file sealed class JournalPeekingRouter : IFileRouter
     private readonly string _resumeFile;
     private readonly FileRouter _inner = new();
     public List<(ResumeStatus Status, string? EncodedFilePath)> SeenWhileRouting { get; } = new();
+    /// <summary>What the queue file says right after the router told its caller the destination (the caller journals it there), before the file is moved.</summary>
+    public List<(ResumeStatus Status, string? EncodedFilePath, string? Destination)> SeenAfterDestinationJournalled { get; } = new();
     public JournalPeekingRouter(string resumeFile) => _resumeFile = resumeFile;
 
-    public string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null, bool flat = false)
+    public string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null, bool flat = false, Action<string>? beforeMove = null)
     {
         foreach (var e in new JsonResumeStateStore().Load(_resumeFile)) SeenWhileRouting.Add((e.Status, e.EncodedFilePath));
-        return _inner.RouteFile(sourcePath, desiredFileName, isTv, tvShowBasePath, movieBasePath, moveFiles, collisionMode, showEdition, protection, flat);
+        Action<string>? journalling = beforeMove is null ? null : destination =>
+        {
+            beforeMove(destination);
+            foreach (var e in new JsonResumeStateStore().Load(_resumeFile)) SeenAfterDestinationJournalled.Add((e.Status, e.EncodedFilePath, e.PendingCompanionVideoDestPath));
+        };
+        return _inner.RouteFile(sourcePath, desiredFileName, isTv, tvShowBasePath, movieBasePath, moveFiles, collisionMode, showEdition, protection, flat, journalling);
     }
 }
 
@@ -240,7 +277,7 @@ file sealed class ThrowingFileRouter : IFileRouter
 {
     private readonly Exception _exception;
     public ThrowingFileRouter(Exception exception) => _exception = exception;
-    public string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null, bool flat = false) => throw _exception;
+    public string? RouteFile(string sourcePath, string desiredFileName, bool isTv, string tvShowBasePath, string movieBasePath, bool moveFiles, DestinationCollisionMode collisionMode = DestinationCollisionMode.Overwrite, string? showEdition = null, SourceProtection? protection = null, bool flat = false, Action<string>? beforeMove = null) => throw _exception;
 }
 
 file sealed record TrashCall(string Path, DeleteAfterConvertMode Mode);
@@ -4769,5 +4806,880 @@ public class ConversionOrchestratorTests : IDisposable
         Assert.Equal(ResumeStatus.Completed, entry.Status);
         Assert.Null(entry.EncodedFilePath);
         Assert.Null(entry.PendingCompanionVideoDestPath);
+    }
+
+    // ---- the 3.1.0-rc.1 review: H7a, H7b, M1 ----
+
+    private static string FiledVideoPath(string library) => Path.Combine(library, "Alien (1979)", "Alien (1979).mkv");
+
+    private static string WriteFiledVideo(string library, string content)
+    {
+        var path = FiledVideoPath(library);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
+        return path;
+    }
+
+    [Fact]
+    public async Task H7a_ADestinationThatWasReplacedMeanwhile_IsNeverTakenForTheOutput_AndTheOriginalIsNotDeleted()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+
+        // The power goes out when the original is about to be deleted - after the video was filed.
+        await Assert.ThrowsAsync<SimulatedCrashException>(() => RunLaneAsync(JournalOrchestrator(config, encoder, new CrashingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000000", store.Load(resumeFile), resumeFile, CancellationToken.None));
+        var filed = FiledVideoPath(library);
+        Assert.NotNull(Assert.Single(store.Load(resumeFile)).EncodedFileSize);       // the output's identity was journalled
+
+        // While Compressarr was down something else took the place of the filed video (Sonarr's upgrade, a person).
+        File.WriteAllText(filed, "a completely different, longer file that is not this job's output");
+
+        var results = await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Empty(results);
+        Assert.True(File.Exists(source));                                              // the original, possibly the only copy, is still there
+        Assert.Equal("a completely different, longer file that is not this job's output", File.ReadAllText(filed));
+        Assert.Equal(1, encoder.CallCount);                                            // and it was not converted a second time
+        var entry = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, entry.Status);
+        Assert.NotNull(entry.KeptSourceSize);                                          // noted as kept, so a scan does not take it for new work
+    }
+
+    [Fact]
+    public async Task H7a_AJournalWithoutTheOutputNote_AsRc1WroteIt_KeepsTheOriginalUnderDelete()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        WriteFiledVideo(library, "the filed video");
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                                      PendingCompanionSourceDirectory = Path.GetDirectoryName(source), PendingCompanionVideoDestPath = FiledVideoPath(library) };
+        ResumeKeeping.NoteEncodeStart(entry);
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);                       // no EncodedFileSize / EncodedFileModifiedUtc
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.True(File.Exists(source));                                              // nothing can show the destination is this job's output
+        Assert.Equal(0, encoder.CallCount);
+    }
+
+    [Fact]
+    public async Task H7a_ADestinationThatIsTheRecordedOutput_LetsTheOriginalBeDealtWith()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        var filed = WriteFiledVideo(library, "the filed video");
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                                      PendingCompanionSourceDirectory = Path.GetDirectoryName(source), PendingCompanionVideoDestPath = filed };
+        ResumeKeeping.NoteEncodeStart(entry);
+        ResumeKeeping.NoteOutputIdentity(entry, filed);
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.False(File.Exists(source));                                             // verified output: the original goes the way the setting says
+        Assert.Equal("the filed video", File.ReadAllText(filed));
+        Assert.Equal(0, encoder.CallCount);
+    }
+
+    [Fact]
+    public async Task H7b_AMoveThatCompletedBeforeItsDestinationWasSaved_IsFoundFromTheJournalledDestination_NotForgotten()
+    {
+        // The stop came after the staged file was moved to the library but before anything more was saved: the journal holds the staged path AND the destination
+        // (written before the move), the staged file is gone. Before the fix the row held no destination, so it was dropped and the original was encoded again.
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Maintain);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        var filed = WriteFiledVideo(library, "the filed video");
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                                      EncodedFilePath = Path.Combine(lane.Output, "Alien (1979).compressarr-abc123.mkv"), EncodedFileDesiredName = "Alien (1979).mkv",
+                                      PendingCompanionSourceDirectory = Path.GetDirectoryName(source), PendingCompanionVideoDestPath = filed };
+        ResumeKeeping.NoteEncodeStart(entry);
+        ResumeKeeping.NoteOutputIdentity(entry, filed);
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        var results = await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Empty(results);
+        Assert.Equal(0, encoder.CallCount);                                            // the surviving source is not rediscovered and encoded
+        Assert.True(File.Exists(source));
+        Assert.Equal("the filed video", File.ReadAllText(filed));
+        var kept = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, kept.Status);
+        Assert.NotNull(kept.KeptSourceSize);
+    }
+
+    [Fact]
+    public async Task H7b_AStagedFileThatIsStillThere_WithAPartialCopyAtTheDestination_IsRoutedAgain_AndThePartialFileIsNotMistakenForIt()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Maintain);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        var staged = Path.Combine(lane.Output, "Alien (1979).compressarr-abc123.mkv");
+        File.WriteAllText(staged, "the complete encode that was waiting to be moved");
+        var partial = WriteFiledVideo(library, "the complete");                       // a copy across drives that stopped half way
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                                      EncodedFilePath = staged, EncodedFileDesiredName = "Alien (1979).mkv",
+                                      PendingCompanionSourceDirectory = Path.GetDirectoryName(source), PendingCompanionVideoDestPath = partial };
+        ResumeKeeping.NoteEncodeStart(entry);
+        ResumeKeeping.NoteOutputIdentity(entry, staged);
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Equal(0, encoder.CallCount);
+        Assert.False(File.Exists(staged));                                             // the encode was routed
+        var folder = Path.GetDirectoryName(partial)!;
+        Assert.Contains(Directory.GetFiles(folder), f => File.ReadAllText(f) == "the complete encode that was waiting to be moved");
+    }
+
+    [Fact]
+    public async Task H7b_AStagedFileLeftBesideACompleteCopy_IsJustRemoved_NoDuplicateIsFiled()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Maintain);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        var staged = Path.Combine(lane.Output, "Alien (1979).compressarr-abc123.mkv");
+        File.WriteAllText(staged, "the encode");
+        var filed = WriteFiledVideo(library, "the encode");
+        File.SetLastWriteTimeUtc(filed, File.GetLastWriteTimeUtc(staged));            // a copy keeps the time
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                                      EncodedFilePath = staged, EncodedFileDesiredName = "Alien (1979).mkv",
+                                      PendingCompanionSourceDirectory = Path.GetDirectoryName(source), PendingCompanionVideoDestPath = filed };
+        ResumeKeeping.NoteEncodeStart(entry);
+        ResumeKeeping.NoteOutputIdentity(entry, staged);
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.False(File.Exists(staged));
+        Assert.Single(Directory.GetFiles(Path.GetDirectoryName(filed)!));              // still the one filed copy
+        Assert.Equal(0, encoder.CallCount);
+    }
+
+    [Fact]
+    public async Task H7b_TheRetriedMove_JournalsItsDestinationBeforeMoving_AndAnUnfinishedRetryGoesBackToMoveFailed()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Maintain);
+        var store = new JsonResumeStateStore();
+        var staged = Path.Combine(lane.Output, "Alien (1979).compressarr-abc123.mkv");
+        File.WriteAllText(staged, "the encode");
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = source, Status = ResumeStatus.MoveFailed, Order = 0, EncodedFilePath = staged, EncodedFileDesiredName = "Alien (1979).mkv" };
+        ResumeKeeping.NoteEncodeStart(entry);
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+        var router = new JournalPeekingRouter(resumeFile);
+
+        await RunLaneAsync(JournalOrchestrator(config, new FakeProcessRunner(), new DeletingTrashService(), router, store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        // When the router was about to move the file, the queue already said so and named the destination.
+        var seen = Assert.Single(router.SeenAfterDestinationJournalled);
+        Assert.Equal(ResumeStatus.FinishPending, seen.Status);
+        Assert.Equal(FiledVideoPath(library), seen.Destination);
+        Assert.Equal(staged, seen.EncodedFilePath);
+        var done = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, done.Status);
+        Assert.Null(done.PendingCompanionVideoDestPath);
+        Assert.Null(done.EncodedFileSize);
+        Assert.True(File.Exists(FiledVideoPath(library)));
+
+        // A retry that fails (the library is unreachable) leaves a plain failed move, not a half-written journal.
+        var failing = new ResumeEntry { LaneId = "lane1", FullName = source, Status = ResumeStatus.MoveFailed, Order = 0, EncodedFilePath = staged, EncodedFileDesiredName = "Alien (1979).mkv" };
+        File.WriteAllText(staged, "the encode");
+        store.Save(new List<ResumeEntry> { failing }, resumeFile);
+        await RunLaneAsync(JournalOrchestrator(config, new FakeProcessRunner(), new DeletingTrashService(), new ThrowingFileRouter(new IOException("the share is gone")), store), lane, config, _tempDir, "20260101_000002", store.Load(resumeFile), resumeFile, CancellationToken.None);
+        var still = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.MoveFailed, still.Status);
+        Assert.Null(still.PendingCompanionVideoDestPath);
+    }
+
+    [Fact]
+    public async Task M1_AnOriginalThatCannotBeConfirmed_IsKeptAndNotedAsKept_SoItIsNotConvertedAgain()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        var filed = WriteFiledVideo(library, "the filed video");
+        // No note of the source when its encode started (as an older build left it): its identity is Unknown.
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                                      PendingCompanionSourceDirectory = Path.GetDirectoryName(source), PendingCompanionVideoDestPath = filed };
+        ResumeKeeping.NoteOutputIdentity(entry, filed);
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        var results = await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Empty(results);
+        Assert.True(File.Exists(source));                                              // kept for the user
+        Assert.Equal(0, encoder.CallCount);                                            // and the scan did not queue it as fresh work
+        var done = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, done.Status);
+        Assert.NotNull(done.KeptSourceSize);
+    }
+
+    // ---- the 3.1.0-rc.1 follow-up review ----
+
+    [Fact]
+    public async Task H7a_AReplacementOfTheSameLengthAndTime_IsStillNotTheOutput_BecauseItsContentDiffers()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        await Assert.ThrowsAsync<SimulatedCrashException>(() => RunLaneAsync(JournalOrchestrator(config, encoder, new CrashingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000000", store.Load(resumeFile), resumeFile, CancellationToken.None));
+        var filed = FiledVideoPath(library);
+        var time = File.GetLastWriteTimeUtc(filed);
+        var original = File.ReadAllText(filed);
+
+        // Different bytes, exactly as long, with the timestamp put back: size and time cannot tell it from the output; only its content can.
+        File.WriteAllText(filed, new string('X', original.Length));
+        File.SetLastWriteTimeUtc(filed, time);
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.True(File.Exists(source));                                              // never deleted on the strength of a lookalike
+        Assert.Equal(new string('X', original.Length), File.ReadAllText(filed));
+        Assert.Equal(1, encoder.CallCount);
+    }
+
+    [Fact]
+    public void H7a_TheOutputCheck_ComparesContent_NotJustSizeAndTime()
+    {
+        var path = Path.Combine(_tempDir, "output.mkv");
+        File.WriteAllText(path, "aaaaaaaaaa");
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = Path.Combine(_tempDir, "src.mkv") };
+        ResumeKeeping.NoteOutputIdentity(entry, path);
+        var time = File.GetLastWriteTimeUtc(path);
+
+        Assert.Equal(ResumeKeeping.OutputCheck.Matches, ResumeKeeping.CheckOutput(entry, path));
+        File.WriteAllText(path, "aaaaaaaaab");
+        File.SetLastWriteTimeUtc(path, time);
+        Assert.Equal(ResumeKeeping.OutputCheck.Different, ResumeKeeping.CheckOutput(entry, path));
+        File.WriteAllText(path, "aaaaa");
+        Assert.Equal(ResumeKeeping.OutputCheck.Different, ResumeKeeping.CheckOutput(entry, path));
+        File.Delete(path);
+        Assert.Equal(ResumeKeeping.OutputCheck.Missing, ResumeKeeping.CheckOutput(entry, path));
+        File.WriteAllText(path, "aaaaaaaaaa");
+        Assert.Equal(ResumeKeeping.OutputCheck.Unrecorded, ResumeKeeping.CheckOutput(new ResumeEntry { LaneId = "lane1", FullName = "x" }, path));
+    }
+
+    [Theory]
+    [InlineData(DeleteAfterConvertMode.Delete)]
+    [InlineData(DeleteAfterConvertMode.Recycle)]
+    public async Task H7b_WhenTheDestinationCannotBeJournalled_ASourceAtTheDestinationPath_IsNotDisposedOf(DeleteAfterConvertMode mode)
+    {
+        // The lane's Input folder is its own library, so the filed result's path is the path of its source - the case where the source used to be disposed of BEFORE the journal write.
+        var library = Path.Combine(_tempDir, "Library");
+        var (lane, config, input, output) = SafetyLane(mode, moveFiles: true, outSameAsIn: false, movieBase: library, inputName: "Library");
+        var folder = Path.Combine(input, "Movie (2020)");
+        Directory.CreateDirectory(folder);
+        var source = Path.Combine(folder, "Movie (2020).mkv");
+        File.WriteAllText(source, "original bytes");
+        var bin = Path.Combine(_tempDir, "bin");
+        ITrashService trash = mode == DeleteAfterConvertMode.Recycle ? new KeepingTrashService(bin) : new DeletingTrashService();
+        var store = new FailOnDestinationJournalStore();
+        var resumeFile = Path.Combine(_tempDir, "resume.json");
+
+        await RunLaneAsync(JournalOrchestrator(config, new FakeProcessRunner(), trash, new FileRouter(), store), lane, config, _tempDir, "20260101_000000", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Equal("original bytes", File.ReadAllText(source));                      // the original is exactly where it was
+        Assert.False(Directory.Exists(bin) && Directory.GetFiles(bin).Length > 0);     // and nothing went to the recycle bin
+        Assert.Single(Directory.GetFiles(output));                                      // the staged encode is still there, waiting for the move to be retried
+        Assert.Equal(ResumeStatus.MoveFailed, Assert.Single(store.Load(resumeFile)).Status);
+    }
+
+    [Fact]
+    public async Task H7b_AFileAddedToOutputUnderItsFinalName_IsJournalledFirst_AndLeavesNoJournalBehind()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        config.Processing.MoveFiles = false;
+        var store = new JsonResumeStateStore();
+
+        await RunLaneAsync(JournalOrchestrator(config, new FakeProcessRunner(), new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000000", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Equal("fake encoded output", File.ReadAllText(Path.Combine(lane.Output, "Alien (1979).mkv")));
+        var entry = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, entry.Status);
+        Assert.False(entry.FiledInOutput);
+        Assert.Null(entry.PendingCompanionVideoDestPath);
+        Assert.Null(entry.EncodedFileDigest);
+    }
+
+    [Fact]
+    public async Task H7b_ACrashRightAfterTheRenameInOutput_IsFinishedFromTheJournal_NotEncodedAgain()
+    {
+        // MoveFiles is off: the staged encode was renamed to its final name in Output and the stop came before anything more was saved. The journal (written before the rename)
+        // names the final file; the staged name is gone.
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        config.Processing.MoveFiles = false;
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        var published = Path.Combine(lane.Output, "Alien (1979).mkv");
+        File.WriteAllText(published, "the published encode");
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                                      EncodedFilePath = Path.Combine(lane.Output, "Alien (1979).compressarr-abc123.mkv"), EncodedFileDesiredName = "Alien (1979).mkv",
+                                      PendingCompanionSourceDirectory = Path.GetDirectoryName(source), PendingCompanionVideoDestPath = published, FiledInOutput = true };
+        ResumeKeeping.NoteEncodeStart(entry);
+        ResumeKeeping.NoteOutputIdentity(entry, published);
+        entry.FiledInOutput = true;
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        var results = await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Empty(results);
+        Assert.Equal(0, encoder.CallCount);                                            // the surviving source is not found and encoded a second time
+        Assert.False(File.Exists(source));                                             // it was dealt with the way the setting says, after the output was verified
+        Assert.Equal("the published encode", File.ReadAllText(published));
+        var done = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, done.Status);
+        Assert.False(done.FiledInOutput);
+        Assert.Null(done.PendingCompanionVideoDestPath);
+    }
+
+    [Fact]
+    public async Task H7b_ARenameInOutputWhoseResultWasReplaced_KeepsTheOriginal()
+    {
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        config.Processing.MoveFiles = false;
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        var published = Path.Combine(lane.Output, "Alien (1979).mkv");
+        File.WriteAllText(published, "the published encode");
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                                      EncodedFilePath = Path.Combine(lane.Output, "Alien (1979).compressarr-abc123.mkv"), EncodedFileDesiredName = "Alien (1979).mkv",
+                                      PendingCompanionSourceDirectory = Path.GetDirectoryName(source), PendingCompanionVideoDestPath = published };
+        ResumeKeeping.NoteEncodeStart(entry);
+        ResumeKeeping.NoteOutputIdentity(entry, published);
+        entry.FiledInOutput = true;
+        File.WriteAllText(published, "someone else's file!!");                         // replaced while Compressarr was down
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.True(File.Exists(source));
+        Assert.Equal("someone else's file!!", File.ReadAllText(published));
+        Assert.Equal(0, encoder.CallCount);
+    }
+
+    // ---- the second and third fixes reviews: replacing an original at the output's own path ----
+
+    private (LaneConfig Lane, CompressarrConfig Config, string Dest, string Staged, string ResumeFile) SamePathLane(DeleteAfterConvertMode mode = DeleteAfterConvertMode.Delete)
+    {
+        var library = Path.Combine(_tempDir, "Library");
+        var (lane, config, input, output) = SafetyLane(mode, moveFiles: true, outSameAsIn: false, movieBase: library, inputName: "Library");
+        config.Processing.MinSizeBytes = 1000;                                          // the tiny test files are not scanned again as new work
+        var folder = Path.Combine(input, "Movie (2020)");
+        Directory.CreateDirectory(folder);
+        return (lane, config, Path.Combine(folder, "Movie (2020).mkv"), Path.Combine(output, "Movie (2020).compressarr-abc123.mkv"), Path.Combine(_tempDir, "resume.json"));
+    }
+
+    private static string ParkedPathFor(string dest, string tag = "0123456789abcdef") =>
+        Path.Combine(Path.GetDirectoryName(dest)!, FileOutcomeHelpers.ParkedOriginalFolderPrefix + tag, Path.GetFileName(dest));
+
+    /// <summary>The entry as the journal leaves it for a same-path replacement, with the original already moved to its parked path.</summary>
+    private static ResumeEntry ParkedEntry(string dest, string staged, string parked, ResumeStatus status = ResumeStatus.FinishPending)
+    {
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = dest, Status = status, Order = 0, EncodedFilePath = staged, EncodedFileDesiredName = "Movie (2020).mkv",
+                                      PendingCompanionSourceDirectory = Path.GetDirectoryName(dest), PendingCompanionVideoDestPath = dest, ParkedOriginalPath = parked };
+        ResumeKeeping.NoteEncodeStart(entry);                                           // noted while the original was still in place
+        Directory.CreateDirectory(Path.GetDirectoryName(parked)!);
+        File.Move(dest, parked);                                                        // the original is set aside
+        return entry;
+    }
+
+    [Fact]
+    public async Task H7b_AStopWhileTheOriginalWasParked_PutsItBack_ThenPublishesTheOutputAndDisposesOfIt()
+    {
+        var (lane, config, dest, staged, resumeFile) = SamePathLane();
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        File.WriteAllText(dest, "original bytes");
+        var parked = ParkedPathFor(dest);
+        var entry = ParkedEntry(dest, staged, parked);
+        File.WriteAllText(staged, "the encode");
+        ResumeKeeping.NoteOutputIdentity(entry, staged);
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Equal("the encode", File.ReadAllText(dest));                             // the output is published
+        Assert.False(File.Exists(parked));                                              // the parked original is gone, as Delete says
+        Assert.False(Directory.Exists(Path.GetDirectoryName(parked)));
+        Assert.Equal(0, encoder.CallCount);
+        var done = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, done.Status);
+        Assert.Null(done.ParkedOriginalPath);
+    }
+
+    [Theory]
+    [InlineData(DeleteAfterConvertMode.Delete)]
+    [InlineData(DeleteAfterConvertMode.Recycle)]
+    public async Task H7b_AStopAfterTheOutputWasPublished_FinishesDisposingOfExactlyTheParkedOriginal(DeleteAfterConvertMode mode)
+    {
+        var (lane, config, dest, staged, resumeFile) = SamePathLane(mode);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        File.WriteAllText(dest, "original bytes");
+        var parked = ParkedPathFor(dest);
+        var entry = ParkedEntry(dest, staged, parked);
+        File.WriteAllText(dest, "the encode");                                          // already published
+        ResumeKeeping.NoteOutputIdentity(entry, dest);
+        entry.EncodedFilePath = null;
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+        var bin = Path.Combine(_tempDir, "bin");
+        ITrashService trash = mode == DeleteAfterConvertMode.Recycle ? new KeepingTrashService(bin) : new DeletingTrashService();
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, trash, new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Equal("the encode", File.ReadAllText(dest));
+        Assert.False(File.Exists(parked));
+        if (mode == DeleteAfterConvertMode.Recycle) Assert.Equal("original bytes", File.ReadAllText(Path.Combine(bin, "Movie (2020).mkv")));
+        Assert.Equal(0, encoder.CallCount);
+        Assert.Null(Assert.Single(store.Load(resumeFile)).ParkedOriginalPath);
+    }
+
+    [Fact]
+    public async Task H7b_AParkedOriginal_IsNeverDeleted_WhenTheOutputCannotBeConfirmed()
+    {
+        var (lane, config, dest, staged, resumeFile) = SamePathLane();
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        File.WriteAllText(dest, "original bytes");
+        var parked = ParkedPathFor(dest);
+        var entry = ParkedEntry(dest, staged, parked);
+        File.WriteAllText(staged, "the encode");
+        ResumeKeeping.NoteOutputIdentity(entry, staged);
+        File.Delete(staged);                                                            // the staged output is gone too
+        File.WriteAllText(dest, "someone else's file");                                 // and something else is at the destination
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Equal("original bytes", File.ReadAllText(parked));                      // the original survives, where it was set aside
+        Assert.Equal("someone else's file", File.ReadAllText(dest));
+        Assert.Null(Assert.Single(store.Load(resumeFile)).ParkedOriginalPath);          // and the record does not nag: the log names the file
+    }
+
+    [Fact]
+    public async Task H7b_AParkedFileThatIsNoLongerTheOriginal_IsKept_EvenWhenTheOutputIsConfirmed()
+    {
+        var (lane, config, dest, staged, resumeFile) = SamePathLane();
+        var store = new JsonResumeStateStore();
+        File.WriteAllText(dest, "original bytes");
+        var parked = ParkedPathFor(dest);
+        var entry = ParkedEntry(dest, staged, parked);
+        File.WriteAllText(dest, "the encode");
+        ResumeKeeping.NoteOutputIdentity(entry, dest);
+        entry.EncodedFilePath = null;
+        File.WriteAllText(parked, "somebody replaced the parked file with other bytes");   // not what was converted any more
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        await RunLaneAsync(JournalOrchestrator(config, new FakeProcessRunner(), new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Equal("somebody replaced the parked file with other bytes", File.ReadAllText(parked));
+        Assert.Equal("the encode", File.ReadAllText(dest));
+    }
+
+    [Fact]
+    public async Task H9_RecoveryNeverDeletesFilesThatOnlyLookLikeAParkedOriginal()
+    {
+        // An ordinary route (the original lives in Input, the output is filed in the library), interrupted after filing. Beside the filed video are files that merely resemble a parked
+        // original: a sibling with the old name pattern, and the parked folder of some earlier job at the very same destination. None of them is on this job's record.
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        var filed = WriteFiledVideo(library, "the filed video");
+        var folder = Path.GetDirectoryName(filed)!;
+        var siblingByName = filed + ".compressarr-original-zzzz";
+        File.WriteAllText(siblingByName, "someone's backup");
+        var otherJobsFolder = Path.Combine(folder, FileOutcomeHelpers.ParkedOriginalFolderPrefix + "fedcba9876543210");
+        Directory.CreateDirectory(otherJobsFolder);
+        var otherJobsOriginal = Path.Combine(otherJobsFolder, Path.GetFileName(filed));
+        File.WriteAllText(otherJobsOriginal, "an earlier interrupted job's original");
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                                      PendingCompanionSourceDirectory = Path.GetDirectoryName(source), PendingCompanionVideoDestPath = filed };
+        ResumeKeeping.NoteEncodeStart(entry);
+        ResumeKeeping.NoteOutputIdentity(entry, filed);
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.False(File.Exists(source));                                              // this job's original went, as the setting says
+        Assert.Equal("someone's backup", File.ReadAllText(siblingByName));              // unrelated files are untouched
+        Assert.Equal("an earlier interrupted job's original", File.ReadAllText(otherJobsOriginal));
+        Assert.Equal("the filed video", File.ReadAllText(filed));
+    }
+
+    [Fact]
+    public async Task M6_AnOriginalThatCouldNotBeRemovedAfterPublishing_StaysOnRecord_AndIsRemovedOnTheNextPass()
+    {
+        var (lane, config, dest, staged, resumeFile) = SamePathLane();
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        var original = new string('o', 2000);                                          // bigger than the lane's minimum size, so it is scanned and converted
+        File.WriteAllText(dest, original);
+
+        // First pass: the output is filed, but the parked original is locked and cannot be deleted.
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new FailingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000000", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Equal("fake encoded output", File.ReadAllText(dest));
+        var open = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.FinishPending, open.Status);                          // the job is still open
+        Assert.NotNull(open.ParkedOriginalPath);
+        Assert.Equal(original, File.ReadAllText(open.ParkedOriginalPath!));              // the original is safe, parked
+        var parked = open.ParkedOriginalPath!;
+
+        // Next pass: the lock is gone; exactly that file is removed and the job completes.
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.False(File.Exists(parked));
+        Assert.Equal("fake encoded output", File.ReadAllText(dest));
+        Assert.Equal(1, encoder.CallCount);                                             // encoded once
+        var done = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, done.Status);
+        Assert.Null(done.ParkedOriginalPath);
+    }
+
+    // ---- the fourth fixes review: a trash service that only logs a failed removal must not make the journal forget the file ----
+
+    [Fact]
+    public async Task M6b_AServiceThatLogsAFailedRemovalAndReturnsNormally_KeepsTheRecord_AndTheNextPassRemovesTheFile()
+    {
+        var (lane, config, dest, staged, resumeFile) = SamePathLane();
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        File.WriteAllText(dest, new string('o', 2000));
+        var swallowing = new SwallowingTrashService();
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, swallowing, new FileRouter(), store), lane, config, _tempDir, "20260101_000000", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Equal("fake encoded output", File.ReadAllText(dest));
+        var open = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.FinishPending, open.Status);                          // the job is still open
+        Assert.NotNull(open.ParkedOriginalPath);                                        // the record was not cleared by a call that merely returned
+        var parked = open.ParkedOriginalPath!;
+        Assert.True(File.Exists(parked));
+
+        // The next pass: the service now works; exactly that file is removed and the job completes.
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.False(File.Exists(parked));
+        Assert.Equal(1, encoder.CallCount);
+        var done = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, done.Status);
+        Assert.Null(done.ParkedOriginalPath);
+    }
+
+    [Fact]
+    public async Task M6b_RestartCleanup_WhoseRemovalSilentlyFails_KeepsTheRecord_UntilTheFileIsReallyGone()
+    {
+        var (lane, config, dest, staged, resumeFile) = SamePathLane();
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        File.WriteAllText(dest, "original bytes");
+        var parked = ParkedPathFor(dest);
+        var entry = ParkedEntry(dest, staged, parked);
+        File.WriteAllText(dest, "the encode");                                          // already published
+        ResumeKeeping.NoteOutputIdentity(entry, dest);
+        entry.EncodedFilePath = null;
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new SwallowingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Equal("original bytes", File.ReadAllText(parked));                      // still there
+        var open = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(parked, open.ParkedOriginalPath);                                  // and still on record
+        Assert.Equal(ResumeStatus.FinishPending, open.Status);
+        Assert.NotNull(open.EncodedFileDigest);                                         // with the output's identity, so the next pass can confirm it
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000002", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.False(File.Exists(parked));
+        Assert.Equal("the encode", File.ReadAllText(dest));
+        Assert.Null(Assert.Single(store.Load(resumeFile)).ParkedOriginalPath);
+    }
+
+    [Theory]
+    [InlineData(ResumeStatus.FinishPending)]
+    [InlineData(ResumeStatus.MoveFailed)]
+    public async Task M6b_AnEntryWhoseOriginalCouldNotBePutBack_IsKeptOutOfOrdinaryRouting_UntilItIsResolved(ResumeStatus status)
+    {
+        if (!OperatingSystem.IsWindows()) return;   // relies on a file lock blocking the rename
+        var (lane, config, dest, staged, resumeFile) = SamePathLane();
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        File.WriteAllText(dest, "original bytes");
+        var parked = ParkedPathFor(dest);
+        var entry = ParkedEntry(dest, staged, parked, status);
+        File.WriteAllText(staged, "the encode");
+        ResumeKeeping.NoteOutputIdentity(entry, staged);
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+        var digest = entry.EncodedFileDigest;
+
+        // The original is locked, so the restart cannot put it back.
+        using (new FileStream(parked, FileMode.Open, FileAccess.Read, FileShare.None))
+            await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        var held = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(parked, held.ParkedOriginalPath);                                  // the record survives
+        Assert.Equal(status, held.Status);                                              // the ordinary loops did not touch it
+        Assert.Equal(dest, held.PendingCompanionVideoDestPath);                         // the intended destination and the output's identity are still there
+        Assert.Equal(digest, held.EncodedFileDigest);
+        Assert.Equal(staged, held.EncodedFilePath);
+        Assert.True(File.Exists(staged));                                               // it was not routed
+        Assert.False(File.Exists(dest));
+        Assert.Equal(0, encoder.CallCount);
+
+        // Once the lock is gone, the next pass puts the original back and finishes the job.
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000002", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Equal("the encode", File.ReadAllText(dest));
+        Assert.False(File.Exists(parked));
+        Assert.Equal(0, encoder.CallCount);
+        var done = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, done.Status);
+        Assert.Null(done.ParkedOriginalPath);
+    }
+
+    [Fact]
+    public async Task M6b_AnOriginalThatCouldNotBeRemovedAfterConverting_IsKeptNotedAndNotConvertedAgain()
+    {
+        // The same root cause on the ordinary route: the trash service returns normally but the original is still there.
+        var (lane, config, input, _) = SafetyLane(DeleteAfterConvertMode.Delete, moveFiles: false, outSameAsIn: false);
+        var source = Path.Combine(input, "Movie (2020).mkv");
+        File.WriteAllText(source, "the original release");
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        var resumeFile = Path.Combine(_tempDir, "resume.json");
+
+        var results = await RunLaneAsync(JournalOrchestrator(config, encoder, new SwallowingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000000", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.True(result.Success);
+        Assert.Contains(ReportWarningCode.SourceNotRemoved, result.WarningCodes);
+        Assert.True(File.Exists(source));
+        Assert.True(Assert.Single(store.Load(resumeFile)).KeptSourceSize.HasValue);      // noted as converted and kept
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Equal(1, encoder.CallCount);                                             // not converted a second time
+    }
+
+    // ---- the fifth fixes review: a path that cannot be checked is not a file that is gone ----
+
+    [Fact]
+    public async Task M7_AParkedOriginalThatCannotBeReached_IsNotMistakenForOneThatIsGone_TheRecordSurvivesUntilItCanBeChecked()
+    {
+        var (lane, config, dest, staged, resumeFile) = SamePathLane();
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+
+        // The original was parked beyond a mount (the library on another volume) and the output is published.
+        File.WriteAllText(dest, "original bytes");
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = dest, Status = ResumeStatus.FinishPending, Order = 0, EncodedFileDesiredName = "Movie (2020).mkv",
+                                      PendingCompanionSourceDirectory = Path.GetDirectoryName(dest), PendingCompanionVideoDestPath = dest };
+        ResumeKeeping.NoteEncodeStart(entry);
+        var relative = Path.Combine(FileOutcomeHelpers.ParkedOriginalFolderPrefix + "0123456789abcdef", Path.GetFileName(dest));
+        using var mount = OfflineJunction.Create(_tempDir, target =>
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(target, relative))!);
+            File.Move(dest, Path.Combine(target, relative));                              // the original is set aside on the mounted volume
+        });
+        if (mount is null) { File.Delete(dest); return; }   // junctions are Windows only
+        var parked = Path.Combine(mount.Link, relative);
+        entry.ParkedOriginalPath = parked;
+        File.WriteAllText(dest, "the encode");
+        ResumeKeeping.NoteOutputIdentity(entry, dest);
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        // The mount drops: the parked file is on disk but File.Exists says it is not.
+        mount.TakeOffline();
+        Assert.False(File.Exists(parked));
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        var held = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(parked, held.ParkedOriginalPath);                                  // the only record of the file was NOT cleared
+        Assert.Equal(ResumeStatus.FinishPending, held.Status);
+        Assert.NotNull(held.EncodedFileDigest);
+
+        // The mount returns: the next pass sees the file, confirms the output and removes exactly that file.
+        mount.BringOnline();
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000002", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.False(File.Exists(parked));
+        Assert.Equal("the encode", File.ReadAllText(dest));
+        Assert.Equal(0, encoder.CallCount);
+        var done = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, done.Status);
+        Assert.Null(done.ParkedOriginalPath);
+    }
+
+    // ---- the sixth fixes review: a read that fails is not a difference. Metadata stays visible, content cannot be read (an exclusive handle), and the record must survive until it can ----
+
+    /// <summary>Blocks every read of the file's content while its metadata (existence, size, times) stays visible - what a scanner, an indexer or a dropped connection does. Windows only.</summary>
+    private static FileStream LockAgainstReads(string path) => new(path, FileMode.Open, FileAccess.Read, FileShare.None);
+
+    private async Task Pass(CompressarrConfig config, LaneConfig lane, string resumeFile, JsonResumeStateStore store, IEncoderRunner encoder, string tag) =>
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_" + tag, store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+    [Fact]
+    public async Task M8_AParkedOriginalWhoseContentCannotBeRead_KeepsItsRecordAndTheOutputIdentity_UntilItCanBe()
+    {
+        if (!OperatingSystem.IsWindows()) return;   // relies on a file lock that blocks reads but not metadata
+        var (lane, config, dest, staged, resumeFile) = SamePathLane();
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        File.WriteAllText(dest, "original bytes");
+        var parked = ParkedPathFor(dest);
+        var entry = ParkedEntry(dest, staged, parked);
+        File.WriteAllText(dest, "the encode");                                          // already published
+        ResumeKeeping.NoteOutputIdentity(entry, dest);
+        entry.EncodedFilePath = null;
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+        var digest = entry.EncodedFileDigest;
+
+        using (LockAgainstReads(parked))
+        {
+            Assert.True(File.Exists(parked));                                           // visible...
+            await Pass(config, lane, resumeFile, store, encoder, "000001");             // ...but its fingerprint cannot be read
+        }
+
+        var held = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(parked, held.ParkedOriginalPath);                                  // persisted state: the record survives
+        Assert.Equal(ResumeStatus.FinishPending, held.Status);
+        Assert.Equal(digest, held.EncodedFileDigest);                                   // and so does the output's identity
+        Assert.Equal(dest, held.PendingCompanionVideoDestPath);
+        Assert.True(File.Exists(parked));
+
+        await Pass(config, lane, resumeFile, store, encoder, "000002");                 // the lock is gone: cleanup finishes
+
+        Assert.False(File.Exists(parked));
+        Assert.Equal("the encode", File.ReadAllText(dest));
+        var done = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, done.Status);
+        Assert.Null(done.ParkedOriginalPath);
+    }
+
+    [Fact]
+    public async Task M8_APublishedOutputWhoseContentCannotBeRead_IsNotTakenForAConflict_TheRecordSurvives()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var (lane, config, dest, staged, resumeFile) = SamePathLane();
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        File.WriteAllText(dest, "original bytes");
+        var parked = ParkedPathFor(dest);
+        var entry = ParkedEntry(dest, staged, parked);
+        File.WriteAllText(dest, "the encode");
+        ResumeKeeping.NoteOutputIdentity(entry, dest);
+        entry.EncodedFilePath = null;
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+        var digest = entry.EncodedFileDigest;
+
+        using (LockAgainstReads(dest))                                                  // the OUTPUT cannot be read, the path is occupied
+            await Pass(config, lane, resumeFile, store, encoder, "000001");
+
+        var held = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(parked, held.ParkedOriginalPath);                                  // not cleared as "another file is there"
+        Assert.Equal(digest, held.EncodedFileDigest);
+        Assert.Equal("original bytes", File.ReadAllText(parked));
+
+        await Pass(config, lane, resumeFile, store, encoder, "000002");
+
+        Assert.False(File.Exists(parked));
+        Assert.Equal("the encode", File.ReadAllText(dest));
+        Assert.Null(Assert.Single(store.Load(resumeFile)).ParkedOriginalPath);
+    }
+
+    [Fact]
+    public async Task M8_AnInterruptedFinish_WhoseFiledOutputCannotBeRead_IsLeftForTheNextPass_NothingIsDeletedOrForgotten()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var (lane, config, source, library, resumeFile) = JournalLane(DeleteAfterConvertMode.Delete);
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        var filed = WriteFiledVideo(library, "the filed video");
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = source, Status = ResumeStatus.FinishPending, Order = 0,
+                                      PendingCompanionSourceDirectory = Path.GetDirectoryName(source), PendingCompanionVideoDestPath = filed };
+        ResumeKeeping.NoteEncodeStart(entry);
+        ResumeKeeping.NoteOutputIdentity(entry, filed);
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+        var digest = entry.EncodedFileDigest;
+
+        using (LockAgainstReads(filed))
+            await Pass(config, lane, resumeFile, store, encoder, "000001");
+
+        var held = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.FinishPending, held.Status);                          // not completed, not dropped
+        Assert.Equal(digest, held.EncodedFileDigest);
+        Assert.Equal(filed, held.PendingCompanionVideoDestPath);
+        Assert.True(File.Exists(source));                                               // the original was not deleted on an unconfirmed output
+
+        await Pass(config, lane, resumeFile, store, encoder, "000002");
+
+        Assert.False(File.Exists(source));                                              // confirmed now: the original goes, as the setting says
+        Assert.Equal("the filed video", File.ReadAllText(filed));
+        Assert.Equal(0, encoder.CallCount);
+    }
+
+    [Fact]
+    public async Task M8_AParkedPathThatCannotBeChecked_WithoutAnyJunction_KeepsTheRecord_UntilItCan()
+    {
+        if (!OperatingSystem.IsWindows()) return;   // the path-below-a-file error is reported as an I/O error here
+        var (lane, config, dest, staged, resumeFile) = SamePathLane();
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        File.WriteAllText(dest, "original bytes");
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = dest, Status = ResumeStatus.FinishPending, Order = 0, EncodedFileDesiredName = "Movie (2020).mkv",
+                                      PendingCompanionSourceDirectory = Path.GetDirectoryName(dest), PendingCompanionVideoDestPath = dest };
+        ResumeKeeping.NoteEncodeStart(entry);
+        var relative = Path.Combine(FileOutcomeHelpers.ParkedOriginalFolderPrefix + "0123456789abcdef", Path.GetFileName(dest));
+        var real = Path.Combine(_tempDir, "real");
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(real, relative))!);
+        File.Move(dest, Path.Combine(real, relative));                                  // the original, parked on a volume...
+        var mount = Path.Combine(_tempDir, "mount");
+        File.WriteAllText(mount, "not a folder");                                       // ...whose mount point is not answering: a FILE stands where the folder should be
+        var parked = Path.Combine(mount, relative);
+        entry.ParkedOriginalPath = parked;
+        File.WriteAllText(dest, "the encode");
+        ResumeKeeping.NoteOutputIdentity(entry, dest);
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        Assert.Equal(FileOutcomeHelpers.FilePresence.Unknown, FileOutcomeHelpers.PresenceOf(parked));
+        await Pass(config, lane, resumeFile, store, encoder, "000001");
+
+        Assert.Equal(parked, Assert.Single(store.Load(resumeFile)).ParkedOriginalPath);   // kept
+
+        File.Delete(mount);
+        Directory.Move(real, mount);                                                    // the volume is back
+        await Pass(config, lane, resumeFile, store, encoder, "000002");
+
+        Assert.False(File.Exists(parked));
+        var done = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, done.Status);
+        Assert.Null(done.ParkedOriginalPath);
+    }
+
+    [Fact]
+    public async Task M6_AFailedMoveWhoseRollbackFailed_LeavesARecord_SoTheRetryPutsTheOriginalBackAndFinishes()
+    {
+        // The state a failed publication leaves when the original could not be put back: MoveFailed, the destination forgotten, but the parked path still on record.
+        var (lane, config, dest, staged, resumeFile) = SamePathLane();
+        var store = new JsonResumeStateStore();
+        var encoder = new FakeProcessRunner();
+        File.WriteAllText(dest, "original bytes");
+        var parked = ParkedPathFor(dest);
+        var entry = ParkedEntry(dest, staged, parked, ResumeStatus.MoveFailed);
+        entry.PendingCompanionVideoDestPath = null;
+        File.WriteAllText(staged, "the encode");
+        store.Save(new List<ResumeEntry> { entry }, resumeFile);
+
+        await RunLaneAsync(JournalOrchestrator(config, encoder, new DeletingTrashService(), new FileRouter(), store), lane, config, _tempDir, "20260101_000001", store.Load(resumeFile), resumeFile, CancellationToken.None);
+
+        Assert.Equal("the encode", File.ReadAllText(dest));                             // restored, then replaced the proper way
+        Assert.False(File.Exists(parked));
+        Assert.Equal(0, encoder.CallCount);
+        var done = Assert.Single(store.Load(resumeFile));
+        Assert.Equal(ResumeStatus.Completed, done.Status);
+        Assert.Null(done.ParkedOriginalPath);
     }
 }

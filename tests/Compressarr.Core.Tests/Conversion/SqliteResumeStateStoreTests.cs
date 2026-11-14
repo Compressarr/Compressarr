@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Compressarr.Core.Conversion;
+using Compressarr.Core.Logging;
 using Microsoft.Data.Sqlite;
 
 namespace Compressarr.Core.Tests.Conversion;
@@ -50,7 +51,8 @@ public class SqliteResumeStateStoreTests : IDisposable
             PendingCompanionVideoDestPath = @"E:\Movies\Movie (1999).mkv", LastRetryFailureMessage = "the share is offline", Order = 7, Skipped = true,
             PresetOverride = "My preset", Removed = true, HeldAfterFailure = true, KeptSourceSize = 12_345_678_901L, KeptSourceModifiedUtc = kept,
             CreatedByQueueEdit = true, FileBotUnmatched = true, DestinationLaneId = "lane2",
-            EncodedFromSize = 9_876_543_210L, EncodedFromModifiedUtc = kept.AddHours(-5)
+            EncodedFromSize = 9_876_543_210L, EncodedFromModifiedUtc = kept.AddHours(-5),
+            EncodedFileSize = 4_000_000_001L, EncodedFileDigest = "ABCDEF0123456789", FiledInOutput = true, ParkedOriginalPath = @"E:\Movies\.compressarr-original-0123456789abcdef\Movie (1999).mkv"
         };
         var store = new SqliteResumeStateStore();
         store.Save(new List<ResumeEntry> { entry, Entry("plain.mkv", order: null) }, ResumePath);
@@ -81,6 +83,13 @@ public class SqliteResumeStateStoreTests : IDisposable
         Assert.Equal(9_876_543_210L, first.EncodedFromSize);
         Assert.Equal(kept.AddHours(-5), first.EncodedFromModifiedUtc);
         Assert.Equal(DateTimeKind.Utc, first.EncodedFromModifiedUtc!.Value.Kind);
+        Assert.Equal(4_000_000_001L, first.EncodedFileSize);
+        Assert.Equal("ABCDEF0123456789", first.EncodedFileDigest);
+        Assert.True(first.FiledInOutput);
+        Assert.Equal(@"E:\Movies\.compressarr-original-0123456789abcdef\Movie (1999).mkv", first.ParkedOriginalPath);
+        Assert.Null(loaded[1].ParkedOriginalPath);
+        Assert.Null(loaded[1].EncodedFileDigest);
+        Assert.False(loaded[1].FiledInOutput);
         Assert.Null(loaded[1].EncodedFromSize);
         Assert.Null(loaded[1].Order);
         Assert.Null(loaded[1].KeptSourceModifiedUtc);
@@ -437,5 +446,78 @@ public class SqliteResumeStateStoreTests : IDisposable
         store.Update(ResumePath, state => { state.RemoveAll(e => e.Status == ResumeStatus.Pending); return true; });
         store.DeleteIfComplete(store.Load(ResumePath), ResumePath);
         Assert.Empty(store.Load(ResumePath));   // the converted file's source is not on disk, so it is not worth keeping
+    }
+
+    // ---- the crash journal's columns (schema 10): every earlier layout upgrades with its queue intact ----
+
+    private void MakeQueueLookLike(string layout)
+    {
+        // A queue with an entry and a Monitor edit in it, then the schema put back to how an earlier build left it.
+        var store = new SqliteResumeStateStore();
+        store.Save(new List<ResumeEntry>
+        {
+            new() { LaneId = "lane1", FullName = @"C:\In\Edited.mkv", Status = ResumeStatus.Pending, Order = 4, Skipped = true, PresetOverride = "My preset" },
+            new() { LaneId = "lane1", FullName = @"C:\In\Plain.mkv", Status = ResumeStatus.Pending, Order = 5 }
+        }, ResumePath);
+        using var connection = new SqliteConnection($"Data Source={DbPath};Pooling=False");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = layout switch
+        {
+            // the original 3.1.0-rc.1: version 8, none of the journal's columns
+            "rc1" => "ALTER TABLE queue DROP COLUMN encoded_file_size; ALTER TABLE queue DROP COLUMN encoded_file_digest; ALTER TABLE queue DROP COLUMN filed_in_output; ALTER TABLE queue DROP COLUMN parked_original_path; PRAGMA user_version = 8;",
+            // the second review-fixes build: version 10, the journal's columns but not the parked path
+            "fixes2" => "ALTER TABLE queue DROP COLUMN parked_original_path; PRAGMA user_version = 10;",
+            // the first review-fixes build: version 9, a size and a time but no digest
+            "fixes1" => "ALTER TABLE queue DROP COLUMN encoded_file_digest; ALTER TABLE queue DROP COLUMN filed_in_output; ALTER TABLE queue DROP COLUMN parked_original_path; ALTER TABLE queue ADD COLUMN encoded_file_modified_utc TEXT NULL; " +
+                        "UPDATE queue SET encoded_file_size = 123, encoded_file_modified_utc = '2026-11-13T10:00:00.0000000Z' WHERE full_name LIKE '%Edited%'; PRAGMA user_version = 9;",
+            _ => throw new ArgumentException(layout)
+        };
+        command.ExecuteNonQuery();
+    }
+
+    [Theory]
+    [InlineData("rc1")]
+    [InlineData("fixes1")]
+    [InlineData("fixes2")]
+    public void AQueueFromAnEarlierLayout_UpgradesToTheCurrentSchema_WithItsEntriesAndEditsIntact(string layout)
+    {
+        MakeQueueLookLike(layout);
+        // A different path to the same file, so this process opens it afresh (the original path is already marked ready here).
+        var other = Path.Combine(Directory.CreateDirectory(Path.Combine(_dir, "upgrade-" + layout)).FullName, "compressarr.resume.json");
+        File.Copy(DbPath, StateDatabase.PathFor(other));
+
+        var loaded = new SqliteResumeStateStore().Load(other);
+
+        Assert.Equal(2, loaded.Count);
+        var edited = loaded.Single(e => e.FullName.EndsWith("Edited.mkv"));
+        Assert.Equal(4, edited.Order);
+        Assert.True(edited.Skipped);
+        Assert.Equal("My preset", edited.PresetOverride);
+        Assert.Null(edited.EncodedFileDigest);                           // an old size-and-time record is unverified: nothing can be confirmed from it
+        Assert.Null(edited.ParkedOriginalPath);
+        Assert.False(edited.FiledInOutput);
+        using var connection = new SqliteConnection($"Data Source={StateDatabase.PathFor(other)};Pooling=False");
+        connection.Open();
+        Assert.Equal(StateDatabase.CurrentVersion, (int)HistoryDatabase.Scalar(connection, "PRAGMA user_version;"));
+        Assert.Equal(11, StateDatabase.CurrentVersion);
+
+        // And the upgraded queue takes the new fields.
+        var store = new SqliteResumeStateStore();
+        store.Update(other, list => { list[0].EncodedFileDigest = "AB12"; list[0].EncodedFileSize = 7; list[0].FiledInOutput = true; list[0].ParkedOriginalPath = @"C:\x\.compressarr-original-1\a.mkv"; return 0; });
+        var again = new SqliteResumeStateStore().Load(other)[0];
+        Assert.Equal("AB12", again.EncodedFileDigest);
+        Assert.True(again.FiledInOutput);
+        Assert.Equal(@"C:\x\.compressarr-original-1\a.mkv", again.ParkedOriginalPath);
+    }
+
+    [Fact]
+    public void AnOldSizeAndTimeRecord_IsUnverified_SoTheOriginalWouldBeKept()
+    {
+        var path = Path.Combine(_dir, "output.mkv");
+        File.WriteAllText(path, "x");
+        var entry = new ResumeEntry { LaneId = "lane1", FullName = @"C:\In\a.mkv", EncodedFileSize = 1 };   // as the first review-fixes build left it: a size, no digest
+
+        Assert.Equal(ResumeKeeping.OutputCheck.Unrecorded, ResumeKeeping.CheckOutput(entry, path));
     }
 }

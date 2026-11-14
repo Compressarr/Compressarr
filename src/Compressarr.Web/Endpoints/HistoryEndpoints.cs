@@ -246,6 +246,9 @@ public static class HistoryEndpoints
             if (long.TryParse(key, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var runId))
                 return RunReport(runId, download is "1" or "true", archive, generator, redact is "1" or "true", withToolbar: true) ?? Results.NotFound();
 
+            // A report saved as a file is ready-made HTML: it cannot be redacted, so a request for the view without file names is refused rather than answered with the names.
+            if (redact is "1" or "true") return Results.BadRequest(new { message = "This report was saved as a file and cannot be shared without file names. Open the report from History instead." });
+
             var config = configStore.Load(AppPaths.GetConfigFilePath());
             var reportPath = pathExpander.Expand(config.Report.ReportPath);
             var safeName = Path.GetFileName(key);
@@ -268,7 +271,7 @@ public static class HistoryEndpoints
         if (redact && model is null) return Results.BadRequest(new { message = "This report was saved by an older version and cannot be shared without file names." });
         var bytes = legacy ?? System.Text.Encoding.UTF8.GetBytes(generator.Generate(redact ? ReportRedactor.Redact(model!) : model!));
         // The buttons go on a page opened for viewing, never into a file handed over for keeping.
-        if (withToolbar && !download) bytes = ReportToolbar.AddTo(bytes);
+        if (withToolbar && !download) bytes = ReportToolbar.AddTo(bytes, redact);
         var name = $"Compressarr_Report_{runId}.html";
         return download
             ? Results.File(bytes, "text/html; charset=utf-8", model is null ? name : $"Compressarr_{model.GeneratedAt:yyyy-MM-dd_HH-mm-ss}_Report.html")

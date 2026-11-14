@@ -113,9 +113,13 @@ file sealed class NoOpArrUnmonitorService : IArrUnmonitorService
         Task.FromResult(new ArrUnmonitorResult(null, ArrRescanOutcome.NotEnabled));
 }
 
+/// <summary>Removes the file the way a working trash service does (Maintain keeps it): the orchestrator takes a source that is still there afterwards for one that could not be removed.</summary>
 file sealed class NoOpTrashService : ITrashService
 {
-    public void DeleteFile(string path, DeleteAfterConvertMode mode) { }
+    public void DeleteFile(string path, DeleteAfterConvertMode mode)
+    {
+        if (mode != DeleteAfterConvertMode.Maintain) File.Delete(path);
+    }
     public void DeleteFolder(string path, DeleteAfterConvertMode mode) { }
 }
 
@@ -1686,5 +1690,48 @@ public class RunOrchestratorTests : IDisposable
         Assert.Equal(3, RunOrchestrator.TrackedResults(new LaneConfig { Tracking = LaneTracking.Full }, results).Count);
         Assert.Equal(2, RunOrchestrator.TrackedResults(new LaneConfig { Tracking = LaneTracking.ErrorsOnly }, results).Count);   // the failure and the warning
         Assert.Empty(RunOrchestrator.TrackedResults(new LaneConfig { Tracking = LaneTracking.None }, results));
+    }
+
+    // ---- the 3.1.0-rc.1 review: M5 ----
+
+    [Theory]
+    [InlineData(LaneTracking.None)]
+    [InlineData(LaneTracking.ErrorsOnly)]
+    public async Task RunOnceAsync_OnlyActivityIsASuccessfulMoveRetry_OfALaneThatIsNotFullyTracked_LeavesNoLogOrReport(LaneTracking tracking)
+    {
+        var inputDir = Path.Combine(_tempDir, "Input");
+        var outputDir = Path.Combine(_tempDir, "Output");
+        var movieBaseDir = Path.Combine(_tempDir, "Movies");
+        Directory.CreateDirectory(movieBaseDir);
+        Directory.CreateDirectory(inputDir);
+        Directory.CreateDirectory(outputDir);
+
+        var lane = MakeLane("lane1", "Test Lane", inputDir, outputDir);
+        lane.MovieBasePath = movieBaseDir;
+        lane.Tracking = tracking;
+
+        var config = new CompressarrConfig { Processing = new ProcessingSettings { MoveFiles = true, ClearTitleMetadata = false } };
+        config.HandBrake.CliPath = Path.Combine(_tempDir, "HandBrakeCLI.exe");
+        config.HandBrake.PresetsPath = Path.Combine(_tempDir, "presets.json");
+        config.Logging.LogFilePath = Path.Combine(_tempDir, "Logs");
+        config.Report.ReportPath = Path.Combine(_tempDir, "Reports");
+        config.Lanes.Add(lane);
+
+        var logger = new Compressarr.Core.Logging.FileRunLogger();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, new RecordingProcessRunner(), logger: logger);
+        var encodedFilePath = Path.Combine(outputDir, "Caddyshack (1980).compressarr-aaaaaaaa.mkv");
+        File.WriteAllText(encodedFilePath, "already encoded");
+        new JsonResumeStateStore().Save(new List<ResumeEntry>
+        {
+            new() { LaneId = "lane1", FullName = Path.Combine(inputDir, "Caddyshack (1980).mkv"), Status = ResumeStatus.MoveFailed, EncodedFilePath = encodedFilePath, EncodedFileDesiredName = "Caddyshack (1980).mkv" }
+        }, resumeFilePath);
+
+        var result = await orchestrator.RunOnceAsync(config);
+
+        Assert.NotNull(result);
+        Assert.True(File.Exists(Path.Combine(movieBaseDir, "Caddyshack (1980)", "Caddyshack (1980).mkv")), "the file is still filed");
+        Assert.Equal(0, result!.RetriesSucceeded);                                     // not counted: the count is what keeps a log and makes a report
+        Assert.False(Directory.Exists(config.Logging.LogFilePath) && Directory.GetFiles(config.Logging.LogFilePath).Length > 0, "a clean retry leaves no log file with its name");
+        Assert.False(Directory.Exists(config.Report.ReportPath) && Directory.GetFiles(config.Report.ReportPath).Length > 0, "and no report");
     }
 }

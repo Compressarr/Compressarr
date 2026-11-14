@@ -127,6 +127,7 @@ internal sealed class EncodedFileFinisher
         resumeEntry.EncodedFileDesiredName = desiredFileName;
         resumeEntry.PendingCompanionSourceDirectory = file.DirectoryName;
         resumeEntry.PendingCompanionVideoDestPath = null;
+        ResumeKeeping.ClearOutputIdentity(resumeEntry);
         request.Journal?.Invoke(resumeEntry);
 
         // Resolves the SAME OnDestinationCollision policy real routing already gets before
@@ -138,6 +139,13 @@ internal sealed class EncodedFileFinisher
         // collision-safe temp name) when Skip applies to a real collision - the caller falls
         // back to physicalPath itself in that case, matching how a routing-level Skip already
         // leaves a file at tempFileName rather than renaming it.
+        // The exact parked path of an original set aside for a replacement is journalled (and cleared once it is resolved): see FileOutcomeHelpers.PublishOverSource.
+        void ParkedChanged(string? parked)
+        {
+            resumeEntry.ParkedOriginalPath = parked;
+            request.Journal?.Invoke(resumeEntry);
+        }
+
         string? RestInPlace(string physicalPath, string folder)
         {
             var desiredDestPath = Path.Combine(folder, desiredFileName);
@@ -154,9 +162,15 @@ internal sealed class EncodedFileFinisher
                 _logger.Log($"  {ex.Message}");
                 return null;
             }
-            // The output is about to take the source's own name: the source goes the way the setting says first (Recycle keeps it recoverable), not under the move.
-            if (disposeSourceFirst) FileOutcomeHelpers.DisposeSource(_trash, file.FullName, config.Processing.DeleteAfterConvert);
-            File.Move(physicalPath, resolvedDestPath, overwrite: true);
+            // The final name is journalled BEFORE anything changes (the crash journal): a stop after the rename is then found on the next start as a file that was published in Output, not as an
+            // encoded file that vanished (which would let the original be found and encoded again).
+            ResumeKeeping.NoteOutputIdentity(resumeEntry, physicalPath);
+            resumeEntry.PendingCompanionVideoDestPath = resolvedDestPath;
+            resumeEntry.FiledInOutput = true;
+            request.Journal?.Invoke(resumeEntry);
+            // The output is about to take the source's own name: the source is replaced without a moment where neither it nor the output is in place (see PublishOverSource).
+            if (disposeSourceFirst) FileOutcomeHelpers.PublishOverSource(_trash, file.FullName, config.Processing.DeleteAfterConvert, physicalPath, resolvedDestPath, ParkedChanged);
+            else File.Move(physicalPath, resolvedDestPath, overwrite: true);
             return resolvedDestPath;
         }
 
@@ -170,7 +184,16 @@ internal sealed class EncodedFileFinisher
             // A Videos lane's library (the lane the file lands in) is one flat folder.
             var flat = LaneKinds.IsVideos(libraries.RedirectedTo ?? config.Lanes.FirstOrDefault(l => l.Id == resumeEntry.LaneId));
             routedDestPath = _fileRouter.RouteFile(tempFileName, desiredFileName, isTv, libraries.TvShowBasePath, libraries.MovieBasePath, config.Processing.MoveFiles, config.Processing.OnDestinationCollision, showEdition,
-                new SourceProtection(file.FullName, config.Processing.DeleteAfterConvert, ResumeKeeping.SourceUnchangedSinceEncode(resumeEntry) && !sourceOutsideInput, _trash), flat);
+                new SourceProtection(file.FullName, config.Processing.DeleteAfterConvert, ResumeKeeping.SourceUnchangedSinceEncode(resumeEntry) && !sourceOutsideInput, _trash, ParkedChanged), flat,
+                // The collision-resolved destination is journalled BEFORE the file is moved there: a stop between the move and the next step then still leaves a trail to the filed file.
+                beforeMove: destination =>
+                {
+                    // What the output is (its size and the SHA-256 of its content): after a stop, only a file that is exactly this is taken for it.
+                    ResumeKeeping.NoteOutputIdentity(resumeEntry, tempFileName);
+                    resumeEntry.PendingCompanionVideoDestPath = destination;
+                    resumeEntry.FiledInOutput = false;
+                    request.Journal?.Invoke(resumeEntry);
+                });
             // Only a file that really reached a library counts as redirected - one resting in Output
             // (MoveFiles off, a Skip) or stuck on a failed move landed nowhere yet.
             if (routedDestPath is not null)
@@ -299,7 +322,15 @@ internal sealed class EncodedFileFinisher
 
         if (!moveFailed && !sameAsSource && !sourceReplaced && !sourceUnknown && !sourceKeptOutsideInput && config.Processing.DeleteAfterConvert != DeleteAfterConvertMode.Maintain)
         {
-            FileOutcomeHelpers.DisposeSource(_trash, file.FullName, config.Processing.DeleteAfterConvert);
+            if (!FileOutcomeHelpers.DisposeSource(_trash, file.FullName, config.Processing.DeleteAfterConvert))
+            {
+                // The trash service only logs a removal that failed (a locked file, no permission) and returns normally: the original is still there. It is kept for the user, and noted as
+                // converted, so a later scan does not take it for new work and convert it a second time.
+                var notRemoved = $"The source '{file.Name}' could not be removed, so it was kept (delete it yourself).";
+                ResumeKeeping.NoteSourceKept(resumeEntry);
+                AddWarning(ReportWarningCode.SourceNotRemoved, notRemoved);
+                _logger.Log($"  {notRemoved}", LogSeverity.Error);
+            }
         }
 
         // Only attempted when the video actually reached a routed (TV/Movie library)
@@ -402,6 +433,19 @@ internal sealed class EncodedFileFinisher
             resumeEntry.EncodedFilePath = null;
             resumeEntry.EncodedFileDesiredName = null;
         }
+
+        // The original that was set aside for the replacement could not be disposed of after the output was filed: it stays on record (ParkedOriginalPath) and the journal stays open - with the output's
+        // identity - so the next start finishes the job from that exact file. (A move that failed and could not put the original back keeps its record too: see the MoveFailed branch.)
+        if (!moveFailed && resumeEntry.ParkedOriginalPath is not null)
+        {
+            AddWarning(ReportWarningCode.CleanupDeferredFailed, $"The original '{file.Name}' could not be removed once the output was filed; it is kept at '{resumeEntry.ParkedOriginalPath}' and will be removed on the next pass.");
+            resumeEntry.Status = ResumeStatus.FinishPending;
+            resumeEntry.PendingCompanionVideoDestPath = routedDestPath ?? currentPath;
+            return new FinishOutcome(endSizeGb, arrStatus, finalFileName ?? newFileName, moveFailed, diskFull, failureReason, errorCode, postProcessWarning, warningCodes, redirectedTo);
+        }
+
+        // Filing is settled one way or another: the journal's note of the output is not needed any more (a retried move notes it afresh).
+        ResumeKeeping.ClearOutputIdentity(resumeEntry);
 
         if (moveFailed)
         {

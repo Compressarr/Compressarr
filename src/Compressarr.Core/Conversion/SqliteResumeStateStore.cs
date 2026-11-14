@@ -25,14 +25,17 @@ public sealed class SqliteResumeStateStore : IResumeStateStore, IQueueAvailabili
         nameof(ResumeEntry.LastRetryFailureMessage), nameof(ResumeEntry.Order), nameof(ResumeEntry.Skipped), nameof(ResumeEntry.PresetOverride),
         nameof(ResumeEntry.Removed), nameof(ResumeEntry.HeldAfterFailure), nameof(ResumeEntry.KeptSourceSize), nameof(ResumeEntry.KeptSourceModifiedUtc),
         nameof(ResumeEntry.CreatedByQueueEdit), nameof(ResumeEntry.FileBotUnmatched), nameof(ResumeEntry.DestinationLaneId),
-        nameof(ResumeEntry.EncodedFromSize), nameof(ResumeEntry.EncodedFromModifiedUtc), nameof(ResumeEntry.EncodedFromCreatedUtc), nameof(ResumeEntry.EncodedFromFingerprint)
+        nameof(ResumeEntry.EncodedFromSize), nameof(ResumeEntry.EncodedFromModifiedUtc), nameof(ResumeEntry.EncodedFromCreatedUtc), nameof(ResumeEntry.EncodedFromFingerprint),
+        nameof(ResumeEntry.EncodedFileSize), nameof(ResumeEntry.EncodedFileDigest), nameof(ResumeEntry.FiledInOutput),
+        nameof(ResumeEntry.ParkedOriginalPath)
     };
 
     private static readonly string[] Columns =
     {
         "lane_id", "full_name", "status", "encoded_file_path", "encoded_file_desired_name", "pending_companion_source_dir", "pending_companion_video_dest_path",
         "last_retry_failure_message", "position", "skipped", "preset_override", "removed", "held_after_failure", "kept_source_size", "kept_source_modified_utc",
-        "created_by_queue_edit", "filebot_unmatched", "destination_lane_id", "encoded_from_size", "encoded_from_modified_utc", "encoded_from_created_utc", "encoded_from_fingerprint"
+        "created_by_queue_edit", "filebot_unmatched", "destination_lane_id", "encoded_from_size", "encoded_from_modified_utc", "encoded_from_created_utc", "encoded_from_fingerprint",
+        "encoded_file_size", "encoded_file_digest", "filed_in_output", "parked_original_path"
     };
 
     private static readonly string SelectSql = "SELECT id, " + string.Join(", ", Columns) + " FROM queue ORDER BY id;";
@@ -174,7 +177,8 @@ public sealed class SqliteResumeStateStore : IResumeStateStore, IQueueAvailabili
         e.KeptSourceSize, e.KeptSourceModifiedUtc is { } kept ? kept.ToString("O", CultureInfo.InvariantCulture) : null,
         e.CreatedByQueueEdit ? 1L : 0L, e.FileBotUnmatched ? 1L : 0L, e.DestinationLaneId,
         e.EncodedFromSize, e.EncodedFromModifiedUtc is { } from ? from.ToString("O", CultureInfo.InvariantCulture) : null,
-        e.EncodedFromCreatedUtc is { } createdFrom ? createdFrom.ToString("O", CultureInfo.InvariantCulture) : null, e.EncodedFromFingerprint
+        e.EncodedFromCreatedUtc is { } createdFrom ? createdFrom.ToString("O", CultureInfo.InvariantCulture) : null, e.EncodedFromFingerprint,
+        e.EncodedFileSize, e.EncodedFileDigest, e.FiledInOutput ? 1L : 0L, e.ParkedOriginalPath
     };
 
     /// <summary>Every row, in insertion order. <paramref name="withValues"/> also keeps each entry's stored values, which only an update needs (to see what its callback changed).</summary>
@@ -212,7 +216,11 @@ public sealed class SqliteResumeStateStore : IResumeStateStore, IQueueAvailabili
                 EncodedFromSize = Number(19),
                 EncodedFromModifiedUtc = Text(20) is { } from ? DateTime.Parse(from, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind) : null,
                 EncodedFromCreatedUtc = Text(21) is { } createdFrom ? DateTime.Parse(createdFrom, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind) : null,
-                EncodedFromFingerprint = Text(22)
+                EncodedFromFingerprint = Text(22),
+                EncodedFileSize = Number(23),
+                EncodedFileDigest = Text(24),
+                FiledInOutput = Number(25) == 1,
+                ParkedOriginalPath = Text(26)
             };
             rows.Add(new Row(entry, reader.GetInt64(0), withValues ? ValuesOf(entry) : Array.Empty<object?>()));
         }
@@ -468,6 +476,10 @@ public sealed class SqliteResumeStateStore : IResumeStateStore, IQueueAvailabili
             inDatabase.EncodedFromModifiedUtc = fromFallback.EncodedFromModifiedUtc;
             inDatabase.EncodedFromCreatedUtc = fromFallback.EncodedFromCreatedUtc;
             inDatabase.EncodedFromFingerprint = fromFallback.EncodedFromFingerprint;
+            inDatabase.EncodedFileSize = fromFallback.EncodedFileSize;
+            inDatabase.EncodedFileDigest = fromFallback.EncodedFileDigest;
+            inDatabase.FiledInOutput = fromFallback.FiledInOutput;
+            inDatabase.ParkedOriginalPath = fromFallback.ParkedOriginalPath;
         }
 
         inDatabase.Skipped |= fromFallback.Skipped;

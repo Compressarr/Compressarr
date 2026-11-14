@@ -247,7 +247,19 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
 
         // Everything left unfinished from earlier passes (see RetryRecovery) is resolved before this
         // pass scans for anything new.
-        retriesSucceeded = await _retryRecovery.RecoverAsync(lane, laneConfig, inputPath, tvShowBasePath, movieBasePath, resumeState, resumeFilePath, cancellationToken);
+        // A lane whose History is not fully tracked (3.1) leaves no file name behind for work it finishes cleanly, and that includes finishing an earlier file: the recovery's log lines are held
+        // like a file's own (an error keeps them), and a recovered file is not counted - the count is what keeps a run's log and makes a retry-only pass write a report.
+        var trackedLane = lane.Tracking == LaneTracking.Full;
+        if (!trackedLane) _logger.BeginFileScope();
+        try
+        {
+            retriesSucceeded = await _retryRecovery.RecoverAsync(lane, laneConfig, inputPath, tvShowBasePath, movieBasePath, resumeState, resumeFilePath, cancellationToken);
+        }
+        finally
+        {
+            if (!trackedLane) _logger.EndFileScope(discard: true);
+        }
+        if (!trackedLane) retriesSucceeded = 0;
 
         // Optional pre-processing pass (FileBot) - no-ops instantly if disabled. Runs before the
         // real scan below so anything it renamed/organized is what Compressarr's own classifier

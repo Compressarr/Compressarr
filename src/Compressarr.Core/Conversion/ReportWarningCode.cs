@@ -29,6 +29,9 @@ public enum ReportWarningCode
 
     /// <summary>The source is not inside the lane's Input folder (the Input setting changed while the work waited), so it and its companions were left alone; the converted file was filed.</summary>
     SourceOutsideInputKept = 207,
+
+    /// <summary>The converted file was filed, but the original could not be removed (a locked file, permissions, antivirus), so it was kept and is not converted again; delete it by hand.</summary>
+    SourceNotRemoved = 208,
 }
 
 public static class ReportWarningCodeExtensions
@@ -43,6 +46,7 @@ public static class ReportWarningCodeExtensions
         ReportWarningCode.CleanupDeferredFailed => "Cleanup deferred (cleanup failed)",
         ReportWarningCode.SourceChangedKept => "Source changed, kept",
         ReportWarningCode.SourceOutsideInputKept => "Source outside Input, kept",
+        ReportWarningCode.SourceNotRemoved => "Source could not be removed, kept",
         _ => "Warning",
     };
 
@@ -63,6 +67,8 @@ public static class ReportWarningCodeExtensions
             "The video was converted and filed, but the file at the source's path is no longer the one that was converted (Sonarr or Radarr replaced it, or a different file was copied in while it converted), or could not be confirmed to be it. It was kept instead of deleted; a different file is queued as new work on a later scan.",
         ReportWarningCode.SourceOutsideInputKept =>
             "The video was converted and filed, but its original is not inside this lane's Input folder (the Input setting was changed while the work waited), and Compressarr only deletes or sweeps inside Input. The original and its companion files were left where they are.",
+        ReportWarningCode.SourceNotRemoved =>
+            "The video was converted and filed, but its original could not be removed (a locked file, permissions, antivirus), so it was kept. It is noted as converted and is not converted again; delete it yourself once whatever holds it lets go.",
         _ => "An unspecified warning.",
     };
 }

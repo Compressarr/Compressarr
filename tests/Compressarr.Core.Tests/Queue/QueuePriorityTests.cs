@@ -227,4 +227,26 @@ public class QueuePriorityTests
         Assert.Equal(2, queue[1].Order);                      // the lowered episode drops behind a.mkv
         Assert.Equal(1, queue[2].Order);
     }
+
+    // ---- the 3.1.0-rc.1 review: M2 ----
+
+    [Fact]
+    public void ATmdbTagTooLargeToBeAnId_IsIgnored_NotAnError()
+    {
+        var path = @"D:\In\Doctor Who {tmdb-99999999999}\Doctor Who - S01E01.mkv";
+
+        Assert.Equal(-1, Rules(Lower("Doctor Who")).TierOf(path));                     // a title rule still matches
+        Assert.Equal(0, Rules(new PriorityRule { TmdbId = 1396, Priority = QueuePriority.Lower }).TierOf(path));
+        Assert.Null(QueuePriorityRules.TmdbIdIn(path));
+        Assert.False(QueuePriorityRules.RuleMatches(Lower("Babylon"), path));
+    }
+
+    [Fact]
+    public void ARealTagAfterAnOversizedOne_IsStillFound()
+    {
+        var path = @"D:\In\Show {tmdb-99999999999} [tmdbid-1396]\Show - S01E01.mkv";
+
+        Assert.Equal(1396, QueuePriorityRules.TmdbIdIn(path));
+        Assert.Equal(-1, Rules(new PriorityRule { TmdbId = 1396, Priority = QueuePriority.Lower }).TierOf(path));
+    }
 }

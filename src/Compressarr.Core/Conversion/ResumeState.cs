@@ -73,6 +73,88 @@ public static class ResumeKeeping
         entry.KeptSourceModifiedUtc = info.LastWriteTimeUtc;
     }
 
+    /// <summary>The SHA-256 of a file's whole content, as hex; null when it cannot be read. Reads the file once, which for a finished encode takes about as long as copying it.</summary>
+    internal static string? ContentDigest(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 20);
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buffer = new byte[1 << 20];
+            int read;
+            while ((read = stream.Read(buffer, 0, buffer.Length)) > 0) hash.AppendData(buffer, 0, read);
+            return Convert.ToHexString(hash.GetHashAndReset());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Notes what the encoded output is (its size and the SHA-256 of its content) as the crash journal records it, just before the file is moved. Clears the note when the file cannot be read.</summary>
+    public static void NoteOutputIdentity(ResumeEntry entry, string encodedFilePath)
+    {
+        try
+        {
+            var info = new FileInfo(encodedFilePath);
+            var digest = info.Exists ? ContentDigest(encodedFilePath) : null;
+            if (digest is null) { ClearOutputIdentity(entry); return; }
+            entry.EncodedFileSize = info.Length;
+            entry.EncodedFileDigest = digest;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ClearOutputIdentity(entry);
+        }
+    }
+
+    /// <summary>Forgets the journal's note of the output (and that it was being published in Output): filing is settled, or the move did not happen.</summary>
+    public static void ClearOutputIdentity(ResumeEntry entry)
+    {
+        entry.EncodedFileSize = null;
+        entry.EncodedFileDigest = null;
+        entry.FiledInOutput = false;
+    }
+
+    /// <summary>Whether the file at <paramref name="path"/> is the output the journal recorded for this entry.</summary>
+    public enum OutputCheck
+    {
+        /// <summary>It has the size and time the encoded output had.</summary>
+        Matches,
+        /// <summary>Nothing is there.</summary>
+        Missing,
+        /// <summary>A file is there and it is positively not the recorded one (another size, or other content that was read).</summary>
+        Different,
+        /// <summary>No record was made (an entry journalled by 3.1.0-rc.1), so nothing can be compared.</summary>
+        Unrecorded,
+        /// <summary>It could not be compared right now: the path cannot be checked, or the content cannot be read (a lock, access denied, a share that dropped). Not a mismatch and not "missing":
+        /// nothing may be concluded from it, and no journal record may be cleared because of it - recovery leaves the entry as it is and looks again on the next pass.</summary>
+        Indeterminate
+    }
+
+    /// <summary>Compares the file at <paramref name="path"/> with the output the journal recorded: the same size and the same SHA-256 of its whole content (a copy that is the same length, or that has
+    /// the same times, is not enough). Only <see cref="OutputCheck.Matches"/> allows treating it as this job's filed output; every other answer means the original must be kept. Reads the file once.</summary>
+    public static OutputCheck CheckOutput(ResumeEntry entry, string path)
+    {
+        try
+        {
+            // Only what was positively read decides Matches or Different. A path that cannot be checked, or content that cannot be read, is Indeterminate - never a mismatch.
+            var presence = FileOutcomeHelpers.PresenceOf(path);
+            if (presence == FileOutcomeHelpers.FilePresence.Absent) return OutputCheck.Missing;
+            if (presence == FileOutcomeHelpers.FilePresence.Unknown) return OutputCheck.Indeterminate;
+            var info = new FileInfo(path);
+            if (entry.EncodedFileSize is not { } size || string.IsNullOrEmpty(entry.EncodedFileDigest)) return OutputCheck.Unrecorded;
+            if (info.Length != size) return OutputCheck.Different;
+            var digest = ContentDigest(path);
+            if (digest is null) return OutputCheck.Indeterminate;
+            return string.Equals(digest, entry.EncodedFileDigest, StringComparison.OrdinalIgnoreCase) ? OutputCheck.Matches : OutputCheck.Different;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return OutputCheck.Indeterminate;
+        }
+    }
+
     private const int FingerprintSample = 1 << 20;
 
     /// <summary>A short fingerprint of a file's content: its size and its first and last megabyte, hashed. Cheap (two megabytes read however large the file is) and enough to tell
@@ -139,22 +221,46 @@ public static class ResumeKeeping
     /// not accepted as identity: an older entry, or a v7 row with no fingerprint, answers <see cref="SourceCheck.Unknown"/> unless the file is already known to differ. With no note at all,
     /// <paramref name="encodedFilePath"/> (where the result is or was staged) can still show a difference: a source written or created after that file was finished cannot be what it was
     /// made from. Being older than the encode proves nothing. This is change detection, not proof: a different file made to look the same in all of these ways would not be noticed.</summary>
-    public static SourceCheck CheckSource(ResumeEntry entry, string? encodedFilePath = null)
+    public static SourceCheck CheckSource(ResumeEntry entry, string? encodedFilePath = null) => CheckSourceFile(entry, entry.FullName, encodedFilePath);
+
+    /// <summary>The same comparison for the file at <paramref name="path"/> - the original wherever it was moved to (a parked original), not only at the entry's own path.</summary>
+    public static SourceCheck CheckSourceFile(ResumeEntry entry, string path, string? encodedFilePath = null) => CheckSourceFileDetailed(entry, path, encodedFilePath).Check;
+
+    /// <summary>As <see cref="CheckSourceFile"/>, and also says whether the answer is <c>Indeterminate</c>: the file could not be examined right now (the path cannot be checked, or its content cannot be
+    /// read - a lock, access denied, a share that dropped). That is reported as Unknown (kept, never deletable) to every ordinary caller; recovery of a parked original uses the flag to tell it from an
+    /// Unknown that is permanent (an entry with no note of the source), and keeps its journal record for the former.</summary>
+    public static (SourceCheck Check, bool Indeterminate) CheckSourceFileDetailed(ResumeEntry entry, string path, string? encodedFilePath = null)
     {
-        if (!File.Exists(entry.FullName)) return SourceCheck.Unchanged;
-        var info = new FileInfo(entry.FullName);
+        // A file that cannot be reached (permissions, a share that dropped) is not "gone": it cannot be shown to be the original, so it is Unknown (kept), never Unchanged (deletable).
+        var presence = FileOutcomeHelpers.PresenceOf(path);
+        if (presence == FileOutcomeHelpers.FilePresence.Absent) return (SourceCheck.Unchanged, false);
+        if (presence == FileOutcomeHelpers.FilePresence.Unknown) return (SourceCheck.Unknown, true);
 
-        if (entry.EncodedFromSize is not { } size || entry.EncodedFromModifiedUtc is not { } modified)
+        try
         {
-            if (encodedFilePath is null || !File.Exists(encodedFilePath)) return SourceCheck.Unknown;
-            var finishedAt = File.GetLastWriteTimeUtc(encodedFilePath);
-            return info.LastWriteTimeUtc > finishedAt + TimeTolerance || info.CreationTimeUtc > finishedAt + TimeTolerance ? SourceCheck.Changed : SourceCheck.Unknown;
-        }
+            var info = new FileInfo(path);
 
-        if (info.Length != size || (info.LastWriteTimeUtc - modified).Duration() > TimeTolerance) return SourceCheck.Changed;
-        if (entry.EncodedFromCreatedUtc is { } created && (info.CreationTimeUtc - created).Duration() > TimeTolerance) return SourceCheck.Changed;
-        if (entry.EncodedFromFingerprint is not { } fingerprint) return SourceCheck.Unknown;
-        return string.Equals(ContentFingerprint(entry.FullName), fingerprint, StringComparison.Ordinal) ? SourceCheck.Unchanged : SourceCheck.Changed;
+            // Unknown below is permanent (nothing was noted about the source): the file itself was examined fine.
+            if (entry.EncodedFromSize is not { } size || entry.EncodedFromModifiedUtc is not { } modified)
+            {
+                if (encodedFilePath is null || !File.Exists(encodedFilePath)) return (SourceCheck.Unknown, false);
+                var finishedAt = File.GetLastWriteTimeUtc(encodedFilePath);
+                return (info.LastWriteTimeUtc > finishedAt + TimeTolerance || info.CreationTimeUtc > finishedAt + TimeTolerance ? SourceCheck.Changed : SourceCheck.Unknown, false);
+            }
+
+            if (info.Length != size || (info.LastWriteTimeUtc - modified).Duration() > TimeTolerance) return (SourceCheck.Changed, false);
+            if (entry.EncodedFromCreatedUtc is { } created && (info.CreationTimeUtc - created).Duration() > TimeTolerance) return (SourceCheck.Changed, false);
+            if (entry.EncodedFromFingerprint is not { } fingerprint) return (SourceCheck.Unknown, false);
+
+            // A fingerprint that could not be read (a lock, access denied) says nothing about the content: it is not a difference.
+            var current = ContentFingerprint(path);
+            if (current is null) return (SourceCheck.Unknown, true);
+            return (string.Equals(current, fingerprint, StringComparison.Ordinal) ? SourceCheck.Unchanged : SourceCheck.Changed, false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return (SourceCheck.Unknown, true);
+        }
     }
 
     /// <summary>True only when <see cref="CheckSource"/> says it is the file that was encoded (or the file is gone): the one answer that allows deleting or overwriting the source.</summary>
@@ -169,7 +275,11 @@ public static class ResumeKeeping
 
     /// <summary>A Completed entry still worth remembering: its kept source is still there, so forgetting it would convert that file again.</summary>
     public static bool StillNeeded(ResumeEntry entry) =>
-        entry.Status == ResumeStatus.Completed && entry.KeptSourceSize.HasValue && File.Exists(entry.FullName);
+        HoldsParkedOriginal(entry) || (entry.Status == ResumeStatus.Completed && entry.KeptSourceSize.HasValue && File.Exists(entry.FullName));
+
+    /// <summary>True while the entry's original is set aside for a same-path replacement and not yet put back or disposed of (<see cref="ResumeEntry.ParkedOriginalPath"/>). Such an entry is the only
+    /// record of where that file is: it is never dropped, and nothing but the parked-original recovery acts on it (no routing, retry, or cleanup) until the file is resolved.</summary>
+    public static bool HoldsParkedOriginal(ResumeEntry entry) => !string.IsNullOrEmpty(entry.ParkedOriginalPath);
 
     /// <summary>The lane's entries that were converted with their source kept, by path - built once per scan, so asking about each scanned
     /// file is a lookup rather than a pass over the whole resume state.</summary>
@@ -224,6 +334,10 @@ internal static class ResumeResults
             onDisk.EncodedFromModifiedUtc = entry.EncodedFromModifiedUtc;
             onDisk.EncodedFromCreatedUtc = entry.EncodedFromCreatedUtc;
             onDisk.EncodedFromFingerprint = entry.EncodedFromFingerprint;
+            onDisk.EncodedFileSize = entry.EncodedFileSize;
+            onDisk.EncodedFileDigest = entry.EncodedFileDigest;
+            onDisk.FiledInOutput = entry.FiledInOutput;
+            onDisk.ParkedOriginalPath = entry.ParkedOriginalPath;
             return true;
         });
     }
@@ -468,6 +582,24 @@ public sealed class ResumeEntry
     /// <summary>A fingerprint of the source's content when its encode started (see <see cref="ResumeKeeping.ContentFingerprint"/>): tells another video from this one even when its
     /// size and times were made to match. See <see cref="EncodedFromSize"/>.</summary>
     public string? EncodedFromFingerprint { get; set; }
+
+    /// <summary>The crash journal's record of the encoded OUTPUT (not the source): its size, noted with <see cref="EncodedFileDigest"/> just before the file is moved to where it will be filed. After a
+    /// stop, a file found at the recorded destination is only this job's output if it has this size and this digest - a different file there (Sonarr, Radarr or a person put one in, even one of the
+    /// same length and time) is never taken for it, and the original is never deleted on its say-so. Null when nothing is journalled (and for an entry journalled by 3.1.0-rc.1, which did not
+    /// record it: such a destination cannot be confirmed, so the original is kept). See <see cref="ResumeKeeping.CheckOutput"/>.</summary>
+    public long? EncodedFileSize { get; set; }
+
+    /// <summary>The SHA-256 of the encoded output's whole content, as hex. See <see cref="EncodedFileSize"/>.</summary>
+    public string? EncodedFileDigest { get; set; }
+
+    /// <summary>Set (with a journalled destination) when the encoded output is being published in the lane's Output folder under its clean name rather than moved into a library: Move converted
+    /// files is off, or a library collision is set to Skip. Such a file has no companions to move and no folder to clean up, so a restart finishes it differently from a library move.</summary>
+    public bool FiledInOutput { get; set; }
+
+    /// <summary>Set while an original that occupied the filed file's own path (a lane whose Input is its library, or its Output) is parked: the exact, unique path it was moved aside to while the output is
+    /// published. Written to the journal BEFORE the original is moved, and cleared only once it is resolved - put back after a failed publication, or deleted/recycled once the output is confirmed. While it
+    /// is set, a restart acts on exactly that file (and nothing that merely looks like it): it restores it, or disposes of it after verifying both the output and that it is still the original.</summary>
+    public string? ParkedOriginalPath { get; set; }
 
     /// <summary>Set when this entry was created purely as bookkeeping for a queue-control action
     /// (reorder/skip/preset-override/remove) on a file the current pass hadn't tracked yet, rather

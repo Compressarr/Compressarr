@@ -27,7 +27,7 @@ internal static class ReportToolbar
   @media print { .report-toolbar { display: none !important; } }
 </style>
 <div class="report-toolbar" id="rt">
-  <a class="rt-btn" id="rtSave" href="?download=1" title="Download this report as a file you can keep or send">Save</a>
+  <a class="rt-btn" id="rtSave" href="?download=1{{REDACT}}" title="Download this report as a file you can keep or send">Save</a>
   <button type="button" class="rt-btn" id="rtShareBtn" aria-haspopup="true" aria-expanded="false">Share &#9662;</button>
   <div class="rt-menu" id="rtMenu" hidden>
     <button type="button" class="rt-item" id="rtCopyLink">Copy link</button>
@@ -41,7 +41,10 @@ internal static class ReportToolbar
 </div>
 <script>
 (function () {
-  var base = location.href.split('?')[0];
+  // true on the view without file names: every link the buttons make must stay that view, or Save and Share would hand over the names.
+  var redacted = /*REDACTED*/false;
+  var base = location.href.split('?')[0] + (redacted ? '?redact=1' : '');
+  if (redacted) { document.getElementById('rtSaveClean').style.display = 'none'; document.getElementById('rtViewClean').style.display = 'none'; }
   var menu = document.getElementById('rtMenu'), btn = document.getElementById('rtShareBtn'), done = document.getElementById('rtDone');
   function summary() {
     var muted = document.querySelector('.muted'), parts = [];
@@ -68,7 +71,7 @@ internal static class ReportToolbar
     ns.addEventListener('click', function () { navigator.share({ title: document.title, text: summary(), url: base }).catch(function () {}); setMenu(false); });
   }
   // A trash can at the end of each file row (3.1): removes the file's name and messages from History while its numbers stay in every total.
-  var fileRows = document.querySelectorAll('tr[data-fid]');
+  var fileRows = redacted ? [] : document.querySelectorAll('tr[data-fid]');
   if (fileRows.length) {
     var runId = location.pathname.split('/').pop();
     document.querySelectorAll('table').forEach(function (table) {
@@ -103,16 +106,20 @@ internal static class ReportToolbar
 </script>
 """;
 
-    /// <summary>Puts the buttons into a report page: at the generator's marker when it is there, otherwise just before the end of the page (a report saved by an older version).</summary>
-    public static byte[] AddTo(byte[] page)
+    /// <summary>Puts the buttons into a report page: at the generator's marker when it is there, otherwise just before the end of the page (a report saved by an older version).
+    /// <paramref name="redacted"/> is true for the view without file names: the buttons then keep to it (Save downloads that view, Copy link and Share point at it).</summary>
+    public static byte[] AddTo(byte[] page, bool redacted = false)
     {
         var text = System.Text.Encoding.UTF8.GetString(page);
-        if (text.Contains(Marker, StringComparison.Ordinal)) text = text.Replace(Marker, Html, StringComparison.Ordinal);
+        // The Save link is final in the markup itself (no script has to run to add the flag): on the view without file names it asks for the download without file names.
+        var buttons = Html.Replace("{{REDACT}}", redacted ? "&amp;redact=1" : "", StringComparison.Ordinal)
+                          .Replace("/*REDACTED*/false", redacted ? "true" : "false", StringComparison.Ordinal);
+        if (text.Contains(Marker, StringComparison.Ordinal)) text = text.Replace(Marker, buttons, StringComparison.Ordinal);
         else
         {
             var end = text.LastIndexOf("</body>", StringComparison.OrdinalIgnoreCase);
             if (end < 0) return page;
-            text = text.Insert(end, Html);
+            text = text.Insert(end, buttons);
         }
         return System.Text.Encoding.UTF8.GetBytes(text);
     }
