@@ -9,6 +9,46 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
+## [3.1.0-rc.2] - 2026-11-13
+
+Fixes from an independent review of 3.1.0-rc.1; nothing else changed. If you installed rc.1, this replaces it.
+
+### Fixed
+
+- **Crash recovery no longer trusts a file just because it is at the recorded destination.** Just before the encoded file is moved, the journal records its size and the SHA-256 of its content (reading the file
+  once, about as long as copying it). After a stop, a file found at the destination is only taken for the output if it has exactly that size and content; anything else there - even a file of the same length and
+  time (Sonarr or Radarr put one in, or a person did) - means the original is **kept, never deleted**, and not converted again. A journal written by 3.1.0-rc.1, which has no such record, is handled the same careful way
+  (the original is kept).
+- **A move that finished just before a stop is no longer forgotten.** The destination is written to the journal *before* the file is moved (for a first attempt, a retried move, and a file that stays in Output
+  because Move converted files is off or a collision is set to Skip). On the next start a staged file that has gone and a destination that holds the recorded output means the file was filed, so its original, companions
+  and cleanup are finished instead of the original being found again and converted a second time. A file published in Output has no companions or folder to tidy: only the Sonarr/Radarr step is repeated.
+  A partial copy left by a move across drives is not mistaken for the output: the encoded file is routed again, and a complete copy whose staged leftover remained just has the leftover removed.
+- **A source that sits at the filed file's own path (a lane whose Input is its library, or its Output) is no longer deleted or recycled before its replacement is in place.** The destination is journalled
+  first. Then, with **Delete** and **Recycle** alike, the original is only moved aside - into a uniquely named folder beside the film (`.compressarr-original-…`), under its own file name, whose exact path is
+  written to the journal before anything is moved - while the encoded file is moved in; only once that has worked is the original deleted or sent to the recycle bin (where it keeps its own name). If the move
+  fails the original is put back and the encoded file stays staged for another try. A stop in the middle, a failed put-back, or an original that could not be removed afterwards (a lock) leaves the record in place
+  and the next start finishes the job from exactly that file: it puts the original back when the output did not make it, or removes it once the output is confirmed (same size and content) and the parked
+  file is still what was converted. Nothing else that merely looks like it is ever touched.
+- **A removal is only counted as done when the file is actually gone.** The trash service writes a failed removal (a locked file, no permission) to the log and returns as if nothing happened, so a call
+  that returned used to be taken as proof the original was disposed of. Now the original is checked to be gone before anything is forgotten: a parked original that is still there keeps its record
+  and is tried again on the next pass, both right after publishing and after a restart. An entry whose original is still set aside (it could not be put back, say) is also kept out of the ordinary
+  retry, companion and cleanup passes until that file is dealt with, so they cannot clear its destination or the output's identity or drop it as dead; and a parked original is never picked up by a
+  scan as new work. An original that cannot be removed on the ordinary route is kept, noted as converted (so it is not converted a second time) and reported with a new warning, **WARN 208**.
+- **A file that cannot be reached is no longer taken for a file that is gone.** A permissions change, a share that dropped or a volume that is not mounted makes the system answer "not there" for files that are
+  on disk. Recovery now tells "gone" from "cannot be checked": the parked-original record, a waiting move's encoded file, and a source or output being compared are only treated as gone when the folder that holds them
+  can be listed and really lacks them. When a path cannot be checked, the record is kept, nothing is deleted or re-converted, and the next pass looks again.
+- **A read that fails is no longer taken for a difference.** The same goes for content: when a file is visible but cannot be read right now (a lock, a scanner, a dropped connection), comparing it with what was
+  recorded gives "could not be examined", not "changed" or "another file". Recovery of a parked original then keeps its record and the output's identity, deletes nothing, and finishes the cleanup on the first pass
+  after the file can be read. Every place that clears the record now needs definite evidence (the file is gone, was removed, was put back, or was read and is positively not the original / not the output).
+- **An original that could not be confirmed is noted as kept** when recovery finishes a file, as it already was in the ordinary path, so a scan does not take it for new work.
+- **A tag like `{tmdb-99999999999}` in a file name no longer stops the queue.** Priority matching ignores a number too large to be a TMDb id instead of failing for every file.
+- **The report's Save, Copy link, Share and Email buttons stay on the "without file names" view** when that is the view you are on, so a saved or shared copy cannot show the names (the Save link itself is
+  already correct in the page, so it also holds when scripting is off). A report saved as a file
+  (an old copy in the Reports folder) cannot be redacted, so asking for it without file names is refused instead of returning the original.
+- **Finishing an earlier file no longer breaks a lane's "Track in History" choice.** A lane set to None or Errors only leaves no file name in the log and no report behind for a retried move that succeeds.
+- The queue database gains four columns (schema version 11); installing 3.0 or 3.1.0-rc.1 over it again cannot read it, as with every database change. A queue from 3.1.0-rc.1 upgrades with its entries and
+  edits intact; the crash journal's new notes start empty.
+
 ## [3.1.0-rc.1] - 2026-11-13
 
 > The first 3.1 pre-release (release candidate). Everything below is new since 3.0.0.
