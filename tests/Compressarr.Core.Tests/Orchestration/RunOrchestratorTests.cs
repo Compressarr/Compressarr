@@ -6,6 +6,7 @@ using Compressarr.Core.Logging;
 using Compressarr.Core.Notifications;
 using Compressarr.Core.Orchestration;
 using Compressarr.Core.Presets;
+using Compressarr.Core.Renaming;
 using Compressarr.Core.Reporting;
 using Compressarr.Core.Routing;
 using Compressarr.Core.Scheduling;
@@ -99,6 +100,25 @@ file sealed class FailingProcessRunner : IEncoderRunner
 {
     public Task<EncodeResult> RunAsync(EncodeRequest request, Action<EncodeProgress>? onProgress, CancellationToken cancellationToken) =>
         Task.FromResult(new EncodeResult(Success: false, DetailLogFile: request.DetailLogFile));
+}
+
+/// <summary>A TMDB renamer that renames nothing, calls the files it is told are unmatched Unmatched, and can say it could not ask about some.</summary>
+file sealed class ScriptedTmdbRenamer : ITmdbRenamer
+{
+    public HashSet<string> UnmatchedNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> UndeterminedNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<FileBotRunResult> RunAsync(TmdbRenameSettings settings, string apiKey, string inputPath, IReadOnlyList<string> vidTypes, IRunLogger logger, CancellationToken cancellationToken)
+    {
+        string[] files = Directory.GetFiles(inputPath);
+        return Task.FromResult(new FileBotRunResult(
+            files.Where(f => UnmatchedNames.Contains(Path.GetFileName(f))).ToHashSet(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, string>(),
+            files.Where(f => UndeterminedNames.Contains(Path.GetFileName(f))).ToHashSet(StringComparer.OrdinalIgnoreCase)));
+    }
+
+    public Task<IReadOnlyList<RenamePlanItem>> PreviewAsync(TmdbRenameSettings settings, string apiKey, string inputPath, IReadOnlyList<string> vidTypes, int limit, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<RenamePlanItem>>(Array.Empty<RenamePlanItem>());
 }
 
 file sealed class NoOpCompanionFileService : ICompanionFileService
@@ -264,7 +284,7 @@ public class RunOrchestratorTests : IDisposable
     private (RunOrchestrator Orchestrator, string ResumeFilePath) BuildOrchestrator(
         CompressarrConfig config, IEncoderRunner processRunner, IResumeStateStore? resumeStore = null,
         IRunLogger? logger = null, TimeSpan? postExecTimeout = null, IEncodeSchedule? schedule = null, IRunHistoryStore? historyStore = null,
-        IEncoderResolver? encoders = null, IRunArchive? archive = null)
+        IEncoderResolver? encoders = null, IRunArchive? archive = null, ITmdbRenamer? tmdbRenamer = null)
     {
         // HandBrakeCLI/presets "paths" just need to exist on disk for PathExists to pass -
         // PassThroughPathExpander does no real expansion, and FixedExtensionPresetService never
@@ -290,7 +310,7 @@ public class RunOrchestratorTests : IDisposable
             new PassThroughPathExpander(), new RealFolderScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), new MetadataService(),
             processRunner, new FileRouter(), new NoOpCompanionFileService(), new NoOpArrUnmonitorService(),
             new NoOpTrashService(), effectiveLogger, effectiveResumeStore, new NoOpProgressReporter(),
-            new StaticConfigStore(config), encoders);
+            new StaticConfigStore(config), encoders, tmdbRenamer);
 
         // postExecTimeout only ever non-null in the PostExec timeout test below - resolves the
         // internal test-only constructor overload; every other test keeps using the real
@@ -393,6 +413,126 @@ public class RunOrchestratorTests : IDisposable
         config.Report.ReportPath = Path.Combine(_tempDir, "Reports");
         config.Lanes.Add(MakeLane("lane", "Lane", input, output));
         return (config, input);
+    }
+
+    // ---- "Do not process unmatched files" ----
+
+    private static void SeedUnmatched(string resumeFilePath, string input, params string[] unmatchedNames)
+    {
+        var store = new JsonResumeStateStore();
+        var entries = new List<ResumeEntry>();
+        var order = 0;
+        foreach (var file in Directory.GetFiles(input).OrderBy(f => f, StringComparer.Ordinal))
+            entries.Add(new ResumeEntry { LaneId = "lane", FullName = file, Status = ResumeStatus.Pending, Order = order++, FileBotUnmatched = unmatchedNames.Contains(Path.GetFileName(file)) });
+        store.Save(entries, resumeFilePath);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_HoldingUnmatchedFiles_EncodesTheMatchedOnes_AndLeavesTheUnmatchedWaiting()
+    {
+        var (config, input) = MakeSingleLaneConfig("a.mkv", "b.mkv", "c.mkv");
+        config.HoldUnmatchedFiles = true;
+        var processRunner = new RecordingProcessRunner();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, processRunner);
+        SeedUnmatched(resumeFilePath, input, "a.mkv");                     // the first in line, and Unmatched
+
+        await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(new[] { "b.mkv", "c.mkv" }, processRunner.ProcessedInOrder);
+        var left = new JsonResumeStateStore().Load(resumeFilePath).Single(e => e.Status == ResumeStatus.Pending);
+        Assert.Equal("a.mkv", Path.GetFileName(left.FullName));
+        Assert.True(left.FileBotUnmatched);
+        Assert.True(File.Exists(Path.Combine(input, "a.mkv")));            // untouched
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_AnUnmatchedFileThatIsThenMatchedOrLeftAsIs_IsEncodedOnTheNextPass()
+    {
+        var (config, input) = MakeSingleLaneConfig("a.mkv", "b.mkv");
+        config.HoldUnmatchedFiles = true;
+        var processRunner = new RecordingProcessRunner();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, processRunner);
+        SeedUnmatched(resumeFilePath, input, "a.mkv");
+        await orchestrator.RunOnceAsync(config);
+        Assert.Equal(new[] { "b.mkv" }, processRunner.ProcessedInOrder);
+
+        // "Leave as is" (or a Match) clears the badge.
+        new JsonResumeStateStore().Update(resumeFilePath, state => { state.Single(e => Path.GetFileName(e.FullName) == "a.mkv").FileBotUnmatched = false; return true; });
+        await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(new[] { "b.mkv", "a.mkv" }, processRunner.ProcessedInOrder);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_NotHoldingUnmatchedFiles_EncodesThemAsBefore()
+    {
+        var (config, input) = MakeSingleLaneConfig("a.mkv", "b.mkv");
+        var processRunner = new RecordingProcessRunner();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, processRunner);
+        SeedUnmatched(resumeFilePath, input, "a.mkv");
+
+        await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(new[] { "a.mkv", "b.mkv" }, processRunner.ProcessedInOrder);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_HoldingUnmatchedFiles_ANewUnmatchedArrivalIsHeldFromTheStart()
+    {
+        var (config, _) = MakeSingleLaneConfig("a.mkv", "b.mkv");
+        config.HoldUnmatchedFiles = true;
+        config.TmdbRename.Enabled = true;
+        config.Posters.TmdbApiKey = "key";
+        var tmdb = new ScriptedTmdbRenamer();
+        tmdb.UnmatchedNames.Add("a.mkv");
+        var processRunner = new RecordingProcessRunner();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, processRunner, tmdbRenamer: tmdb);
+
+        await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(new[] { "b.mkv" }, processRunner.ProcessedInOrder);
+        var a = new JsonResumeStateStore().Load(resumeFilePath).Single(e => Path.GetFileName(e.FullName) == "a.mkv");
+        Assert.True(a.FileBotUnmatched);
+        Assert.Equal(ResumeStatus.Pending, a.Status);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_HoldingUnmatchedFiles_AFileTmdbCouldNotBeAskedAbout_WaitsThatPass_ButIsNotMarkedUnmatched()
+    {
+        var (config, _) = MakeSingleLaneConfig("a.mkv", "b.mkv");
+        config.HoldUnmatchedFiles = true;
+        config.TmdbRename.Enabled = true;
+        config.Posters.TmdbApiKey = "key";
+        var tmdb = new ScriptedTmdbRenamer();
+        tmdb.UndeterminedNames.Add("a.mkv");                               // TMDB was unreachable for this one
+        var processRunner = new RecordingProcessRunner();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, processRunner, tmdbRenamer: tmdb);
+
+        await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(new[] { "b.mkv" }, processRunner.ProcessedInOrder);
+        Assert.False(new JsonResumeStateStore().Load(resumeFilePath).Single(e => Path.GetFileName(e.FullName) == "a.mkv").FileBotUnmatched);
+
+        tmdb.UndeterminedNames.Clear();                                    // TMDB is back
+        await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(new[] { "b.mkv", "a.mkv" }, processRunner.ProcessedInOrder);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_NotHolding_AFileTmdbCouldNotBeAskedAbout_IsEncodedAsBefore()
+    {
+        var (config, _) = MakeSingleLaneConfig("a.mkv");
+        config.TmdbRename.Enabled = true;
+        config.Posters.TmdbApiKey = "key";
+        var tmdb = new ScriptedTmdbRenamer();
+        tmdb.UndeterminedNames.Add("a.mkv");
+        var processRunner = new RecordingProcessRunner();
+        var (orchestrator, _) = BuildOrchestrator(config, processRunner, tmdbRenamer: tmdb);
+
+        await orchestrator.RunOnceAsync(config);
+
+        Assert.Equal(new[] { "a.mkv" }, processRunner.ProcessedInOrder);
     }
 
     [Fact]

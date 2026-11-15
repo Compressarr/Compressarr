@@ -49,6 +49,14 @@ public interface IQueueService
     /// exist.</summary>
     QueueEditResult SetDestination(CompressarrConfig config, string laneId, string fullName, string? destinationLaneId);
 
+    /// <summary>Carries a waiting file's queue entry over to its new name after something renamed it (the Match / Fix match / Restore dialog): the same place in line, skip and preset
+    /// override, as for a file FileBot renamed. <paramref name="unmatched"/> sets the Unmatched badge on the renamed file (true when the name was put back). NotFound when the file has no
+    /// waiting entry, or the rename did not happen on disk.</summary>
+    QueueEditResult ApplyRename(CompressarrConfig config, string laneId, string oldFullName, string newFullName, bool unmatched);
+
+    /// <summary>Sets or clears the Unmatched badge of a waiting file without renaming it ("Leave as is" clears it).</summary>
+    QueueEditResult SetUnmatched(CompressarrConfig config, string laneId, string fullName, bool unmatched);
+
     /// <summary>Clears a failed file's Error entry (only that status) so the next scan can pick it up
     /// fresh. Returns how many entries were removed.</summary>
     int RemoveError(string laneId, string fullName);
@@ -231,6 +239,26 @@ public sealed class QueueService : IQueueService
             QueueRules.LockInVisibleOrder(config, resumeState, _pathExpander, _scanner);   // pin what is on screen first, then sort it
             return QueueRules.ApplyPriorityToWaiting(resumeState, new QueuePriorityRules(config.Priority.Rules));
         });
+
+    public QueueEditResult ApplyRename(CompressarrConfig config, string laneId, string oldFullName, string newFullName, bool unmatched)
+    {
+        if (config.Lanes.All(l => l.Id != laneId)) return QueueEditResult.UnknownLane;
+
+        var found = _resumeStore.Update(AppPaths.GetResumeFilePath(), resumeState =>
+        {
+            QueueRules.RemapRenamedFiles(resumeState, laneId, new Dictionary<string, string> { [oldFullName] = newFullName });
+            var entry = resumeState.FirstOrDefault(e => e.LaneId == laneId && e.Status == ResumeStatus.Pending && string.Equals(e.FullName, newFullName, StringComparison.OrdinalIgnoreCase));
+            if (entry is null) return false;
+
+            entry.FileBotUnmatched = unmatched;
+            return true;
+        });
+
+        return found ? QueueEditResult.Ok : QueueEditResult.NotFound;
+    }
+
+    public QueueEditResult SetUnmatched(CompressarrConfig config, string laneId, string fullName, bool unmatched) =>
+        Edit(config, laneId, fullName, entry => entry.FileBotUnmatched = unmatched);
 
     public int RemoveError(string laneId, string fullName) =>
         _resumeStore.Update(AppPaths.GetResumeFilePath(), resumeState => resumeState.RemoveAll(e =>

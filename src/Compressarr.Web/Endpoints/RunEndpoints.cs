@@ -191,7 +191,8 @@ public static class RunEndpoints
             IEncodeSchedule schedule,
             IActiveEncodeProcess activeProcess,
             IResumeStateStore resumeStore,
-            IPosterService posters) =>
+            IPosterService posters,
+            Compressarr.Core.Renaming.IRenameLog renameLog) =>
         {
             var snapshot = runState.GetSnapshot();
             var cpu = await cpuSampler.SampleAsync();
@@ -212,6 +213,11 @@ public static class RunEndpoints
             var upNextShown = posterSettings.Enabled
                 ? upNext.Select(i => i.IsVideosLane ? i : i with { PosterKey = posters.GetPosterId(posterSettings, i.FileName) }).ToList()   // a Videos lane's file names are never sent to TMDb
                 : upNext;
+            // Rows whose file Compressarr renamed (or FileBot did) can be fixed from the row's menu.
+            var renamedPaths = renameLog.CurrentPaths();
+            var upNextOut = renamedPaths.Count == 0
+                ? upNextShown
+                : upNextShown.Select(i => renamedPaths.Contains(Path.GetFullPath(i.FullName).ToUpperInvariant()) ? i with { IsRenamed = true } : i).ToList();
             var currentLane = config.Lanes.FirstOrDefault(l => l.DisplayName == snapshot.LaneDisplayName);
             var currentPosterKey = posterSettings.Enabled && snapshot.IsRunning && snapshot.FileName is not null && !LaneKinds.IsVideos(currentLane)
                 ? posters.GetPosterId(posterSettings, snapshot.FileName)
@@ -262,7 +268,8 @@ public static class RunEndpoints
                     nextChange = scheduleStatus.NextChange,
                     hold = scheduleStatus.Hold is { } hold ? new { reason = hold.Reason, since = hold.Since, until = hold.Until, suspendCurrent = hold.SuspendCurrent, setBy = hold.SetBy } : null
                 },
-                upNext = upNextShown,
+                upNext = upNextOut,
+                canMatch = !string.IsNullOrWhiteSpace(config.Posters.TmdbApiKey),
                 queueEtaText,
                 posters = new
                 {
@@ -290,7 +297,7 @@ public static class RunEndpoints
     /// window is counted too (see IEncodeSchedule.ProjectCompletion).</summary>
     internal static string? ComputeQueueEtaText(IReadOnlyList<UpNextItem> upNext, CurrentRunStateService runState, IEncodeSchedule schedule, ScheduleStatus scheduleStatus)
     {
-        var remaining = upNext.Where(i => !i.IsSkipped && !i.IsError).ToList();
+        var remaining = upNext.Where(i => !i.IsSkipped && !i.IsHeld && !i.IsError).ToList();
         var current = runState.GetCurrentFileRemaining();
         if (remaining.Count == 0 && current is null) return null;
 

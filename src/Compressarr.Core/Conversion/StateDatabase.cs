@@ -8,7 +8,7 @@ namespace Compressarr.Core.Conversion;
 /// statements are shared with <see cref="HistoryDatabase"/>.</summary>
 internal static class StateDatabase
 {
-    public const int CurrentVersion = 11;
+    public const int CurrentVersion = 12;
     public const string FileName = "compressarr.state.db";
 
     /// <summary>The database that goes with a resume-file path: the app's own <c>compressarr.resume.json</c> maps to <c>compressarr.state.db</c> in the
@@ -128,7 +128,41 @@ internal static class StateDatabase
             HistoryDatabase.Execute(connection, "PRAGMA user_version = 11;", transaction);
             transaction.Commit();
         }
+
+        if (version < 12)
+        {
+            using var transaction = connection.BeginTransaction();
+            HistoryDatabase.Execute(connection, SchemaV12, transaction);
+            HistoryDatabase.Execute(connection, "PRAGMA user_version = 12;", transaction);
+            transaction.Commit();
+        }
     }
+
+    // v12 (3.2): what the TMDB renamer and the queue's Match / Fix match did to a file name, so a wrong match can be put right or undone, and the matches a person chose by hand, so the
+    // rest of a show follows them. IF NOT EXISTS because the migration tests set an old version on a database that already has them. Two new tables only: nothing in 'queue' changes.
+    private const string SchemaV12 = """
+        CREATE TABLE IF NOT EXISTS rename_log (
+            id            INTEGER PRIMARY KEY,
+            current_key   TEXT    NOT NULL UNIQUE,   -- the file's present path in upper case: one row per file
+            original_path TEXT    NOT NULL,          -- what it was called before anything renamed it
+            current_path  TEXT    NOT NULL,
+            tmdb_id       INTEGER NULL,              -- NULL for a rename FileBot made: only the names are known
+            is_tv         INTEGER NOT NULL DEFAULT 0,
+            season        INTEGER NULL,
+            episodes      TEXT    NULL,              -- comma separated
+            source        TEXT    NOT NULL,          -- tmdb (the automatic renamer) | manual (Match / Fix match) | filebot
+            created_at    TEXT    NOT NULL,
+            updated_at    TEXT    NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS rename_memory (
+            key        TEXT    PRIMARY KEY,          -- movie|tv, the title reduced to letters and digits, the year, the region tag
+            tmdb_id    INTEGER NOT NULL,
+            is_tv      INTEGER NOT NULL,
+            title      TEXT    NOT NULL,
+            year       INTEGER NULL,
+            updated_at TEXT    NOT NULL
+        );
+        """;
 
     // v11: the exact path an original was parked at while its replacement is published (see ResumeEntry.ParkedOriginalPath). A step of its own: version 10 was already carried by an earlier build.
     private static readonly (string Name, string Definition)[] ParkedColumns =

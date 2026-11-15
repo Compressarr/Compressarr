@@ -411,7 +411,9 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 var next = QueueRules.SelectNext(
                     resumeState,
                     laneOrderIndex,
-                    (laneId, fullName) => laneContexts[laneId].NaturalOrderIndex.TryGetValue(fullName, out var idx) ? idx : int.MaxValue);
+                    (laneId, fullName) => laneContexts[laneId].NaturalOrderIndex.TryGetValue(fullName, out var idx) ? idx : int.MaxValue,
+                    // "Do not process unmatched files": an Unmatched file waits (like a skipped one) until it is matched or left as it is; so does one the renamer could not ask TMDB about this pass.
+                    e => config.HoldUnmatchedFiles && (e.FileBotUnmatched || laneContexts[e.LaneId].UndeterminedPaths.Contains(e.FullName)));
 
                 if (next is null) break;
 

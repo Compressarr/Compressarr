@@ -11,7 +11,9 @@ namespace Compressarr.Core.FileBot;
 /// <param name="Renames">Old full path -> new full path for every file FileBot renamed or moved,
 /// read from FileBot's own output. The queue uses it to carry a file's place in line (Order, Skip,
 /// preset override) over to its new name instead of treating the renamed file as a new arrival.</param>
-public sealed record FileBotRunResult(HashSet<string> Unmatched, IReadOnlyDictionary<string, string> Renames)
+/// <param name="Undetermined">Files the renamer could not give an answer for this pass (the TMDB renamer could not reach TMDB). Not unmatched, and nothing is remembered about them; with "Do not process
+/// unmatched files" on they simply wait this pass.</param>
+public sealed record FileBotRunResult(HashSet<string> Unmatched, IReadOnlyDictionary<string, string> Renames, IReadOnlySet<string>? Undetermined = null)
 {
     public static FileBotRunResult Empty => new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
 }

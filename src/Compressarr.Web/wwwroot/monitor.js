@@ -304,6 +304,188 @@ async function applyBulkChange() {
   }
 }
 
+// ---- Match / Fix match (3.2): pick the right film or show on TMDB for a waiting file. The page sends a TMDB id, never a title; every name is put in with textContent. ----
+let canMatch = false;
+const matchState = { item: null, isFix: false, candidates: [], selected: null, currentId: null, others: [] };
+
+function matchEl(id) { return document.getElementById(id); }
+
+function matchPost(path, body) {
+  return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+}
+
+async function openMatch(item, isFix) {
+  Object.assign(matchState, { item, isFix, candidates: [], selected: null, currentId: null, others: [] });
+  matchEl('matchTitle').textContent = isFix ? 'Fix match' : 'Match to TMDB';
+  matchEl('matchFile').textContent = item.fileName;
+  matchEl('matchIntro').textContent = isFix
+    ? 'This file was renamed. Pick the right film or show below, or restore the name it had.'
+    : 'TMDB could not tell what this file is. Pick the right film or show below.';
+  matchEl('matchQuery').value = '';
+  matchEl('matchYear').value = '';
+  matchEl('matchKind').value = 'movie';
+  matchEl('matchSeason').value = '';
+  matchEl('matchEpisodes').value = '';
+  matchEl('matchList').textContent = 'Looking on TMDB...';
+  matchEl('matchNote').textContent = '';
+  matchEl('matchEpisode').classList.add('hidden');
+  matchEl('matchOthersRow').classList.add('hidden');
+  matchEl('matchLeave').classList.toggle('hidden', isFix);
+  matchEl('matchRestore').classList.toggle('hidden', !isFix);
+  matchEl('matchApply').disabled = true;
+  matchEl('matchOverlay').classList.remove('hidden');
+
+  const body = await matchPost('/api/run/queue/match/candidates', { laneId: item.laneId, fullName: item.fullName }).catch(() => null);
+  if (!body || !body.success) {
+    matchEl('matchList').textContent = '';
+    matchEl('matchNote').textContent = body ? body.message : 'Could not reach Compressarr.';
+    return;
+  }
+
+  const sug = body.suggestion || {};
+  matchEl('matchQuery').value = sug.title || '';
+  matchEl('matchYear').value = sug.year || '';
+  matchEl('matchKind').value = sug.isTv ? 'tv' : 'movie';
+  matchEl('matchSeason').value = sug.season ?? '';
+  matchEl('matchEpisodes').value = (sug.episodes || []).join(',');
+  matchState.currentId = body.currentTmdbId;
+  matchState.others = body.otherFiles || [];
+  if (isFix && body.originalName) matchEl('matchIntro').textContent = `Renamed from "${body.originalName}". Pick the right film or show below, or restore that name.`;
+  showMatchCandidates(body);
+}
+
+function showMatchCandidates(body) {
+  matchState.candidates = body.candidates || [];
+  const keep = matchState.selected && matchState.candidates.find(c => c.id === matchState.selected.id && c.isTv === matchState.selected.isTv);
+  matchState.selected = keep || null;
+  const list = matchEl('matchList');
+  list.textContent = '';
+  for (const c of matchState.candidates) {
+    const row = document.createElement('div');
+    row.className = 'match-item' + (matchState.selected === c || keep === c ? ' selected' : '');
+    const img = document.createElement('img');
+    img.className = 'match-thumb';
+    img.alt = '';
+    img.loading = 'lazy';
+    if (c.posterPath) img.src = `/api/rename/poster?size=w92&path=${encodeURIComponent(c.posterPath)}`;
+    const text = document.createElement('div');
+    text.className = 'match-text';
+    const name = document.createElement('div');
+    name.className = 'match-name';
+    name.textContent = c.year ? `${c.title} (${c.year})` : c.title;
+    if (matchState.currentId === c.id) {
+      const tag = document.createElement('span');
+      tag.className = 'match-current';
+      tag.textContent = 'current';
+      name.appendChild(tag);
+    }
+    const meta = document.createElement('div');
+    meta.className = 'match-meta';
+    const bits = [c.isTv ? 'TV show' : 'Movie'];
+    if (c.originalTitle && c.originalTitle !== c.title) bits.push(c.originalTitle);
+    if (c.countries && c.countries.length) bits.push(c.countries.join('/'));
+    meta.textContent = bits.join(' · ');
+    text.append(name, meta);
+    if (c.overview) {
+      const overview = document.createElement('div');
+      overview.className = 'match-overview';
+      overview.textContent = c.overview;
+      text.appendChild(overview);
+    }
+    row.append(img, text);
+    row.addEventListener('click', () => selectMatch(c));
+    list.appendChild(row);
+  }
+  if (matchState.candidates.length === 0) list.textContent = body.message || 'Nothing found.';
+  if (matchState.selected) selectMatch(matchState.selected, true);
+  else matchEl('matchApply').disabled = true;
+}
+
+function selectMatch(candidate, keepRows) {
+  matchState.selected = candidate;
+  if (!keepRows) {
+    matchEl('matchList').querySelectorAll('.match-item').forEach((row, i) => row.classList.toggle('selected', matchState.candidates[i] === candidate));
+  }
+  matchEl('matchApply').disabled = false;
+  matchEl('matchEpisode').classList.toggle('hidden', !candidate.isTv);
+  const others = candidate.isTv ? matchState.others : [];
+  matchEl('matchOthersRow').classList.toggle('hidden', others.length === 0);
+  if (others.length) {
+    const shown = others.slice(0, 3).join(', ') + (others.length > 3 ? ', ...' : '');
+    matchEl('matchOthersText').textContent = `Also match the ${others.length} other waiting episode${others.length === 1 ? '' : 's'} of this show (${shown})`;
+    matchEl('matchOthers').checked = true;
+  }
+}
+
+async function searchMatch() {
+  const item = matchState.item;
+  if (!item) return;
+  const yearText = matchEl('matchYear').value.trim();
+  matchEl('matchList').textContent = 'Looking on TMDB...';
+  const body = await matchPost('/api/run/queue/match/candidates', {
+    laneId: item.laneId, fullName: item.fullName,
+    query: matchEl('matchQuery').value, year: yearText ? Number(yearText) : null, kind: matchEl('matchKind').value
+  }).catch(() => null);
+  if (!body || !body.success) { matchEl('matchList').textContent = ''; matchEl('matchNote').textContent = body ? body.message : 'Could not reach Compressarr.'; return; }
+  showMatchCandidates(body);
+}
+
+function parseEpisodes(text) {
+  return text.split(/[\s,;-]+/).map(t => Number(t)).filter(n => Number.isInteger(n) && n >= 0);
+}
+
+async function applyMatch() {
+  const item = matchState.item, c = matchState.selected;
+  if (!item || !c) return;
+  const note = matchEl('matchNote');
+  const request = { laneId: item.laneId, fullName: item.fullName, tmdbId: c.id, kind: c.isTv ? 'tv' : 'movie', applyToOthers: false };
+  if (c.isTv) {
+    const season = matchEl('matchSeason').value.trim();
+    const episodes = parseEpisodes(matchEl('matchEpisodes').value);
+    if (season === '' || episodes.length === 0) { note.textContent = 'Say which season and episode this file is.'; return; }
+    request.season = Number(season);
+    request.episodes = episodes;
+    request.applyToOthers = matchState.others.length > 0 && matchEl('matchOthers').checked;
+  }
+  matchEl('matchApply').disabled = true;
+  note.textContent = 'Renaming...';
+  const body = await matchPost('/api/run/queue/match/apply', request).catch(() => null);
+  finishMatch(body, note);
+}
+
+async function restoreMatch() {
+  const item = matchState.item;
+  if (!item) return;
+  matchEl('matchNote').textContent = 'Restoring...';
+  finishMatch(await matchPost('/api/run/queue/match/restore', { laneId: item.laneId, fullName: item.fullName }).catch(() => null), matchEl('matchNote'));
+}
+
+async function leaveMatch() {
+  const item = matchState.item;
+  if (!item) return;
+  finishMatch(await matchPost('/api/run/queue/match/leave', { laneId: item.laneId, fullName: item.fullName }).catch(() => null), matchEl('matchNote'));
+}
+
+function finishMatch(body, note) {
+  if (!body || !body.success) {
+    note.textContent = body ? body.message : 'Could not reach Compressarr.';
+    matchEl('matchApply').disabled = matchState.selected === null;
+    return;
+  }
+  matchEl('matchOverlay').classList.add('hidden');
+  const problems = body.problems && body.problems.length ? ` (${body.problems.length} problem${body.problems.length === 1 ? '' : 's'}: ${body.problems.join('; ')})` : '';
+  if (typeof setStatusMessage === 'function') setStatusMessage(body.message + problems, problems ? 'error' : 'success');
+  poll();
+}
+
+matchEl('matchSearch').addEventListener('click', searchMatch);
+matchEl('matchQuery').addEventListener('keydown', e => { if (e.key === 'Enter') searchMatch(); });
+matchEl('matchYear').addEventListener('keydown', e => { if (e.key === 'Enter') searchMatch(); });
+matchEl('matchApply').addEventListener('click', applyMatch);
+matchEl('matchRestore').addEventListener('click', restoreMatch);
+matchEl('matchLeave').addEventListener('click', leaveMatch);
+matchEl('matchCancel').addEventListener('click', () => matchEl('matchOverlay').classList.add('hidden'));
+
 document.getElementById('bulkChangeBtn').addEventListener('click', openBulkChange);
 document.getElementById('bulkCancel').addEventListener('click', () => document.getElementById('bulkOverlay').classList.add('hidden'));
 document.getElementById('bulkApply').addEventListener('click', applyBulkChange);
@@ -482,12 +664,12 @@ function renderQueueList() {
     row.className = 'queue-item';
     row.dataset.key = key;
     row.dataset.laneId = item.laneId;
-    if (item.isSkipped) row.classList.add('skipped');
+    if (item.isSkipped || item.isHeld) row.classList.add('skipped');   // a held (unmatched) file waits like a skipped one
 
     row.innerHTML = `
       ${item.isError ? '' : `<span class="queue-handle">${QUEUE_ICON_GRIP}</span>`}
       ${queuePosterHtml(item)}
-      <span class="queue-badge ${queueBadgeClass(item)}">${item.isSkipped ? 'Skipped' : queueBadgeLabel(item)}</span>
+      <span class="queue-badge ${queueBadgeClass(item)}">${item.isSkipped ? 'Skipped' : item.isHeld ? 'Held' : queueBadgeLabel(item)}</span>
       ${item.isFileBotUnmatched ? '<span class="queue-badge unmatched">Unmatched</span>' : ''}
       ${queuePriorityBadge(item)}
       <div class="queue-lane">${escapeHtml(item.laneDisplayName)}${queueEngineChip(item)}${queueDestinationMarker(item)}</div>
@@ -558,6 +740,9 @@ function renderQueueList() {
       const pop = document.createElement('div');
       pop.className = 'queue-popover';
       pop.innerHTML = `
+        ${canMatch && item.isFileBotUnmatched ? `<div class="queue-popover-item" data-act="match">Match…</div>` : ''}
+        ${canMatch && item.isRenamed ? `<div class="queue-popover-item" data-act="fix-match">Fix match…</div>` : ''}
+        ${item.isFileBotUnmatched ? `<div class="queue-popover-item" data-act="leave-as-is">Leave as is</div>` : ''}
         <div class="queue-popover-item" data-act="skip">${item.isSkipped ? 'Unskip' : 'Skip'}</div>
         ${item.isCustomPreset ? `<div class="queue-popover-item" data-act="use-lane-preset">Use Lane Preset</div>` : ''}
         <div class="queue-popover-item" data-act="prio-higher">${item.priority > 0 ? 'Priority: raised (set normal)' : 'Raise priority for this show'}</div>
@@ -571,6 +756,16 @@ function renderQueueList() {
         e.stopPropagation();
         openMenuKey = null;
         const act = opt.dataset.act;
+        if (act === 'match' || act === 'fix-match') {
+          openMatch(item, act === 'fix-match');
+          return;
+        }
+        if (act === 'leave-as-is') {
+          const body = await matchPost('/api/run/queue/match/leave', { laneId: item.laneId, fullName: item.fullName }).catch(() => null);
+          if (typeof setStatusMessage === 'function') setStatusMessage(body ? body.message : 'Could not reach Compressarr.', body && body.success ? 'success' : 'error');
+          poll();
+          return;
+        }
         if (act === 'skip') {
           await fetch('/api/run/queue/skip', {
             method: 'POST',
@@ -817,7 +1012,7 @@ async function poll() {
   stateValueEl.textContent = s.isRenaming ? 'Renaming' : (s.isRunning ? 'Running' : (heldAny ? 'Held' : (s.isMonitoring ? 'Watching' : 'Idle')));
   stateValueEl.classList.toggle('running', s.isRunning);
   document.getElementById('fileLabel').textContent = s.isRenaming
-    ? `Renaming files with FileBot in Lane ${s.laneDisplayName}`
+    ? `Renaming files in Lane ${s.laneDisplayName}`
     : (s.isRunning && s.laneDisplayName)
       ? `${s.isPassthrough ? 'Copying' : 'Compressing'} File in Lane ${s.laneDisplayName}${s.isPassthrough ? ' (passthrough, not re-encoded)' : (s.presetName ? ` using ${s.engine === 'FFmpeg' ? 'ffmpeg profile' : 'preset'} ${s.presetName}` : '')}${s.landsInLaneName ? ` and lands in ${s.landsInLaneName}` : ''}`
       : 'Waiting for files';
@@ -877,6 +1072,7 @@ async function poll() {
   jobKind.classList.toggle('hidden', !showKind);
   document.getElementById('statFile').classList.toggle('with-kind', showKind);
 
+  canMatch = !!s.canMatch;
   renderQueue(s.upNext);
   renderLog(s.recentLogLines);
 }

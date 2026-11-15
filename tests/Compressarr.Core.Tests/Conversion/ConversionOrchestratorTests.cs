@@ -5,6 +5,7 @@ using Compressarr.Core.FileBot;
 using Compressarr.Core.Logging;
 using Compressarr.Core.Orchestration;
 using Compressarr.Core.Presets;
+using Compressarr.Core.Renaming;
 using Compressarr.Core.Routing;
 
 namespace Compressarr.Core.Tests.Conversion;
@@ -64,6 +65,44 @@ file sealed class RenamingFileBotRunner : IFileBotRunner
         }
         return new FileBotRunResult(new HashSet<string>(), _renames);
     }
+}
+
+/// <summary>Stands in for the TMDB renamer: really moves the files it is told to (like the FileBot stand-in), reports them, and notes whether and how it was asked.</summary>
+file sealed class FakeTmdbRenamer : ITmdbRenamer
+{
+    private readonly Dictionary<string, string> _renames;
+    private readonly HashSet<string> _unmatched;
+    public int Runs { get; private set; }
+    public string? KeySeen { get; private set; }
+
+    public FakeTmdbRenamer(Dictionary<string, string>? renames = null, HashSet<string>? unmatched = null)
+    {
+        _renames = renames ?? new Dictionary<string, string>();
+        _unmatched = unmatched ?? new HashSet<string>();
+    }
+
+    public Task<FileBotRunResult> RunAsync(TmdbRenameSettings settings, string apiKey, string inputPath, IReadOnlyList<string> vidTypes, IRunLogger logger, CancellationToken cancellationToken)
+    {
+        Runs++;
+        KeySeen = apiKey;
+        foreach (var (from, to) in _renames) File.Move(from, to);
+        return Task.FromResult(new FileBotRunResult(_unmatched, _renames));
+    }
+
+    public Task<IReadOnlyList<RenamePlanItem>> PreviewAsync(TmdbRenameSettings settings, string apiKey, string inputPath, IReadOnlyList<string> vidTypes, int limit, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<RenamePlanItem>>(Array.Empty<RenamePlanItem>());
+}
+
+file sealed class RecordingRenameLog : IRenameLog
+{
+    public List<(string From, string To, int? TmdbId, string Source)> Recorded { get; } = new();
+    public void Record(string originalPath, string newPath, int? tmdbId, bool isTv, int? season, IReadOnlyList<int>? episodes, string source) => Recorded.Add((originalPath, newPath, tmdbId, source));
+    public RenameRecord? Find(string currentPath) => null;
+    public void Forget(string currentPath) { }
+    public IReadOnlySet<string> CurrentPaths() => new HashSet<string>();
+    public void ForgetMemory(string memoryKey) { }
+    public RememberedMatch? Recall(string memoryKey) => null;
+    public void Remember(string memoryKey, RememberedMatch match) { }
 }
 
 file sealed class EnabledRecordingFileBotRunner : IFileBotRunner
@@ -3357,6 +3396,177 @@ public class ConversionOrchestratorTests : IDisposable
         var unmatchedEntry = Assert.Single(resumeState, e => e.FullName == unmatchedPath);
         Assert.False(matchedEntry.FileBotUnmatched);
         Assert.True(unmatchedEntry.FileBotUnmatched);
+    }
+
+    private ConversionOrchestrator OrchestratorWithTmdb(ITmdbRenamer tmdb, CompressarrConfig config, IFileBotRunner? fileBot = null) => new(
+        new PassThroughPathExpander(), new RealFolderScanner(), fileBot ?? new NoOpFileBotRunner(),
+        new FixedExtensionPresetService(), new MetadataService(), new FakeProcessRunner(), new FileRouter(),
+        new NoOpCompanionFileService(), new NoOpArrUnmonitorService(), new RecordingTrashService(), new NoOpRunLogger(),
+        new NoOpResumeStateStore(), new NoOpProgressReporter(), new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue), encoders: null, tmdbRenamer: tmdb);
+
+    private (LaneConfig Lane, CompressarrConfig Config, string Input) TmdbLane(bool tmdbOn = true, string key = "abc")
+    {
+        var inputDir = Path.Combine(_tempDir, "Input");
+        Directory.CreateDirectory(inputDir);
+        var lane = new LaneConfig { Id = "lane1", DisplayName = "Test Lane", Enabled = true, Input = inputDir, Output = Path.Combine(_tempDir, "Output"), MoviePreset = "Any Preset" };
+        var config = new CompressarrConfig { Processing = new ProcessingSettings { MoveFiles = false, ClearTitleMetadata = false } };
+        config.Lanes.Add(lane);
+        config.TmdbRename.Enabled = tmdbOn;
+        config.Posters.TmdbApiKey = key;
+        return (lane, config, inputDir);
+    }
+
+    [Fact]
+    public async Task PrepareLane_TmdbRenamesAQueuedFile_ItKeepsItsPlaceSkipAndPresetOverride()
+    {
+        var (lane, config, inputDir) = TmdbLane();
+        var a = Path.Combine(inputDir, "a.mkv");
+        var b = Path.Combine(inputDir, "b.mkv");
+        var c = Path.Combine(inputDir, "c.mkv");
+        foreach (var path in new[] { a, b, c }) File.WriteAllText(path, "x");
+        var renamedB = Path.Combine(inputDir, "Heat (1995).mkv");
+        var tmdb = new FakeTmdbRenamer(new() { [b] = renamedB });
+
+        // The user dragged b to the front, skipped it and gave it its own preset.
+        var resumeState = new List<ResumeEntry>
+        {
+            new() { LaneId = "lane1", FullName = a, Status = ResumeStatus.Pending, Order = 2 },
+            new() { LaneId = "lane1", FullName = b, Status = ResumeStatus.Pending, Order = 0, Skipped = true, PresetOverride = "Fast 1080p30" },
+            new() { LaneId = "lane1", FullName = c, Status = ResumeStatus.Pending, Order = 1 }
+        };
+        await OrchestratorWithTmdb(tmdb, config).PrepareLaneAsync(lane, config, resumeState, Path.Combine(_tempDir, "resume.json"));
+
+        Assert.Equal(1, tmdb.Runs);
+        Assert.Equal(3, resumeState.Count);
+        Assert.DoesNotContain(resumeState, e => e.FullName == b);
+        var renamed = Assert.Single(resumeState, e => e.FullName == renamedB);
+        Assert.Equal(0, renamed.Order);
+        Assert.True(renamed.Skipped);
+        Assert.Equal("Fast 1080p30", renamed.PresetOverride);
+    }
+
+    [Fact]
+    public async Task PrepareLane_FileBotsRenames_AreNotedInTheRenameLog_ByNameOnly()
+    {
+        var (lane, config, inputDir) = TmdbLane(tmdbOn: false);
+        config.FileBot.Enabled = true;
+        var a = Path.Combine(inputDir, "a.mkv");
+        File.WriteAllText(a, "x");
+        var renamed = Path.Combine(inputDir, "Heat (1995).mkv");
+        var log = new RecordingRenameLog();
+        var orchestrator = new ConversionOrchestrator(
+            new PassThroughPathExpander(), new RealFolderScanner(), new RenamingFileBotRunner(new() { [a] = renamed }),
+            new FixedExtensionPresetService(), new MetadataService(), new FakeProcessRunner(), new FileRouter(),
+            new NoOpCompanionFileService(), new NoOpArrUnmonitorService(), new RecordingTrashService(), new NoOpRunLogger(),
+            new NoOpResumeStateStore(), new NoOpProgressReporter(), new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue), encoders: null, tmdbRenamer: null, renameLog: log);
+
+        await orchestrator.PrepareLaneAsync(lane, config, new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"));
+
+        var noted = Assert.Single(log.Recorded);
+        Assert.Equal((a, renamed, (int?)null, RenameRecord.FileBotSource), noted);
+    }
+
+    [Fact]
+    public async Task PrepareLane_AFileBotRenameThatDidNotHappen_IsNotNoted()
+    {
+        var (lane, config, inputDir) = TmdbLane(tmdbOn: false);
+        config.FileBot.Enabled = true;
+        var a = Path.Combine(inputDir, "a.mkv");
+        File.WriteAllText(a, "x");
+        var log = new RecordingRenameLog();
+        var orchestrator = new ConversionOrchestrator(
+            new PassThroughPathExpander(), new RealFolderScanner(), new RenamingFileBotRunner(new() { [a] = Path.Combine(inputDir, "never-created.mkv") }, actuallyMove: false),
+            new FixedExtensionPresetService(), new MetadataService(), new FakeProcessRunner(), new FileRouter(),
+            new NoOpCompanionFileService(), new NoOpArrUnmonitorService(), new RecordingTrashService(), new NoOpRunLogger(),
+            new NoOpResumeStateStore(), new NoOpProgressReporter(), new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue), encoders: null, tmdbRenamer: null, renameLog: log);
+
+        await orchestrator.PrepareLaneAsync(lane, config, new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"));
+
+        Assert.Empty(log.Recorded);
+    }
+
+    [Fact]
+    public async Task PrepareLane_TmdbFlagsOneFileUnmatched_OnlyThatEntryIsStamped()
+    {
+        var (lane, config, inputDir) = TmdbLane();
+        var matched = Path.Combine(inputDir, "Heat (1995).mkv");
+        var unmatched = Path.Combine(inputDir, "unknown.mkv");
+        File.WriteAllText(matched, "a");
+        File.WriteAllText(unmatched, "b");
+
+        var resumeState = new List<ResumeEntry>();
+        await OrchestratorWithTmdb(new FakeTmdbRenamer(unmatched: new HashSet<string> { unmatched }), config).PrepareLaneAsync(lane, config, resumeState, Path.Combine(_tempDir, "resume.json"));
+
+        Assert.False(Assert.Single(resumeState, e => e.FullName == matched).FileBotUnmatched);
+        Assert.True(Assert.Single(resumeState, e => e.FullName == unmatched).FileBotUnmatched);
+    }
+
+    [Fact]
+    public async Task PrepareLane_TmdbIsGivenTheTrimmedKeyFromQueuePosters()
+    {
+        var (lane, config, inputDir) = TmdbLane(key: "  abc123  ");
+        File.WriteAllText(Path.Combine(inputDir, "Heat (1995).mkv"), "a");
+        var tmdb = new FakeTmdbRenamer();
+
+        await OrchestratorWithTmdb(tmdb, config).PrepareLaneAsync(lane, config, new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"));
+
+        Assert.Equal("abc123", tmdb.KeySeen);
+    }
+
+    [Fact]
+    public async Task PrepareLane_TmdbWithNoKey_DoesNotRun_AndTheReportSaysWhy()
+    {
+        var (lane, config, inputDir) = TmdbLane(key: "");
+        File.WriteAllText(Path.Combine(inputDir, "a.mkv"), "a");
+        var tmdb = new FakeTmdbRenamer();
+        var problems = new List<ReportErrorCode>();
+
+        var context = await OrchestratorWithTmdb(tmdb, config).PrepareLaneAsync(lane, config, new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), problems);
+
+        Assert.NotNull(context);                                  // the lane still runs
+        Assert.Equal(0, tmdb.Runs);
+        Assert.Contains(ReportErrorCode.TmdbRenameKeyMissing, problems);
+    }
+
+    [Fact]
+    public async Task PrepareLane_TmdbOff_NeverRuns_EvenWithAKeySaved()
+    {
+        var (lane, config, inputDir) = TmdbLane(tmdbOn: false);
+        File.WriteAllText(Path.Combine(inputDir, "a.mkv"), "a");
+        var tmdb = new FakeTmdbRenamer();
+
+        await OrchestratorWithTmdb(tmdb, config).PrepareLaneAsync(lane, config, new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"));
+
+        Assert.Equal(0, tmdb.Runs);
+    }
+
+    [Fact]
+    public async Task PrepareLane_WhenFileBotAndTmdbAreBothOn_FileBotWins_AndTmdbDoesNotRun()
+    {
+        var (lane, config, inputDir) = TmdbLane();
+        config.FileBot.Enabled = true;
+        File.WriteAllText(Path.Combine(inputDir, "a.mkv"), "a");
+        var tmdb = new FakeTmdbRenamer();
+        var fileBot = new EnabledRecordingFileBotRunner();
+
+        await OrchestratorWithTmdb(tmdb, config, fileBot).PrepareLaneAsync(lane, config, new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"));
+
+        Assert.Equal(0, tmdb.Runs);
+        Assert.Equal(new[] { true }, fileBot.EnabledWhenAsked);
+    }
+
+    [Fact]
+    public async Task AVideosLane_IsNeverHandedToTheTmdbRenamer()
+    {
+        var (lane, config, input, _) = VideosLane();
+        config.TmdbRename.Enabled = true;
+        config.Posters.TmdbApiKey = "abc";
+        File.WriteAllText(Path.Combine(input, "Clip.mkv"), "clip");
+        var tmdb = new FakeTmdbRenamer();
+
+        await RunLaneAsync(OrchestratorWithTmdb(tmdb, config), lane, config, _tempDir, "20260101_000000", new List<ResumeEntry>(), Path.Combine(_tempDir, "resume.json"), CancellationToken.None);
+
+        Assert.Equal(0, tmdb.Runs);
     }
 
     private ConversionOrchestrator OrchestratorWithFileBot(IFileBotRunner fileBot, CompressarrConfig config) => new(

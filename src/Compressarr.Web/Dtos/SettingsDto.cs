@@ -46,7 +46,12 @@ public sealed record SettingsDto(
     bool? SaveReportCopy = null,
     int? ReportCopyRetentionDays = null,
     int? UnseenErrorDays = null,
-    string? AllowedHosts = null);
+    string? AllowedHosts = null,
+    TmdbRenameDto? TmdbRename = null,
+    bool? HoldUnmatchedFiles = null);
+
+/// <summary>The built-in TMDB renamer's settings (3.2). Null (an older page that does not know about it) leaves the saved ones as they are. The API key is not here: it is the one under Queue Posters.</summary>
+public sealed record TmdbRenameDto(bool Enabled, string Language, string Numbering, bool AddMovieTmdbId);
 
 /// <summary>Null (an older page that does not know about posters) leaves the saved poster settings as they are.</summary>
 public sealed record PosterSettingsDto(bool Enabled, string TmdbApiKey, string Size, bool SmallerImages, string? Source = null, string? OmdbApiKey = null, bool? FallbackToOther = null);

@@ -33,6 +33,8 @@ public static class WebMonitorStartup
         app.MapDonateEndpoints();
         app.MapNotificationEndpoints();
         app.MapFileBotEndpoints();
+        app.MapRenameEndpoints();
+        app.MapQueueMatchEndpoints();
         app.MapAuthEndpoints();
         app.MapAutomationEndpoints();
         app.MapApiV1Endpoints();

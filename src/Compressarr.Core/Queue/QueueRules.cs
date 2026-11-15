@@ -12,7 +12,7 @@ namespace Compressarr.Core.Queue;
 /// name in different subfolders (e.g. two different shows' own "episode.mkv"). Code-review finding:
 /// matching on FileName alone let a skip/remove/preset-override/reorder request silently target the
 /// wrong one of two same-named files, or fail ambiguously.</summary>
-public sealed record UpNextItem(string LaneId, string LaneDisplayName, string FileName, string FullName, double SizeGb, string? Preset, bool IsResumed, bool IsError, bool IsSkipped, bool IsCustomPreset, bool IsFileBotUnmatched, string? DestinationLaneId = null, string? DestinationLaneName = null, bool DestinationMissing = false, EncoderEngine Engine = EncoderEngine.HandBrake, string? PosterKey = null, int Priority = 0, bool IsVideosLane = false)
+public sealed record UpNextItem(string LaneId, string LaneDisplayName, string FileName, string FullName, double SizeGb, string? Preset, bool IsResumed, bool IsError, bool IsSkipped, bool IsCustomPreset, bool IsFileBotUnmatched, string? DestinationLaneId = null, string? DestinationLaneName = null, bool DestinationMissing = false, EncoderEngine Engine = EncoderEngine.HandBrake, string? PosterKey = null, int Priority = 0, bool IsVideosLane = false, bool IsRenamed = false, bool IsHeld = false)
 {
     /// <summary>True when this file's preset is Passthrough (it will be copied, not re-encoded); the Monitor page shows a badge.</summary>
     public bool IsPassthrough => PassthroughPreset.Is(Preset);
@@ -268,7 +268,7 @@ public static class QueueRules
                 // lane that has since been deleted is flagged rather than hidden - the file will wait in
                 // Output until the user picks somewhere to land it.
                 var (destinationId, destinationName, destinationMissing) = DescribeDestination(config, lane, entry);
-                var item = new UpNextItem(lane.Id, lane.DisplayName, file.Name, file.FullName, sizeGb, preset, isResumed, IsError: false, isSkipped, hasOverride, isFileBotUnmatched, destinationId, destinationName, destinationMissing, lane.Engine, Priority: priority.TierOf(file.FullName), IsVideosLane: LaneKinds.IsVideos(lane));
+                var item = new UpNextItem(lane.Id, lane.DisplayName, file.Name, file.FullName, sizeGb, preset, isResumed, IsError: false, isSkipped, hasOverride, isFileBotUnmatched, destinationId, destinationName, destinationMissing, lane.Engine, Priority: priority.TierOf(file.FullName), IsVideosLane: LaneKinds.IsVideos(lane), IsHeld: config.HoldUnmatchedFiles && isFileBotUnmatched);
                 candidates.Add((item, laneOrderIndex, entry?.Order, naturalIndex[file.FullName]));
             }
 
@@ -420,12 +420,13 @@ public static class QueueRules
 
     /// <summary>This lane's waiting entries in processing order - user-set/stamped Order first. A
     /// Skipped entry stays Pending (still shown in the queue, still eligible to be un-skipped
-    /// later) but is excluded here, as is a Removed one.</summary>
-    public static List<ResumeEntry> WaitingEntriesInOrder(List<ResumeEntry> resumeState, string laneId) =>
+    /// later) but is excluded here, as is a Removed one - and, with "Do not process unmatched files"
+    /// on (<paramref name="holdUnmatched"/>), an Unmatched one, which waits until it is matched or left as it is.</summary>
+    public static List<ResumeEntry> WaitingEntriesInOrder(List<ResumeEntry> resumeState, string laneId, bool holdUnmatched = false) =>
         resumeState
             .Where(e => e.LaneId == laneId && e.Status == ResumeStatus.Pending)
             .OrderBy(p => p.Order ?? int.MaxValue)
-            .Where(p => !p.Skipped && !p.Removed)
+            .Where(p => !p.Skipped && !p.Removed && !(holdUnmatched && p.FileBotUnmatched))
             .ToList();
 
     /// <summary>The next file the engine should process across every prepared lane: the eligible
@@ -434,13 +435,15 @@ public static class QueueRules
     /// same three-level tie-break BuildUpNext uses for the Monitor page, so the queue shown and the
     /// processing order cannot disagree. laneOrderIndex's keys are the lanes that were prepared this
     /// pass (an entry from any other lane is never eligible). Entries whose source file is gone are
-    /// skipped.</summary>
+    /// skipped. <paramref name="isHeld"/> says which waiting entries are not to be picked (an Unmatched file
+    /// while "Do not process unmatched files" is on); like a skipped file they stay in the queue.</summary>
     public static ResumeEntry? SelectNext(
         IEnumerable<ResumeEntry> resumeState,
         IReadOnlyDictionary<string, int> laneOrderIndex,
-        Func<string, string, int> naturalIndexOf) =>
+        Func<string, string, int> naturalIndexOf,
+        Func<ResumeEntry, bool>? isHeld = null) =>
         resumeState
-            .Where(e => laneOrderIndex.ContainsKey(e.LaneId) && e.Status == ResumeStatus.Pending && !e.Skipped && !e.Removed)
+            .Where(e => laneOrderIndex.ContainsKey(e.LaneId) && e.Status == ResumeStatus.Pending && !e.Skipped && !e.Removed && !(isHeld?.Invoke(e) ?? false))
             .OrderBy(e => e.Order ?? int.MaxValue)
             .ThenBy(e => laneOrderIndex[e.LaneId])
             .ThenBy(e => naturalIndexOf(e.LaneId, e.FullName))

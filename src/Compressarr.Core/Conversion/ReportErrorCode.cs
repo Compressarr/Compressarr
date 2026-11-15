@@ -78,6 +78,9 @@ public enum ReportErrorCode
     /// <summary>A HandBrake lane met an HDR / Dolby Vision file whose profile's video encoder would lose the HDR (an SDR-only H.264
     /// profile, or a hardware encoder that can't keep Dolby Vision / HDR10+). The file was not touched.</summary>
     ProfileCannotKeepHdr = 114,
+
+    /// <summary>The built-in TMDB renamer is on but there is no TMDB API key (it uses the one entered under Queue Posters), so no file was renamed this pass. The lane still ran normally.</summary>
+    TmdbRenameKeyMissing = 115,
 }
 
 public static class ReportErrorCodeExtensions
@@ -99,6 +102,7 @@ public static class ReportErrorCodeExtensions
         ReportErrorCode.DynamicHdrNeedsHandBrake => "Dolby Vision needs HandBrake",
         ReportErrorCode.LaneEncoderNotAvailable => "Encoder not found",
         ReportErrorCode.ProfileCannotKeepHdr => "HDR would be lost",
+        ReportErrorCode.TmdbRenameKeyMissing => "TMDB key missing",
         _ => "Error",
     };
 
@@ -134,6 +138,8 @@ public static class ReportErrorCodeExtensions
             "This file is HDR (HDR10, HLG, Dolby Vision or HDR10+), and the lane's profile would lose it - an H.264 profile can only produce SDR, and a hardware encoder can't keep Dolby Vision or HDR10+ - so the file was left alone and nothing was encoded. Use a profile that keeps HDR (x265 or SVT-AV1), or tick 'Allow HDR files to lose their HDR' on the lane (Advanced). A Dolby Vision profile 5 file is always refused, because it would show wrong colours.",
         ReportErrorCode.LaneEncoderNotAvailable =>
             "This lane's encoder (HandBrake or ffmpeg) wasn't found where Compressarr looks for it, so the lane was skipped this pass. Check the Encoder page.",
+        ReportErrorCode.TmdbRenameKeyMissing =>
+            "The TMDB renamer is turned on but there is no TMDB API key, so no file was renamed this pass and the lane ran normally. Enter the key under Queue Posters on the Settings page (the renamer uses the same one).",
         _ => "An unspecified error occurred.",
     };
 }

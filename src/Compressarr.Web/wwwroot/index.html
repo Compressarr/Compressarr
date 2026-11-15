@@ -72,6 +72,43 @@
 
     <div class="card">
       <div class="card-head">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+        <h2>Rename with TMDB</h2>
+      </div>
+      <div class="card-body">
+        <div class="check-row"><span class="lane-switch"><input type="checkbox" id="tmdbRenameEnabled" /><span class="knob"></span></span><label for="tmdbRenameEnabled">Rename with TMDB<span class="help-tag" tabindex="0" title="Renames the files in each lane's Input folder from TMDB (The Movie Database) before Compressarr scans them, like FileBot does, with nothing to buy. Only one of FileBot and TMDB can be on.">?<span class="help-tip">Renames the files in each lane's Input folder from TMDB (The Movie Database) before Compressarr scans them, like FileBot does, with nothing to buy. Only one of FileBot and TMDB can be on.</span></span></label></div>
+        <p class="muted" style="margin: 4px 0 10px; font-size: 12px;">An alternative to FileBot for people who don't use Sonarr or Radarr. A movie needs a year in its name (a bare title matches the wrong film too often); a file TMDB can't place with certainty is left as it is and shown as Unmatched. Only the title, year and season are sent to TMDB, never a file path. Turning this on turns FileBot off.</p>
+        <p class="muted" id="tmdbRenameKeyStatus" style="margin: 0 0 10px; font-size: 12px;"></p>
+        <div class="two-col">
+          <div class="field-block">
+            <label for="tmdbRenameLanguage">Language<span class="help-tag" tabindex="0" title="The language TMDB gives titles and episode names in, as a language tag such as en-US, de-DE or fr-FR.">?<span class="help-tip">The language TMDB gives titles and episode names in, as a language tag such as en-US, de-DE or fr-FR.</span></span></label>
+            <input type="text" id="tmdbRenameLanguage" placeholder="en-US" />
+          </div>
+          <div class="field-block">
+            <label for="tmdbRenameNumbering">TV episode numbering<span class="help-tag" tabindex="0" title="How the season and episode are written in the new name: S01E02 or 1x02.">?<span class="help-tip">How the season and episode are written in the new name: S01E02 or 1x02.</span></span></label>
+            <select id="tmdbRenameNumbering"><option value="S00E00">S01E02</option><option value="SxE">1x02</option></select>
+          </div>
+        </div>
+        <div class="check-row"><input type="checkbox" id="tmdbRenameAddId" /><label for="tmdbRenameAddId">Add the TMDB id to movie names<span class="help-tag" tabindex="0" title="Adds Plex's {tmdb-123} tag, e.g. Heat (1995) {tmdb-949}.mkv, so Plex and Jellyfin match the film without guessing. TV episodes never carry it.">?<span class="help-tip">Adds Plex's {tmdb-123} tag, e.g. Heat (1995) {tmdb-949}.mkv, so Plex and Jellyfin match the film without guessing. TV episodes never carry it.</span></span></label></div>
+        <div class="field-with-btn" style="margin-top: 10px;"><button type="button" id="tmdbRenamePreviewBtn">Preview Renames</button></div>
+        <div id="tmdbRenamePreviewOut" class="muted" style="margin-top: 8px;"></div>
+        <p class="muted" style="margin: 10px 0 0; font-size: 12px;">This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+        <h2>Unmatched Files</h2>
+      </div>
+      <div class="card-body">
+        <div class="check-row"><span class="lane-switch"><input type="checkbox" id="holdUnmatchedFiles" /><span class="knob"></span></span><label for="holdUnmatchedFiles">Do not process unmatched files<span class="help-tag" tabindex="0" title="When FileBot or TMDB cannot place a file, it stays in the queue marked Unmatched and is not encoded until you match it (Match in its row menu) or choose Leave as is. Off: it is encoded under the name it has. This covers both FileBot and TMDB.">?<span class="help-tip">When FileBot or TMDB cannot place a file, it stays in the queue marked Unmatched and is not encoded until you match it (Match in its row menu) or choose Leave as is. Off: it is encoded under the name it has. This covers both FileBot and TMDB.</span></span></label></div>
+        <p class="muted" style="margin: 4px 0 0; font-size: 12px;">A file FileBot or TMDB could not place waits in the queue, marked Unmatched, until you match it or choose Leave as is from its row menu on the Monitor page. It also waits for a pass when TMDB could not be reached. Applies whichever of the two is on.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
         <h2>Processing</h2>
       </div>

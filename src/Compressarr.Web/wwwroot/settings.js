@@ -25,6 +25,7 @@ function syncReportCopyOptions() {
 // note on why these can differ).
 const SETTINGS_FIELD_MAP = {
   tmdbApiKey: '#tmdbApiKey',
+  tmdbRenameEnabled: '#tmdbRenameEnabled',
   omdbApiKey: '#omdbApiKey',
   fileBotCliPath: '#fileBotCliPath',
   vidTypes: '#vidTypes'
@@ -129,6 +130,8 @@ function fillForm(dto) {
   document.getElementById('posterSize').value = posters.size;
   document.getElementById('posterSmaller').checked = posters.smallerImages;
   updatePosterCard();
+  fillTmdbRename(dto.tmdbRename);
+  document.getElementById('holdUnmatchedFiles').checked = !!dto.holdUnmatchedFiles;
   document.getElementById('updateChannel').value = dto.updateChannel || 'Stable';
   document.getElementById('postExecCmd').value = dto.postExecCmd;
   document.getElementById('postExecArgs').value = dto.postExecArgs;
@@ -196,6 +199,8 @@ function readForm() {
     allowedHosts: document.getElementById('allowedHosts').value,
     runAtLogin: document.getElementById('runAtLogin').checked,
     announcementsEnabled: document.getElementById('announcementsEnabled').checked,
+    tmdbRename: readTmdbRename(),
+    holdUnmatchedFiles: document.getElementById('holdUnmatchedFiles').checked,
     posters: {
       enabled: document.getElementById('postersEnabled').checked,
       tmdbApiKey: document.getElementById('tmdbApiKey').value.trim(),
@@ -352,6 +357,82 @@ document.getElementById('radarrFolderBtn').addEventListener('click', async () =>
   const body = await res.json();
   setStatus(body.message, body.success ? true : 'error');
   if (body.success) refreshRadarrFolderNote();
+});
+
+// ---- Rename with TMDB (3.2): an alternative to FileBot, so only one of the two can be on; the key is the one under Queue Posters.
+function fillTmdbRename(rename) {
+  const r = rename || { enabled: false, language: 'en-US', numbering: 'S00E00', addMovieTmdbId: false };
+  document.getElementById('tmdbRenameEnabled').checked = r.enabled;
+  document.getElementById('tmdbRenameLanguage').value = r.language || 'en-US';
+  document.getElementById('tmdbRenameNumbering').value = r.numbering || 'S00E00';
+  document.getElementById('tmdbRenameAddId').checked = !!r.addMovieTmdbId;
+  updateTmdbRenameCard();
+}
+
+function readTmdbRename() {
+  return {
+    enabled: document.getElementById('tmdbRenameEnabled').checked,
+    language: document.getElementById('tmdbRenameLanguage').value.trim() || 'en-US',
+    numbering: document.getElementById('tmdbRenameNumbering').value,
+    addMovieTmdbId: document.getElementById('tmdbRenameAddId').checked
+  };
+}
+
+function updateTmdbRenameCard() {
+  const hasKey = document.getElementById('tmdbApiKey').value.trim() !== '';
+  const status = document.getElementById('tmdbRenameKeyStatus');
+  status.textContent = hasKey
+    ? 'Uses the TMDB API key under Queue Posters (a key is entered).'
+    : 'No TMDB API key yet - enter one under Queue Posters (free at themoviedb.org). The renamer uses the same key.';
+  status.style.color = hasKey ? '' : 'var(--warn)';
+}
+
+// Turning one rename tool on turns the other off.
+document.getElementById('tmdbRenameEnabled').addEventListener('change', e => {
+  if (e.target.checked) document.getElementById('fileBotEnabled').checked = false;
+});
+document.getElementById('fileBotEnabled').addEventListener('change', e => {
+  if (e.target.checked) document.getElementById('tmdbRenameEnabled').checked = false;
+});
+document.getElementById('tmdbApiKey').addEventListener('input', updateTmdbRenameCard);
+
+// Preview: what each file in the lanes' Input folders would be called, nothing renamed. Built with textContent only: file names are never put in as HTML.
+document.getElementById('tmdbRenamePreviewBtn').addEventListener('click', async () => {
+  const out = document.getElementById('tmdbRenamePreviewOut');
+  out.textContent = 'Looking up the first files of each lane on TMDB...';
+  let body;
+  try {
+    const res = await fetch('/api/rename/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: readTmdbRename(), apiKey: document.getElementById('tmdbApiKey').value.trim() })
+    });
+    body = await res.json();
+  } catch {
+    out.textContent = 'The preview could not be loaded.';
+    return;
+  }
+
+  out.textContent = '';
+  if (!body.success) { out.textContent = body.message; return; }
+  if (!body.lanes.length) { out.textContent = 'No lane has an Input folder to look at.'; return; }
+
+  const LABELS = { Rename: 'rename', Unmatched: 'unmatched', TargetExists: 'name taken', LookupFailed: 'not looked up' };
+  for (const lane of body.lanes) {
+    const head = document.createElement('div');
+    head.style.fontWeight = '600';
+    head.style.marginTop = '8px';
+    head.textContent = `${lane.laneName}: ${lane.looked} file${lane.looked === 1 ? '' : 's'} looked at, ${lane.alreadyNamed} already named`;
+    out.appendChild(head);
+    for (const item of lane.items) {
+      const row = document.createElement('div');
+      row.style.margin = '4px 0 0 8px';
+      row.textContent = item.kind === 'Rename'
+        ? `${item.file}  ->  ${item.newName}`
+        : `${item.file}  (${LABELS[item.kind] || item.kind}: ${item.reason})`;
+      out.appendChild(row);
+    }
+  }
 });
 
 // ---- Queue Posters: Test Key checks what is typed (saved or not); the cache line says what is stored and whether TMDB is refusing the key.

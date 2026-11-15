@@ -466,6 +466,8 @@ public class SqliteResumeStateStoreTests : IDisposable
         {
             // the original 3.1.0-rc.1: version 8, none of the journal's columns
             "rc1" => "ALTER TABLE queue DROP COLUMN encoded_file_size; ALTER TABLE queue DROP COLUMN encoded_file_digest; ALTER TABLE queue DROP COLUMN filed_in_output; ALTER TABLE queue DROP COLUMN parked_original_path; PRAGMA user_version = 8;",
+            // 3.1.0-rc.2: version 11, everything the queue has but not the 3.2 rename log and remembered matches
+            "rc2" => "DROP TABLE rename_log; DROP TABLE rename_memory; PRAGMA user_version = 11;",
             // the second review-fixes build: version 10, the journal's columns but not the parked path
             "fixes2" => "ALTER TABLE queue DROP COLUMN parked_original_path; PRAGMA user_version = 10;",
             // the first review-fixes build: version 9, a size and a time but no digest
@@ -480,6 +482,7 @@ public class SqliteResumeStateStoreTests : IDisposable
     [InlineData("rc1")]
     [InlineData("fixes1")]
     [InlineData("fixes2")]
+    [InlineData("rc2")]
     public void AQueueFromAnEarlierLayout_UpgradesToTheCurrentSchema_WithItsEntriesAndEditsIntact(string layout)
     {
         MakeQueueLookLike(layout);
@@ -500,7 +503,8 @@ public class SqliteResumeStateStoreTests : IDisposable
         using var connection = new SqliteConnection($"Data Source={StateDatabase.PathFor(other)};Pooling=False");
         connection.Open();
         Assert.Equal(StateDatabase.CurrentVersion, (int)HistoryDatabase.Scalar(connection, "PRAGMA user_version;"));
-        Assert.Equal(11, StateDatabase.CurrentVersion);
+        Assert.Equal(12, StateDatabase.CurrentVersion);
+        Assert.Equal(2, (long)HistoryDatabase.Scalar(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('rename_log', 'rename_memory');"));
 
         // And the upgraded queue takes the new fields.
         var store = new SqliteResumeStateStore();

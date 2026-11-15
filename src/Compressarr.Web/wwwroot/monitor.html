@@ -94,6 +94,36 @@
     </div>
   </div>
 
+  <div id="matchOverlay" class="modal-overlay hidden">
+    <div class="modal match-modal" role="dialog" aria-label="Match to TMDB">
+      <h3 id="matchTitle">Match to TMDB</h3>
+      <div class="modal-path" id="matchFile"></div>
+      <p class="enc-note" id="matchIntro" style="margin-top:0"></p>
+      <div class="match-search">
+        <input type="text" id="matchQuery" placeholder="Title to search for" aria-label="Title to search for" />
+        <input type="number" id="matchYear" placeholder="Year" aria-label="Year" min="1888" max="2100" />
+        <select id="matchKind" aria-label="Movie or TV show"><option value="movie">Movie</option><option value="tv">TV show</option></select>
+        <button type="button" id="matchSearch">Search</button>
+      </div>
+      <div id="matchList" class="modal-list match-list" tabindex="0"></div>
+      <div id="matchEpisode" class="match-episode hidden">
+        <label for="matchSeason">Season</label>
+        <input type="number" id="matchSeason" min="0" max="999" />
+        <label for="matchEpisodes">Episode(s)</label>
+        <input type="text" id="matchEpisodes" placeholder="e.g. 3 or 3,4" />
+      </div>
+      <label id="matchOthersRow" class="match-others hidden"><input type="checkbox" id="matchOthers" /> <span id="matchOthersText"></span></label>
+      <div class="enc-note" id="matchNote"></div>
+      <div class="modal-actions">
+        <button type="button" id="matchLeave" class="hidden">Leave as is</button>
+        <button type="button" id="matchRestore" class="hidden">Restore original name</button>
+        <span style="margin-left:auto"></span>
+        <button type="button" id="matchCancel">Cancel</button>
+        <button type="button" id="matchApply" class="primary" disabled>Apply</button>
+      </div>
+    </div>
+  </div>
+
   <div id="logOverlay" class="modal-overlay hidden">
     <div class="modal log-modal" role="dialog" aria-label="Log Snapshot">
       <h3>Log Snapshot</h3>

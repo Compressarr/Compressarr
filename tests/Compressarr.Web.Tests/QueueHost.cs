@@ -65,11 +65,14 @@ public sealed class TestHttpFactory : IHttpClientFactory
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             lock (_owner._requests) _owner._requests.Add(request.RequestUri!);
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+            return Task.FromResult(_owner.Responder?.Invoke(request.RequestUri!) ?? new HttpResponseMessage(HttpStatusCode.NotFound));
         }
     }
 
     private readonly List<Uri> _requests = new();
+
+    /// <summary>Answers a request with something other than the fast 404: a test that needs TMDB to say something returns it here (null = the 404).</summary>
+    public Func<Uri, HttpResponseMessage?>? Responder { get; set; }
 
     public IReadOnlyList<Uri> Requests { get { lock (_requests) return _requests.ToList(); } }
 

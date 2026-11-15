@@ -54,6 +54,13 @@ public sealed class CompressarrConfig
     public BackupSettings Backup { get; set; } = new();
     public NotificationSettings Notifications { get; set; } = new();
     public FileBotSettings FileBot { get; set; } = new();
+
+    /// <summary>The built-in TMDB renamer (3.2): an alternative to FileBot that renames a lane's files from TMDB itself. Off by default; only one of FileBot and this runs.</summary>
+    public TmdbRenameSettings TmdbRename { get; set; } = new();
+
+    /// <summary>"Do not process unmatched files" (3.2): a file the renamer (FileBot or TMDB) could not place stays in the queue but is not encoded until it is matched ("Match") or left as it is ("Leave as is"). Off by
+    /// default, which keeps today's behaviour: an unmatched file is encoded under the name it has. One setting for both renamers.</summary>
+    public bool HoldUnmatchedFiles { get; set; } = false;
     public UiStateSettings UiState { get; set; } = new();
     public ScheduleSettings Schedule { get; set; } = new();
 
@@ -153,6 +160,32 @@ public sealed class FileBotSettings
     /// just the movie files' paths. No "{format}" token here (movie naming has no season/episode
     /// numbering-style choice to make).</summary>
     public string MovieArgs { get; set; } = "";
+}
+
+/// <summary>How a season and episode are written in a TV file name the TMDB renamer produces.</summary>
+public enum TvNumbering
+{
+    /// <summary>S01E02 (two episodes: S01E02-E03).</summary>
+    S00E00,
+
+    /// <summary>1x02 (two episodes: 1x02-03).</summary>
+    SxE
+}
+
+/// <summary>The built-in renamer (3.2): looks each file in a lane's Input folder up on TMDB and renames it in place, the way the optional FileBot step does for people who do not
+/// run Sonarr or Radarr, but with no program to buy. It needs the TMDB API key from the Queue Posters settings (Posters.TmdbApiKey). Only the title, year and season text of a file name is
+/// ever sent to TMDB, never a path. Off by default, and mutually exclusive with <see cref="FileBotSettings"/>.</summary>
+public sealed class TmdbRenameSettings
+{
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>The language TMDB answers in for titles and episode names (an IETF tag such as en-US, de-DE, fr-FR).</summary>
+    public string Language { get; set; } = "en-US";
+
+    public TvNumbering Numbering { get; set; } = TvNumbering.S00E00;
+
+    /// <summary>Adds Plex's {tmdb-123} tag to a movie's file name, so Plex and Jellyfin match it without guessing. TV episode files never carry it (it belongs on the show folder).</summary>
+    public bool AddMovieTmdbId { get; set; } = false;
 }
 
 public sealed class LaneConfig

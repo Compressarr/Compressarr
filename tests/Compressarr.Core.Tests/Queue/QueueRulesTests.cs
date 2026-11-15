@@ -297,6 +297,67 @@ public sealed class QueueRulesTests : IDisposable
         Assert.Equal(new[] { "a", "c", "unordered" }, names);
     }
 
+    // ---- "Do not process unmatched files" -----------------------------------------------------
+
+    [Fact]
+    public void SelectNext_PassesOverAnEntryTheCallerHolds_AndTakesTheNext()
+    {
+        var a = Touch(Folder("a"), "a.mkv");
+        var b = Touch(Folder("b"), "b.mkv");
+        var held = Pending("laneA", a, order: 0);
+        held.FileBotUnmatched = true;
+        var state = new List<ResumeEntry> { held, Pending("laneA", b, order: 1) };
+
+        Assert.Equal(b, QueueRules.SelectNext(state, LaneIndex("laneA"), (_, _) => 0, e => e.FileBotUnmatched)!.FullName);
+        Assert.Equal(a, QueueRules.SelectNext(state, LaneIndex("laneA"), (_, _) => 0)!.FullName);                      // nothing held unless asked
+        Assert.Equal(a, QueueRules.SelectNext(state, LaneIndex("laneA"), (_, _) => 0, _ => false)!.FullName);
+    }
+
+    [Fact]
+    public void SelectNext_WhenEverythingIsHeld_HasNothingToTake()
+    {
+        var a = Touch(Folder("a"), "a.mkv");
+        var held = Pending("laneA", a, order: 0);
+        held.FileBotUnmatched = true;
+
+        Assert.Null(QueueRules.SelectNext(new List<ResumeEntry> { held }, LaneIndex("laneA"), (_, _) => 0, e => e.FileBotUnmatched));
+    }
+
+    [Fact]
+    public void WaitingEntriesInOrder_LeavesOutUnmatchedOnesOnlyWhenHolding()
+    {
+        var unmatched = Pending("laneA", "u", order: 0);
+        unmatched.FileBotUnmatched = true;
+        var state = new List<ResumeEntry> { unmatched, Pending("laneA", "m", order: 1) };
+
+        Assert.Equal(new[] { "u", "m" }, QueueRules.WaitingEntriesInOrder(state, "laneA").Select(e => e.FullName));
+        Assert.Equal(new[] { "m" }, QueueRules.WaitingEntriesInOrder(state, "laneA", holdUnmatched: true).Select(e => e.FullName));
+    }
+
+    [Fact]
+    public void BuildUpNext_MarksAnUnmatchedFileHeld_OnlyWhenTheSettingIsOn()
+    {
+        var folder = Folder("a");
+        var unmatched = Touch(folder, "unmatched.mkv");
+        var matched = Touch(folder, "matched.mkv");
+        var scanner = new ScriptedScanner();
+        scanner.FilesByFolder[folder] = new List<string> { unmatched, matched };
+        var config = ConfigWith(("laneA", folder));
+        var held = Pending("laneA", unmatched, order: 0);
+        held.FileBotUnmatched = true;
+        var state = new List<ResumeEntry> { held, Pending("laneA", matched, order: 1) };
+        var context = new QueueRunContext(null, new Dictionary<string, bool>());
+
+        var off = QueueRules.BuildUpNext(config, state, new PassThroughPathExpander(), scanner, context, out _);
+        config.HoldUnmatchedFiles = true;
+        var on = QueueRules.BuildUpNext(config, state, new PassThroughPathExpander(), scanner, context, out _);
+
+        Assert.All(off, i => Assert.False(i.IsHeld));
+        Assert.True(on.Single(i => i.FileName == "unmatched.mkv").IsHeld);
+        Assert.True(on.Single(i => i.FileName == "unmatched.mkv").IsFileBotUnmatched);
+        Assert.False(on.Single(i => i.FileName == "matched.mkv").IsHeld);
+    }
+
     // ---- MergeUserEdits ---------------------------------------------------------------------
 
     [Fact]

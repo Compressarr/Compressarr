@@ -32,6 +32,10 @@ public sealed class LaneProcessingContext
     /// lane's own prep, cosmetic only (a queue-control edit mid-run can make the real count drift
     /// slightly), kept per-lane rather than switched to a global count across every lane so today's
     /// "Compressing File in Lane X, i of N" UI copy keeps meaning what it already says.</summary>
+    /// <summary>Files the renamer could not give an answer for in this lane's prep (TMDB could not be reached). With "Do not process unmatched files" on, they are not started this pass; nothing is
+    /// remembered about them, so the next pass asks again.</summary>
+    public IReadOnlySet<string> UndeterminedPaths { get; init; } = new HashSet<string>();
+
     public int FileIndex { get; set; }
     public int FileTotal { get; set; }
     public int PadSize { get; set; }
@@ -143,6 +147,12 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
     private readonly IPathExpander _pathExpander;
     private readonly IVideoFileScanner _scanner;
     private readonly IFileBotRunner _fileBotRunner;
+
+    /// <summary>The built-in TMDB renamer (3.2), the alternative to FileBot. Null in the tests that build this class directly and do not use it.</summary>
+    private readonly Compressarr.Core.Renaming.ITmdbRenamer? _tmdbRenamer;
+
+    /// <summary>Where renames are kept so a wrong match can be fixed or undone. The TMDB renamer writes its own; the ones FileBot made are noted here (names only).</summary>
+    private readonly Compressarr.Core.Renaming.IRenameLog? _renameLog;
     private readonly IEncoderPresetService _presets;
     private readonly IMetadataService _metadata;
     private readonly IEncoderRunner _processRunner;
@@ -183,9 +193,13 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         IResumeStateStore resumeStore,
         IRunProgressReporter progress,
         IConfigStore configStore,
-        IEncoderResolver? encoders = null)
+        IEncoderResolver? encoders = null,
+        Compressarr.Core.Renaming.ITmdbRenamer? tmdbRenamer = null,
+        Compressarr.Core.Renaming.IRenameLog? renameLog = null)
     {
         _encoders = encoders;
+        _tmdbRenamer = tmdbRenamer;
+        _renameLog = renameLog;
         _pathExpander = pathExpander;
         _scanner = scanner;
         _fileBotRunner = fileBotRunner;
@@ -291,18 +305,47 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         // A live UI otherwise has nothing to show between LaneStarted and the first FileStarted -
         // FileBot's own lookups can take real wall-clock time (a live TheTVDB/TMDB call), during
         // which the Monitor page would look stuck/idle without this.
-        if (fileBotOn)
+        // The built-in TMDB renamer takes FileBot's place and runs at the same point; only one of the two ever runs (the Settings page and its validator keep both from being on, and
+        // when a hand-edited settings file has both on, FileBot, which was there first, wins).
+        var tmdbOn = config.TmdbRename.Enabled && !config.FileBot.Enabled && !LaneKinds.IsVideos(lane) && _tmdbRenamer is not null;
+        var tmdbKey = (config.Posters.TmdbApiKey ?? "").Trim();
+        if (tmdbOn && tmdbKey.Length == 0)
+        {
+            reportProblems?.Add(ReportErrorCode.TmdbRenameKeyMissing);
+            _logger.LogProblem($"tmdb-rename-nokey:{inputPath}", "The TMDB renamer is on but there is no TMDB API key (it uses the one under Queue Posters), so nothing was renamed.");
+            tmdbOn = false;
+        }
+        else if (tmdbOn)
+        {
+            _logger.ClearProblem($"tmdb-rename-nokey:{inputPath}");
+        }
+
+        var renameOn = fileBotOn || tmdbOn;
+        if (renameOn)
         {
             _progress.FileBotStarted(lane.Id);
-            _logger.Log("Renaming files with FileBot...");
+            _logger.Log(tmdbOn ? "Renaming files with TMDB..." : "Renaming files with FileBot...");
         }
-        // FileBot prints the files it renames; for a lane whose History is not fully tracked those lines stay out of the log file (an error among them is kept).
-        if (fileBotOn && lane.Tracking != LaneTracking.Full) _logger.BeginFileScope();
+        // The renamer prints the files it renames; for a lane whose History is not fully tracked those lines stay out of the log file (an error among them is kept).
+        if (renameOn && lane.Tracking != LaneTracking.Full) _logger.BeginFileScope();
         FileBotRunResult fileBotResult;
-        try { fileBotResult = _fileBotRunner.Run(expandedFileBotSettings, inputPath, laneConfig.Processing.VidTypes, _logger); }
-        finally { if (fileBotOn && lane.Tracking != LaneTracking.Full) _logger.EndFileScope(discard: true); }
+        try
+        {
+            fileBotResult = tmdbOn
+                ? await _tmdbRenamer!.RunAsync(config.TmdbRename, tmdbKey, inputPath, laneConfig.Processing.VidTypes, _logger, cancellationToken)
+                : _fileBotRunner.Run(expandedFileBotSettings, inputPath, laneConfig.Processing.VidTypes, _logger);
+        }
+        finally { if (renameOn && lane.Tracking != LaneTracking.Full) _logger.EndFileScope(discard: true); }
         var fileBotUnmatched = fileBotResult.Unmatched;
-        if (fileBotOn)
+        if (fileBotOn && _renameLog is not null)
+        {
+            // FileBot's renames are noted by name (it does not say what it matched), so Fix match can still work from the new name and Restore can put the old one back.
+            foreach (var (from, to) in fileBotResult.Renames)
+            {
+                if (!File.Exists(from) && File.Exists(to)) _renameLog.Record(from, to, null, false, null, null, Compressarr.Core.Renaming.RenameRecord.FileBotSource);
+            }
+        }
+        if (renameOn)
         {
             _progress.FileBotCompleted(lane.Id);
         }
@@ -337,7 +380,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         if (laneHadPending)
         {
             // Processing order drives this count: user-set/stamped Order first (see QueueRules).
-            videoFiles = QueueRules.WaitingEntriesInOrder(resumeState, lane.Id)
+            videoFiles = QueueRules.WaitingEntriesInOrder(resumeState, lane.Id, config.HoldUnmatchedFiles)
                 .Select(p => new FileInfo(p.FullName))
                 .ToList();
             if (addedUntracked || remappedRenames) ResumeResults.SaveChanges(_resumeStore, persisted, resumeState, resumeFilePath, fileBotResult.Renames);
@@ -349,6 +392,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             var keptSources = ResumeKeeping.KeptSources(resumeState, lane.Id);
             videoFiles = scanned
                 .Where(f => !heldPaths.Contains(f.FullName))
+                .Where(f => !(config.HoldUnmatchedFiles && fileBotUnmatched.Contains(f.FullName)))   // an unmatched file waits for a match
                 .Where(f => !ResumeKeeping.AlreadyConverted(keptSources, f)) // converted already, source kept (Maintain) and unchanged
                 .ToList();
             ResumeResults.SaveChanges(_resumeStore, persisted, resumeState, resumeFilePath, fileBotResult.Renames);
@@ -370,6 +414,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             FileTotal = fileCount,
             PadSize = padSize,
             NaturalOrderIndex = naturalOrderIndex,
+            UndeterminedPaths = fileBotResult.Undetermined ?? new HashSet<string>(),
             RetriesSucceeded = retriesSucceeded
         };
     }
@@ -414,7 +459,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         var i = context.FileIndex;
         // The total was counted when the lane was prepared; files that reached the lane after that (a lane that started empty, imports during a long pass)
         // are still processed, so the total grows to cover what has been started plus what is still waiting - never "65 of 0".
-        var waiting = QueueRules.WaitingEntriesInOrder(resumeState, context.Lane.Id);
+        var waiting = QueueRules.WaitingEntriesInOrder(resumeState, context.Lane.Id, context.Config.HoldUnmatchedFiles);
         context.FileTotal = Math.Max(context.FileTotal, i - 1 + waiting.Count + (waiting.Contains(resumeEntry) ? 0 : 1));
         var fileCount = context.FileTotal;
         var padSize = context.PadSize;

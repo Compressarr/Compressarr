@@ -92,6 +92,50 @@ public class SettingsValidatorTests : IDisposable
     }
 
     [Fact]
+    public void Validate_TmdbRenameOff_NeedsNoKey()
+    {
+        var config = MakeHealthyConfig();
+        config.TmdbRename.Enabled = false;
+
+        Assert.Empty(SettingsValidator.Validate(config, new PassThroughPathExpander()));
+    }
+
+    [Fact]
+    public void Validate_TmdbRenameOn_WithoutAKey_Flags()
+    {
+        var config = MakeHealthyConfig();
+        config.TmdbRename.Enabled = true;
+
+        var issues = SettingsValidator.Validate(config, new PassThroughPathExpander());
+
+        Assert.Contains(issues, i => i.Field == "tmdbApiKey");
+    }
+
+    [Fact]
+    public void Validate_TmdbRenameOn_WithAKey_IsFine()
+    {
+        var config = MakeHealthyConfig();
+        config.TmdbRename.Enabled = true;
+        config.Posters.TmdbApiKey = "abc";
+
+        Assert.Empty(SettingsValidator.Validate(config, new PassThroughPathExpander()));
+    }
+
+    [Fact]
+    public void Validate_TmdbRenameAndFileBotBothOn_Flags()
+    {
+        var config = MakeHealthyConfig();
+        config.TmdbRename.Enabled = true;
+        config.Posters.TmdbApiKey = "abc";
+        config.FileBot = new FileBotSettings { Enabled = true, CliPath = Path.Combine(_tempDir, "filebot.exe") };
+        File.WriteAllText(config.FileBot.CliPath, "x");
+
+        var issues = SettingsValidator.Validate(config, new PassThroughPathExpander());
+
+        Assert.Contains(issues, i => i.Field == "tmdbRenameEnabled");
+    }
+
+    [Fact]
     public void Validate_MultipleSimultaneousProblems_AllAppear()
     {
         var config = new CompressarrConfig

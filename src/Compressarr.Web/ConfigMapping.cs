@@ -51,6 +51,8 @@ internal static class ConfigMapping
         ValidationIssues: validationIssues,
         Posters: new PosterSettingsDto(config.Posters.Enabled, SecretFields.Show(config.Posters.TmdbApiKey), config.Posters.Size.ToString(), config.Posters.SmallerImages,
             config.Posters.Source.ToString(), SecretFields.Show(config.Posters.OmdbApiKey), config.Posters.FallbackToOther),
+        HoldUnmatchedFiles: config.HoldUnmatchedFiles,
+        TmdbRename: new TmdbRenameDto(config.TmdbRename.Enabled, config.TmdbRename.Language, config.TmdbRename.Numbering.ToString(), config.TmdbRename.AddMovieTmdbId),
         SaveReportCopy: config.Report.SaveCopy,
         ReportCopyRetentionDays: config.Report.CopyRetentionDays,
         UnseenErrorDays: config.Report.UnseenErrorDays,
@@ -108,6 +110,16 @@ internal static class ConfigMapping
         config.Backup.FolderPath = dto.BackupFolderPath;
         config.Backup.IntervalDays = dto.BackupIntervalDays;
         config.Backup.RetentionDays = dto.BackupRetentionDays;
+        if (dto.HoldUnmatchedFiles is { } hold) config.HoldUnmatchedFiles = hold;
+
+        if (dto.TmdbRename is { } rename)
+        {
+            config.TmdbRename.Enabled = rename.Enabled;
+            config.TmdbRename.Language = string.IsNullOrWhiteSpace(rename.Language) ? "en-US" : rename.Language.Trim();
+            config.TmdbRename.Numbering = Enum.TryParse<TvNumbering>(rename.Numbering, ignoreCase: true, out var numbering) ? numbering : TvNumbering.S00E00;
+            config.TmdbRename.AddMovieTmdbId = rename.AddMovieTmdbId;
+        }
+
         if (dto.Posters is { } posters)
         {
             config.Posters.Enabled = posters.Enabled;

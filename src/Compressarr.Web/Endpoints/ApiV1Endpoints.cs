@@ -103,8 +103,8 @@ public static class ApiV1Endpoints
                 hold = HoldOf(scheduleStatus.Hold),
                 queue = new
                 {
-                    pending = upNext.Count(i => !i.IsError && !i.IsSkipped),
-                    skipped = upNext.Count(i => !i.IsError && i.IsSkipped),
+                    pending = upNext.Count(i => !i.IsError && !i.IsSkipped && !i.IsHeld),
+                    skipped = upNext.Count(i => !i.IsError && (i.IsSkipped || i.IsHeld)),
                     errors = upNext.Count(i => i.IsError),
                     etaState = scheduleStatus.Hold is not null ? "held" : etaText is null ? "none" : etaText == "Estimating" ? "estimating" : "projected",
                     eta = scheduleStatus.Hold is not null || etaText is null || etaText == "Estimating" ? null : etaText
@@ -124,7 +124,7 @@ public static class ApiV1Endpoints
             var config = configStore.Load(AppPaths.GetConfigFilePath());
             var upNext = queue.GetUpNext(config, new QueueRunContext(snapshot.FileFullName, snapshot.LaneIsResumedById));
 
-            static string StatusOf(UpNextItem i) => i.IsError ? "error" : i.IsSkipped ? "skipped" : "pending";
+            static string StatusOf(UpNextItem i) => i.IsError ? "error" : i.IsSkipped || i.IsHeld ? "skipped" : "pending";
             var numbered = upNext.Select((item, index) => (Item: item, Position: index + 1));
             if (!string.IsNullOrWhiteSpace(lane))
                 numbered = numbered.Where(x => string.Equals(x.Item.LaneId, lane.Trim(), StringComparison.OrdinalIgnoreCase)
@@ -176,8 +176,8 @@ public static class ApiV1Endpoints
                     moviePreset = l.MoviePreset,
                     queue = new
                     {
-                        pending = upNext.Count(i => i.LaneId == l.Id && !i.IsError && !i.IsSkipped),
-                        skipped = upNext.Count(i => i.LaneId == l.Id && !i.IsError && i.IsSkipped),
+                        pending = upNext.Count(i => i.LaneId == l.Id && !i.IsError && !i.IsSkipped && !i.IsHeld),
+                        skipped = upNext.Count(i => i.LaneId == l.Id && !i.IsError && (i.IsSkipped || i.IsHeld)),
                         errors = upNext.Count(i => i.LaneId == l.Id && i.IsError)
                     }
                 }).ToList()

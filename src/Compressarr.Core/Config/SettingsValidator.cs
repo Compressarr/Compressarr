@@ -21,6 +21,19 @@ public static class SettingsValidator
             }
         }
 
+        if (config.TmdbRename.Enabled)
+        {
+            if (config.FileBot.Enabled)
+            {
+                issues.Add(new ValidationIssue("tmdbRenameEnabled", "The TMDB renamer and FileBot are both turned on. Only one can rename your files - turn one of them off."));
+            }
+
+            if (string.IsNullOrWhiteSpace(config.Posters.TmdbApiKey))
+            {
+                issues.Add(new ValidationIssue("tmdbApiKey", "The TMDB renamer is on, but it needs a TMDB API key (free at themoviedb.org). It uses the key entered under Queue Posters."));
+            }
+        }
+
         if (config.Posters.Enabled && config.Posters.Source == PosterSource.Omdb && string.IsNullOrWhiteSpace(config.Posters.OmdbApiKey))
         {
             issues.Add(new ValidationIssue("omdbApiKey", "Show posters on queue is on, but it needs an OMDb API key (free at omdbapi.com)."));
