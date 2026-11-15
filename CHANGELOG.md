@@ -9,6 +9,43 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
+## [Unreleased]
+
+> [!TIP]
+> **What's new in 3.2:** a built-in **TMDB renamer** that does what FileBot does for people without Sonarr or Radarr, with nothing to buy; **Match** and **Fix match** on the queue to put a file right
+> yourself; and a switch to **hold unmatched files** instead of compressing them under a messy name. Nothing changes until you turn something on: with the renamer and the switch off, 3.2 behaves as 3.1.
+
+### Added
+
+- **Rename with TMDB** (Settings). Looks each video in a lane's Input folder up on [The Movie Database](https://www.themoviedb.org/) and renames it in place, at the same point in each pass where FileBot runs.
+  It is an alternative to FileBot, never used with it: turning one on turns the other off (if a hand-edited settings file has both on, FileBot runs). It uses the TMDB key already entered under Queue Posters.
+  A movie becomes `Title (Year)`; an episode `Show (Year) - S01E02 - Episode Title` (`S01E01-E02` for two in one file; `1x02` numbering if you prefer). Options: the language of the titles, the numbering
+  style, and Plex's `{tmdb-123}` tag on movie names. **Preview Renames** shows what the first 40 files of each lane would be called without renaming anything.
+  - **Strict by design.** A title is accepted only when it is clearly the one: each result is scored on title (exact, or equal once a leading "The" is ignored) and year (the same year, or one out), and the best
+    wins only if it stands alone. A movie with no year is never guessed at; a `US` / `UK` tag picks between shows of one name; a tie, an unknown title or an episode TMDB does not have leaves the file as it is and
+    marks it **Unmatched**. Release noise (`1080p`, `BluRay`, `x265`, `[group]`) is ignored, and a show or year missing from the file name is taken from its folder when that is the same film or show.
+  - **Safe.** Nothing is ever overwritten (a taken name leaves the file alone), a file is renamed in its own folder, and **subtitles and other companion files are renamed with their video**, because Compressarr finds
+    them by the video's name. A colon is dropped from a title, a slash or TMDB's `·` becomes a hyphen (`WALL-E`), and a Plex edition tag already on the name is kept. If TMDB cannot be reached nothing is renamed and
+    nothing is flagged; a rejected key is a standing problem in the log; with no key the lane runs as before and the report shows the new **ERROR 115**.
+  - Only the title, year and season read from a name are sent to TMDB, never a path. Lookups are remembered for six hours while Compressarr runs. A Videos lane is never renamed.
+- **Match, Fix match, Restore original name and Leave as is** on the queue (the row's ⋮ menu). **Match…** on an Unmatched file opens a dialog that searches TMDB (poster, year, description), starting from what
+  the file name says; pick the right film or show (and, for a show, the season and episode) and the file is renamed, keeping its place in the queue, its skip and its profile. For a show it can carry your choice to the
+  other waiting episodes in one go, and the choice is remembered so later episodes follow it. **Fix match…** on a file that was renamed (by the renamer, by a Match, or by FileBot) opens the same dialog from the
+  file's **original** name with the current match marked, and can correct a whole show matched wrongly; **Restore original name** puts the name (and the subtitles) back and leaves the file Unmatched, and the
+  automatic renamer never overrules a match made by hand. **Leave as is** clears the badge without renaming; it is also its own menu item because it needs no TMDB key. Match and Fix match need the TMDB key and work
+  for FileBot users too; they apply to waiting files only (not the one being encoded, not one already filed). The dialog never trusts a title sent by the page: it sends a TMDB id and the name comes from TMDB, and the
+  pictures come through Compressarr so the browser never talks to TMDB.
+- **Do not process unmatched files** (Settings, one switch for both FileBot and TMDB). An Unmatched file stays in the queue, dimmed and marked **Held**, and is passed over like a skipped one until it is matched or left as
+  it is; the rest of the queue carries on. A file TMDB could not be asked about because it was unreachable also waits that one pass, without being flagged. Off by default, which keeps today's behaviour.
+  The queue's ETA, and the API's `pending` and `skipped` counts, treat a held file as skipped.
+
+### Changed
+
+- **The queue database gains two tables** (schema version 12): the record of what the renamer and Match did to each file (so a match can be fixed or undone) and the matches you chose (so the rest of a show follows).
+  Nothing in the existing queue changes, and a 3.1 queue upgrades with its entries and edits intact; installing 3.0 or 3.1 over it again cannot read it, as with every database change.
+- While renaming, the Monitor page's status line reads "Renaming files in Lane ..." (it used to name FileBot, which is no longer the only renamer).
+- The queue's JSON gains `canMatch` (a TMDB key is saved), and each row `isRenamed` and `isHeld`; the Settings JSON gains `tmdbRename` and `holdUnmatchedFiles`. An older page that does not send them leaves them as they are.
+
 ## [3.1.0-rc.2] - 2026-11-13
 
 Fixes from an independent review of 3.1.0-rc.1; nothing else changed. If you installed rc.1, this replaces it.

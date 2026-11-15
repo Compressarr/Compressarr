@@ -100,7 +100,7 @@ the web interface needs the sign-in you set up in Settings > Security, and saved
 
 ### And more
 
-Optional **FileBot** renaming before a scan; **Plex edition** tags (`{edition-Name}`) filed the way Plex expects; **queue posters** from TMDb or OMDb; scheduled and downloadable **backups** that
+Optional renaming before a scan, with **FileBot** or the built-in **TMDB renamer** (no program to buy), and **Match** / **Fix match** on the queue to put a file right yourself; **Plex edition** tags (`{edition-Name}`) filed the way Plex expects; **queue posters** from TMDb or OMDb; scheduled and downloadable **backups** that
 carry your settings, profiles, queue and history; a start-up window; and an installer where every program file is signed.
 
 ## Installation
