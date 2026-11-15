@@ -9,7 +9,9 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
-## [Unreleased]
+## [3.2.0-beta.1] - 2026-11-15
+
+> The first 3.2 pre-release (beta), built on 3.1.0-rc.2. Everything below is new since then.
 
 > [!TIP]
 > **What's new in 3.2:** a built-in **TMDB renamer** that does what FileBot does for people without Sonarr or Radarr, with nothing to buy; **Match** and **Fix match** on the queue to put a file right
