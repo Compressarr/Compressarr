@@ -192,6 +192,42 @@ public sealed class QueueRulesTests : IDisposable
         Assert.True(state.Single().FileBotUnmatched);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TrackScannedFiles_FlagsAFileThatWasAlreadyTracked_WhenTheRenamerCouldNotPlaceIt(bool laneHadPending)
+    {
+        // The queue held the file before the renamer (or "Do not process unmatched files") was switched on: the verdict used to be dropped for any entry that existed already.
+        var folder = Folder("a");
+        var file = Touch(folder, "blux2.mkv");
+        var entry = Pending("laneA", file, order: 0);
+        var state = new List<ResumeEntry> { entry };
+
+        var changed = QueueRules.TrackScannedFiles(state, "laneA", new[] { new FileInfo(file) }, new HashSet<string> { file }, laneHadPending);
+
+        Assert.True(entry.FileBotUnmatched);
+        Assert.True(changed);   // so the pass saves it
+        Assert.Single(state);
+    }
+
+    [Fact]
+    public void TrackScannedFiles_NeverClearsTheFlag_AndOnlyFlagsTheFileTheRenamerNamed()
+    {
+        var folder = Folder("a");
+        var flagged = Touch(folder, "flagged.mkv");
+        var other = Touch(folder, "other.mkv");
+        var a = Pending("laneA", flagged, order: 0);
+        a.FileBotUnmatched = true;
+        var b = Pending("laneA", other, order: 1);
+        var state = new List<ResumeEntry> { a, b };
+
+        var changed = QueueRules.TrackScannedFiles(state, "laneA", new[] { new FileInfo(flagged), new FileInfo(other) }, new HashSet<string>(), laneHadPending: true);
+
+        Assert.False(changed);
+        Assert.True(a.FileBotUnmatched);
+        Assert.False(b.FileBotUnmatched);
+    }
+
     [Fact]
     public void TrackScannedFiles_ReAddedCompletedFileIsRequeuedAtTheEnd_WhenNothingElseIsPending()
     {
@@ -514,6 +550,20 @@ public sealed class QueueRulesTests : IDisposable
         Assert.True(entry.Skipped);
         Assert.Equal("Fast", entry.PresetOverride);
         Assert.Equal(2, state.Count);
+    }
+
+    [Fact]
+    public void RemapRenamedFiles_ARenamedFileIsMatched_SoItIsNoLongerFlaggedUnmatched()
+    {
+        var folder = Folder("a");
+        var oldPath = Path.Combine(folder, "old.mkv");
+        var newPath = Touch(folder, "New Name.mkv");
+        var entry = new ResumeEntry { LaneId = "laneA", FullName = oldPath, Status = ResumeStatus.Pending, Order = 0, FileBotUnmatched = true };
+        var state = new List<ResumeEntry> { entry };
+
+        QueueRules.RemapRenamedFiles(state, "laneA", Renames(oldPath, newPath));
+
+        Assert.False(entry.FileBotUnmatched);
     }
 
     [Fact]

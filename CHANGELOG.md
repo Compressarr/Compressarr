@@ -9,6 +9,16 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
+## [Unreleased]
+
+### Fixed
+
+- **"Do not process unmatched files" no longer misses files already in the queue.** The Unmatched flag used to be set only on a file added to the queue in that pass, so a file that was already waiting (tracked before the
+  renamer or the switch was turned on, or left over from an earlier pass) was encoded as though it were matched even though the renamer could not place it. Such a file is now flagged, and held, like any other.
+- **A file you have dealt with stays dealt with.** A file matched by hand, restored or left as it is no longer gets the Unmatched badge back when FileBot, which does not read Compressarr's rename record,
+  reports it unmatched again. **Leave as is** now writes that record too, so the next pass does not flag the file and hold it a second time.
+- **A renamed file is no longer held for good.** When a waiting file is renamed, its Unmatched flag is cleared with the old name; a stale flag used to keep the renamed file held.
+
 ## [3.2.0-beta.1] - 2026-11-15
 
 > The first 3.2 pre-release (beta), built on 3.1.0-rc.2. Everything below is new since then.

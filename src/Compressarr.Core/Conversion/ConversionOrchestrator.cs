@@ -337,6 +337,8 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         }
         finally { if (renameOn && lane.Tracking != LaneTracking.Full) _logger.EndFileScope(discard: true); }
         var fileBotUnmatched = fileBotResult.Unmatched;
+        // A file a person matched by hand or chose to leave as it is (Match, Restore, Leave as is) is theirs: FileBot, which does not read the rename log, may still report it unmatched, and that must not put the badge back.
+        if (_renameLog is not null) fileBotUnmatched.RemoveWhere(path => _renameLog.Find(path) is { IsHandled: true });
         if (fileBotOn && _renameLog is not null)
         {
             // FileBot's renames are noted by name (it does not say what it matched), so Fix match can still work from the new name and Restore can put the old one back.

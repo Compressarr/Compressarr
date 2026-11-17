@@ -464,6 +464,17 @@ public class TmdbMatchServiceTests : AppDataTestBase
         Assert.False(EntryOf(path)!.FileBotUnmatched);
     }
 
+    [Fact]
+    public void LeaveAsIsIsRemembered_SoTheAutomaticRenamerAndTheNextPassTreatTheFileAsHandled()
+    {
+        var path = Touch("video1.mkv");
+
+        _service.LeaveAsIs(_config, "lane1", path, null);
+
+        Assert.True(_log.Find(path) is { IsHandled: true });
+        Assert.DoesNotContain(Path.GetFullPath(path).ToUpperInvariant(), _log.CurrentPaths());   // not shown as renamed: there is nothing to fix or restore
+    }
+
     /// <summary>Renames the file the way the automatic renamer would have, and records it.</summary>
     private string RenameAsTmdb(string original, int tmdbId, bool film = false, int episode = 1)
     {

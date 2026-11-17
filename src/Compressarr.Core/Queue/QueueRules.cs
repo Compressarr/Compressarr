@@ -354,10 +354,12 @@ public static class QueueRules
                 ResumeQueueOrder.Place(resumeState, created, priority);
                 resumeState.Add(created);
                 addedUntracked = true;
+                continue;
             }
             else if (ResumeKeeping.IsConvertedAndUnchanged(existing, f))
             {
                 // Converted already and its source was kept (Maintain): the same file still sitting there is not new work.
+                continue;
             }
             else if (!laneHadPending
                 && !existing.HeldAfterFailure
@@ -366,6 +368,15 @@ public static class QueueRules
             {
                 existing.Status = ResumeStatus.Pending;
                 ResumeQueueOrder.Place(resumeState, existing, priority);
+            }
+
+            // A file that was already in the queue (tracked before the renamer or "Do not process unmatched files" was turned on, or left over from an earlier pass) is flagged too when
+            // the renamer could not place it this pass; the flag used to be stamped only on a brand-new entry, so such a file was encoded as though it were matched. It is only ever set here:
+            // a file a person matched or chose to leave as it is is not reported unmatched (the caller leaves it out), so their choice is never undone.
+            if (existing.Status == ResumeStatus.Pending && !existing.FileBotUnmatched && fileBotUnmatched.Contains(f.FullName))
+            {
+                existing.FileBotUnmatched = true;
+                addedUntracked = true;
             }
         }
 
@@ -483,6 +494,7 @@ public static class QueueRules
             if (target is null)
             {
                 old.FullName = to;
+                old.FileBotUnmatched = false;      // it was renamed, so it is matched now (a stale flag would hold it for good)
                 changed = true;
             }
             else if (target.Status == ResumeStatus.Pending)

@@ -295,9 +295,12 @@ public sealed class TmdbMatchService : ITmdbMatchService
         var (target, error) = Check(config, laneId, fullName, currentFileFullName);
         if (target is null) return new MatchApplyResult(false, error!);
 
-        return _queue.SetUnmatched(config, target.Lane.Id, target.File.FullName, unmatched: false) == QueueEditResult.Ok
-            ? new MatchApplyResult(true, "Left as it is.")
-            : new MatchApplyResult(false, "That file is no longer waiting in the queue.");
+        if (_queue.SetUnmatched(config, target.Lane.Id, target.File.FullName, unmatched: false) != QueueEditResult.Ok)
+            return new MatchApplyResult(false, "That file is no longer waiting in the queue.");
+
+        // Remembered as handled (the name stays what it is), so the next pass does not flag the file Unmatched again and hold it once more. A file that has a record already (put back by hand) is handled as it is.
+        if (_log.Find(target.File.FullName) is null) _log.Record(target.File.FullName, target.File.FullName, null, false, null, null, RenameRecord.RestoredSource);
+        return new MatchApplyResult(true, "Left as it is.");
     }
 
     /// <summary>The other waiting episodes of the same show (the same name once read) that a choice could carry to: files left Unmatched or put back by hand, files renamed by Compressarr or FileBot (they may be wrong
