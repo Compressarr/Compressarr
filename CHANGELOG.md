@@ -9,7 +9,9 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
-## [Unreleased]
+## [3.2.0-beta.2] - 2026-11-17
+
+Fixes to holding unmatched files; nothing else changed. If you installed beta.1, this replaces it.
 
 ### Fixed
 
