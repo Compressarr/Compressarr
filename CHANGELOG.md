@@ -9,6 +9,15 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
+## [3.1.0] - 2026-11-20
+
+The final 3.1 release. It is 3.1.0-rc.2 with only the version, and the update channel new installs start on (Stable), changed. The entries below for 3.1.0-rc.1 and 3.1.0-rc.2 hold the full detail of each change.
+
+> [!TIP]
+> **What's new in 3.1, compared with 3.0.0:** a **Videos lane** for home videos, a **Track in History** choice per lane, **processing settings per lane**, **priority rules** for the queue and a **Change all** button for it,
+> **Save and Share** on reports (with a copy that has no file names), a **trash can** that removes a file's name from History, and a **crash journal** so a power cut while a file is being filed no longer
+> loses its place. Nothing changes until you use them: a lane that follows the global settings, tracks everything and has no priority rule behaves exactly as in 3.0.
+
 ## [3.1.0-rc.2] - 2026-11-13
 
 Fixes from an independent review of 3.1.0-rc.1; nothing else changed. If you installed rc.1, this replaces it.
