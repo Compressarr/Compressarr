@@ -3,6 +3,7 @@ using Compressarr.Core.Config;
 using Compressarr.Core.Conversion;
 using Compressarr.Core.Logging;
 using Microsoft.Data.Sqlite;
+using FilePresence = Compressarr.Core.Conversion.FileOutcomeHelpers.FilePresence;
 
 namespace Compressarr.Core.Renaming;
 
@@ -150,7 +151,7 @@ public sealed class SqliteRenameJournal : IRenameJournal
 /// stay as they are, the journal keeps them, and the caller holds those files back from being encoded so nothing is filed - and cleaned up - around a half-renamed set.</summary>
 public sealed record RenameReconciliation(IReadOnlyDictionary<string, string> Completed, IReadOnlyDictionary<string, bool> UnmatchedAfter, IReadOnlySet<string> Unresolved, IReadOnlyList<long> Close);
 
-/// <summary>Finishes what a stop left half done (3.2). For each open rename it looks at where the files are, never at what it hopes happened: the video at its old name and nothing moved means the
+/// <summary>Finishes what a stop left half done (3.2). For each open rename it looks at where the files are, never at what it hopes happened (and a path that cannot be examined is neither there nor gone: it keeps the record and holds the file): the video at its old name and nothing moved means the
 /// rename never started (anything that did move is put back); the video at its new name means it is carried through (the companions still under the old name follow it); anything else (the files are
 /// gone, or both names exist) is not something to touch, and the record is dropped. A rename it cannot finish stays open and is retried on the next pass.</summary>
 public sealed class RenameReconciler
@@ -174,18 +175,44 @@ public sealed class RenameReconciler
         foreach (var open in _journal.Pending(inputPath))
         {
             var intent = open.Intent;
-            var oldVideo = File.Exists(intent.OldPath);
-            var newVideo = File.Exists(intent.NewPath);
+            var name = Path.GetFileName(intent.OldPath);
 
-            if (oldVideo && !newVideo)
+            // Every decision below is made on what can be SAID about a path, not on File.Exists: that answers false for a file that is merely out of reach (access denied, a share that dropped),
+            // and a record is only ever closed on what is definitely there or definitely not. Anything un-examinable keeps the record, holds the file and is asked again on the next pass.
+            var oldVideo = Presence(intent.OldPath);
+            var newVideo = Presence(intent.NewPath);
+            if (oldVideo == FilePresence.Unknown || newVideo == FilePresence.Unknown)
+            {
+                Hold(unresolved, intent);
+                logger.Log($"[TMDB] A rename of \"{name}\" was interrupted and \"{Path.GetFileName(oldVideo == FilePresence.Unknown ? intent.OldPath : intent.NewPath)}\" cannot be looked at right now (is the drive or share reachable?); the file is held and it is looked at again on the next pass.", LogSeverity.Error);
+                continue;
+            }
+
+            if (oldVideo == FilePresence.Present && newVideo == FilePresence.Absent)
             {
                 // The video never moved. If a companion did, it goes back so the set is as it was.
-                var moved = intent.Companions.Where(c => File.Exists(c.To) && !File.Exists(c.From)).ToList();
+                var moved = new List<RenameMove>();
+                RenameMove? unreadable = null;
+                foreach (var companion in intent.Companions)
+                {
+                    var to = Presence(companion.To);
+                    var from = Presence(companion.From);
+                    if (to == FilePresence.Unknown || from == FilePresence.Unknown) unreadable ??= companion;
+                    else if (to == FilePresence.Present && from == FilePresence.Absent) moved.Add(companion);
+                }
+
+                if (unreadable is not null)
+                {
+                    Hold(unresolved, intent);
+                    logger.Log($"[TMDB] A rename of \"{name}\" was interrupted and \"{Path.GetFileName(unreadable.From)}\" cannot be looked at right now; the file is held and it is looked at again on the next pass.", LogSeverity.Error);
+                    continue;
+                }
+
                 var stranded = RenameApplier.Undo(moved);
                 if (stranded.Count > 0)
                 {
                     Hold(unresolved, intent);
-                    logger.Log($"[TMDB] A rename of \"{Path.GetFileName(intent.OldPath)}\" was interrupted and \"{Path.GetFileName(stranded[0].To)}\" could not be put back; the file is held until it is.", LogSeverity.Error);
+                    logger.Log($"[TMDB] A rename of \"{name}\" was interrupted and \"{Path.GetFileName(stranded[0].To)}\" could not be put back; the file is held until it is.", LogSeverity.Error);
                     continue;
                 }
 
@@ -193,7 +220,7 @@ public sealed class RenameReconciler
                 continue;
             }
 
-            if (!oldVideo && newVideo)
+            if (oldVideo == FilePresence.Absent && newVideo == FilePresence.Present)
             {
                 // The video moved. The queue entry and the rename log follow the video whatever becomes of the files behind it, so its place in line, its skip and its profile, and its way back, are kept;
                 // the rename log is written when the interrupted rename got that far, otherwise now (never twice, or the first name the file ever had would be overwritten).
@@ -201,13 +228,30 @@ public sealed class RenameReconciler
                 completed[intent.OldPath] = intent.NewPath;
                 unmatched[intent.OldPath] = intent.Unmatched;
 
-                // The files that follow it move too - or the video is held, and the record stays open, until they can.
-                var pending = intent.Companions.Where(c => File.Exists(c.From)).ToList();
-                var blocked = pending.FirstOrDefault(c => File.Exists(c.To));
+                // The files that follow it move too - or the video is held, and the record stays open, until they can. A companion that cannot be looked at is not "already done": its place is unknown.
+                var pending = new List<RenameMove>();
+                RenameMove? blocked = null;
+                RenameMove? unreadable = null;
+                foreach (var companion in intent.Companions)
+                {
+                    var from = Presence(companion.From);
+                    var to = Presence(companion.To);
+                    if (from == FilePresence.Unknown || to == FilePresence.Unknown) unreadable ??= companion;
+                    else if (from == FilePresence.Present && to == FilePresence.Present) blocked ??= companion;
+                    else if (from == FilePresence.Present) pending.Add(companion);
+                }
+
+                if (unreadable is not null)
+                {
+                    Hold(unresolved, intent);
+                    logger.Log($"[TMDB] A rename of \"{name}\" was interrupted and \"{Path.GetFileName(unreadable.From)}\" cannot be looked at right now; the file is held and it is looked at again on the next pass.", LogSeverity.Error);
+                    continue;
+                }
+
                 if (blocked is not null)
                 {
                     Hold(unresolved, intent);
-                    logger.Log($"[TMDB] A rename of \"{Path.GetFileName(intent.OldPath)}\" was interrupted and \"{Path.GetFileName(blocked.From)}\" cannot follow its video because \"{Path.GetFileName(blocked.To)}\" now exists. Rename it by hand; the file is held until then.", LogSeverity.Error);
+                    logger.Log($"[TMDB] A rename of \"{name}\" was interrupted and \"{Path.GetFileName(blocked.From)}\" cannot follow its video because \"{Path.GetFileName(blocked.To)}\" now exists. Rename it by hand; the file is held until then.", LogSeverity.Error);
                     continue;
                 }
 
@@ -218,22 +262,24 @@ public sealed class RenameReconciler
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     Hold(unresolved, intent);
-                    logger.Log($"[TMDB] A rename of \"{Path.GetFileName(intent.OldPath)}\" was interrupted and could not be finished: {ex.Message}. The file is held and it is tried again on the next pass.", LogSeverity.Error);
+                    logger.Log($"[TMDB] A rename of \"{name}\" was interrupted and could not be finished: {ex.Message}. The file is held and it is tried again on the next pass.", LogSeverity.Error);
                     continue;
                 }
 
                 close.Add(open.Id);
-                logger.Log($"[TMDB] Finished an interrupted rename of \"{Path.GetFileName(intent.OldPath)}\" to \"{Path.GetFileName(intent.NewPath)}\".");
+                logger.Log($"[TMDB] Finished an interrupted rename of \"{name}\" to \"{Path.GetFileName(intent.NewPath)}\".");
                 continue;
             }
 
-            // Both names exist, or neither: not a state this rename can have made. Nothing is moved; the record is dropped.
-            logger.Log($"[TMDB] An interrupted rename of \"{Path.GetFileName(intent.OldPath)}\" was dropped: {(oldVideo ? "both names exist now" : "the file is no longer there")}.");
+            // Both names are definitely there, or definitely neither: not a state this rename can have made. Nothing is moved; the record is dropped.
+            logger.Log($"[TMDB] An interrupted rename of \"{name}\" was dropped: {(oldVideo == FilePresence.Present ? "both names exist now" : "the file is no longer there")}.");
             close.Add(open.Id);
         }
 
         return new RenameReconciliation(completed, unmatched, unresolved, close);
     }
+
+    private static FilePresence Presence(string path) => FileOutcomeHelpers.PresenceOf(path);
 
     /// <summary>Closes records the caller has applied.</summary>
     public void Close(IEnumerable<long> ids)

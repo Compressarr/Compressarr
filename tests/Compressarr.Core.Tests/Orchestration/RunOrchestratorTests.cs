@@ -58,6 +58,19 @@ file sealed class RecordingProcessRunner : IEncoderRunner
     }
 }
 
+/// <summary>Records which profile each file was encoded with.</summary>
+file sealed class PresetRecordingProcessRunner : IEncoderRunner
+{
+    public List<(string File, string Preset)> Runs { get; } = new();
+
+    public Task<EncodeResult> RunAsync(EncodeRequest request, Action<EncodeProgress>? onProgress, CancellationToken cancellationToken)
+    {
+        Runs.Add((Path.GetFileName(request.SourcePath), request.PresetName));
+        File.WriteAllText(request.OutputPath, "fake encoded output");
+        return Task.FromResult(new EncodeResult(Success: true, DetailLogFile: request.DetailLogFile));
+    }
+}
+
 /// <summary>Holds each encode until released (or, ungated, a moment) and records how many ran at the same time: the proof that two passes never overlap.</summary>
 file sealed class OverlapDetectingProcessRunner : IEncoderRunner
 {
@@ -507,6 +520,95 @@ public class RunOrchestratorTests : IDisposable
         await run.WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.Equal(new[] { "Heat (1995).mkv" }, processRunner.ProcessedInOrder);
+    }
+
+    // ---- after a reservation wait the whole pick is made again on the queue as it is now (fixes-1 review F2) ----
+
+    /// <summary>Runs a pass in which the first file in line is held by a rename; while the encoder waits for it, <paramref name="editWhileWaiting"/> changes that file's queue entry on disk (what a
+    /// Skip, a Remove, a re-order, a new profile or a Match does), and then the reservation is released.</summary>
+    private async Task RunWithEditWhileWaiting(CompressarrConfig config, string input, IEncoderRunner processRunner, Action<ResumeEntry> editWhileWaiting, CancellationToken stop = default, Action? afterEdit = null)
+    {
+        var reservations = new Compressarr.Core.Queue.FileReservations();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, processRunner, reservations: reservations);
+        var first = Path.Combine(input, "a.mkv");
+
+        var held = reservations.TryReserve(first);
+        var run = orchestrator.RunOnceAsync(config, stop);
+        await Task.Delay(500);                                                // the pass has tracked the files and the encoder is waiting for a.mkv
+        new JsonResumeStateStore().Update(resumeFilePath, state => { editWhileWaiting(state.Single(e => e.FullName == first)); return true; });
+        afterEdit?.Invoke();
+        held!.Dispose();
+        await run.WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_AFileSkippedWhileTheEncoderWaitedForIt_IsNotStarted_AndTheNextOneIs()
+    {
+        var (config, input) = MakeSingleLaneConfig("a.mkv", "b.mkv");
+        var runner = new RecordingProcessRunner();
+
+        await RunWithEditWhileWaiting(config, input, runner, e => e.Skipped = true);
+
+        Assert.Equal(new[] { "b.mkv" }, runner.ProcessedInOrder);
+        Assert.True(File.Exists(Path.Combine(input, "a.mkv")));
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_AFileRemovedFromTheQueueWhileTheEncoderWaitedForIt_IsNotStarted()
+    {
+        var (config, input) = MakeSingleLaneConfig("a.mkv", "b.mkv");
+        var runner = new RecordingProcessRunner();
+
+        await RunWithEditWhileWaiting(config, input, runner, e => { e.Removed = true; e.Skipped = true; });
+
+        Assert.Equal(new[] { "b.mkv" }, runner.ProcessedInOrder);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_AFileMovedDownTheQueueWhileTheEncoderWaitedForIt_GivesWayToTheOneNowFirst()
+    {
+        var (config, input) = MakeSingleLaneConfig("a.mkv", "b.mkv");
+        var runner = new RecordingProcessRunner();
+
+        await RunWithEditWhileWaiting(config, input, runner, e => e.Order = 99);
+
+        Assert.Equal(new[] { "b.mkv", "a.mkv" }, runner.ProcessedInOrder);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_AFileThatBecameUnmatchedWhileTheEncoderWaitedForIt_IsHeldWhenUnmatchedFilesAreHeld()
+    {
+        var (config, input) = MakeSingleLaneConfig("a.mkv", "b.mkv");
+        config.HoldUnmatchedFiles = true;
+        var runner = new RecordingProcessRunner();
+
+        await RunWithEditWhileWaiting(config, input, runner, e => e.FileBotUnmatched = true);       // what a Restore does to the file it puts back
+
+        Assert.Equal(new[] { "b.mkv" }, runner.ProcessedInOrder);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_AFileGivenItsOwnProfileWhileTheEncoderWaitedForIt_IsEncodedWithThatProfile()
+    {
+        var (config, input) = MakeSingleLaneConfig("a.mkv");
+        var runner = new PresetRecordingProcessRunner();
+
+        await RunWithEditWhileWaiting(config, input, runner, e => e.PresetOverride = "Fast 1080p30");
+
+        var run = Assert.Single(runner.Runs);
+        Assert.Equal(("a.mkv", "Fast 1080p30"), run);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_AStopRequestedWhileTheEncoderWaitedForAFile_StartsNothingMore()
+    {
+        var (config, input) = MakeSingleLaneConfig("a.mkv", "b.mkv");
+        var runner = new RecordingProcessRunner();
+        using var stop = new CancellationTokenSource();
+
+        await RunWithEditWhileWaiting(config, input, runner, _ => { }, stop.Token, afterEdit: stop.Cancel);
+
+        Assert.Empty(runner.ProcessedInOrder);
     }
 
     [Fact]

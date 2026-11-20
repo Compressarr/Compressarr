@@ -43,6 +43,12 @@ internal static class RenameApplier
         var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var move in moves)
         {
+            // A name is free only when it is verifiably not there: one that cannot be examined is not "free" (File.Exists is false for a missing file and for one that is out of reach).
+            if (Compressarr.Core.Conversion.FileOutcomeHelpers.PresenceOf(move.To) == Compressarr.Core.Conversion.FileOutcomeHelpers.FilePresence.Unknown)
+            {
+                throw new IOException($"\"{Path.GetFileName(move.To)}\" cannot be looked at right now");
+            }
+
             if (File.Exists(move.To) || Directory.Exists(move.To))
             {
                 throw new IOException($"\"{Path.GetFileName(move.To)}\" already exists" + (ReferenceEquals(move, moves[0]) ? "" : $", so \"{Path.GetFileName(move.From)}\" cannot follow its video"));
@@ -83,7 +89,8 @@ internal static class RenameApplier
             var move = done[i];
             try
             {
-                if (File.Exists(move.From)) { stranded.Add(move); continue; }       // the old name was taken meanwhile: never overwrite it
+                // The old name must be verifiably free: taken meanwhile, or out of reach (File.Exists is false for both a missing file and one that cannot be examined), means it is never overwritten.
+                if (Compressarr.Core.Conversion.FileOutcomeHelpers.PresenceOf(move.From) != Compressarr.Core.Conversion.FileOutcomeHelpers.FilePresence.Absent) { stranded.Add(move); continue; }
                 File.Move(move.To, move.From);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

@@ -310,6 +310,17 @@ const matchState = { item: null, isFix: false, candidates: [], selected: null, c
 
 function matchEl(id) { return document.getElementById(id); }
 
+// Every waiting file in an ordinary lane can be matched or re-matched, not only an Unmatched one or one Compressarr renamed: a name that already looks right (or that was left as it is) can still be the wrong film.
+// Only the DEDICATED Videos lane is excluded (its files are never renamed): that is item.isVideosLane. Not item.kind: that says "video" for ANY file whose name has neither a year nor an episode number
+// (Heat.mkv in a movie lane), and that is exactly the file the strict renamer leaves Unmatched and needs a Match. A file held after a failed encode (isError) is not waiting.
+function canMatchRow(item) { return !item.isVideosLane && !item.isError; }
+
+// What the row's menu offers for matching: null (nothing), "Match..." for a file TMDB could not place, or "Fix match..." for any other waiting file, renamed or not.
+function matchMenuItem(item) {
+  if (!canMatch || !canMatchRow(item)) return null;
+  return item.isFileBotUnmatched ? { act: 'match', label: 'Match…' } : { act: 'fix-match', label: 'Fix match…' };
+}
+
 function matchPost(path, body) {
   return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
 }
@@ -318,9 +329,13 @@ async function openMatch(item, isFix) {
   Object.assign(matchState, { item, isFix, candidates: [], selected: null, currentId: null, others: [] });
   matchEl('matchTitle').textContent = isFix ? 'Fix match' : 'Match to TMDB';
   matchEl('matchFile').textContent = item.fileName;
-  matchEl('matchIntro').textContent = isFix
-    ? 'This file was renamed. Pick the right film or show below, or restore the name it had.'
-    : 'TMDB could not tell what this file is. Pick the right film or show below.';
+  const unmatched = !!item.isFileBotUnmatched;
+  const renamed = !!item.isRenamed;
+  matchEl('matchIntro').textContent = unmatched
+    ? 'TMDB could not tell what this file is. Pick the right film or show below.'
+    : renamed
+      ? 'This file was renamed. Pick the right film or show below, or restore the name it had.'
+      : 'Pick the right film or show for this file below. Its name is changed to match your choice.';
   matchEl('matchQuery').value = '';
   matchEl('matchYear').value = '';
   matchEl('matchKind').value = 'movie';
@@ -330,8 +345,8 @@ async function openMatch(item, isFix) {
   matchEl('matchNote').textContent = '';
   matchEl('matchEpisode').classList.add('hidden');
   matchEl('matchOthersRow').classList.add('hidden');
-  matchEl('matchLeave').classList.toggle('hidden', isFix);
-  matchEl('matchRestore').classList.toggle('hidden', !isFix);
+  matchEl('matchLeave').classList.toggle('hidden', !unmatched);          // "Leave as is" is for a file flagged Unmatched
+  matchEl('matchRestore').classList.toggle('hidden', !renamed);          // "Restore original name" only where there is a name to go back to
   matchEl('matchApply').disabled = true;
   matchEl('matchOverlay').classList.remove('hidden');
 
@@ -350,7 +365,7 @@ async function openMatch(item, isFix) {
   matchEl('matchEpisodes').value = (sug.episodes || []).join(',');
   matchState.currentId = body.currentTmdbId;
   matchState.others = body.otherFiles || [];
-  if (isFix && body.originalName) matchEl('matchIntro').textContent = `Renamed from "${body.originalName}". Pick the right film or show below, or restore that name.`;
+  if (renamed && body.originalName) matchEl('matchIntro').textContent = `Renamed from "${body.originalName}". Pick the right film or show below, or restore that name.`;
   showMatchCandidates(body);
 }
 
@@ -739,9 +754,9 @@ function renderQueueList() {
     if (openMenuKey === key) {
       const pop = document.createElement('div');
       pop.className = 'queue-popover';
+      const matchItem = matchMenuItem(item);
       pop.innerHTML = `
-        ${canMatch && item.isFileBotUnmatched ? `<div class="queue-popover-item" data-act="match">Match…</div>` : ''}
-        ${canMatch && item.isRenamed ? `<div class="queue-popover-item" data-act="fix-match">Fix match…</div>` : ''}
+        ${matchItem ? `<div class="queue-popover-item" data-act="${matchItem.act}">${matchItem.label}</div>` : ''}
         ${item.isFileBotUnmatched ? `<div class="queue-popover-item" data-act="leave-as-is">Leave as is</div>` : ''}
         <div class="queue-popover-item" data-act="skip">${item.isSkipped ? 'Unskip' : 'Skip'}</div>
         ${item.isCustomPreset ? `<div class="queue-popover-item" data-act="use-lane-preset">Use Lane Preset</div>` : ''}

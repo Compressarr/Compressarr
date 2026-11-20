@@ -29,10 +29,19 @@ Fixes from an independent review of 3.2.0-beta.2: a rename is now one unit (the 
   destination, and **Restore original name** still knows the first name. Before, the waiting entry for a file that had vanished under its old name was dropped and the new name arrived as brand-new work with none of that.
   A rename that cannot be finished (a subtitle is locked, or something now stands in its way) keeps its record and is tried again each pass; meanwhile that file is not started, whatever **Do not process unmatched
   files** says, so it is never filed and cleaned up around a half-renamed set. The log says what to do by hand.
+- **A file that cannot be examined is neither there nor gone.** Finishing an interrupted rename used to read a video or subtitle it could not look at (a share that dropped, an offline mount, access denied) as
+  missing, and could close the record - and with it the queue entry's place, skip and profile and the subtitle's way across. Every file of the rename is now looked at three ways (there, verifiably gone, cannot be
+  told); anything that cannot be told keeps the record, holds the file for the pass and is looked at again on the next. The same applies to the check that a new name is free and to an undo.
+- **The encoder starts a file only if it still owns the pick once the file is reserved.** A file's reservation may have to wait for a rename, and a skip, a remove, a re-order, a new profile or destination, a Match,
+  a Restore, "Do not process unmatched files", the schedule or a stop request can arrive in the meantime; the pick was made before. The decision is now made again on the queue as it is then: the file starts (with its
+  refreshed choices) only if it is still the one to start, otherwise the reservation is released and the next file is picked.
 - A file moved to another lane's destination while it waited keeps that destination when the renamer renames it.
 
 ### Changed
 
+- **Match and Fix match are on every waiting video, not only an Unmatched one or one Compressarr renamed.** A name that already looked right to the renamer (or a file you chose to Leave as is) could still be the wrong film
+  or show, and had no way to be corrected. The ⋮ menu now shows **Match…** on an Unmatched file and **Fix match…** on any other waiting video (not a Videos-lane file, not one held after a failed encode), with the TMDB key saved.
+  A file that was never renamed starts the dialog from the name it has; **Restore original name** appears only where there is an original name to go back to, and **Leave as is** only on an Unmatched file.
 - **The queue database gains one table** (schema version 13): the rename journal. A new step, nothing existing changes; as with every database change, installing 3.1 or an earlier 3.2 beta over it again cannot read it.
 - A subtitle (or other file that follows a video) whose new name is taken now stops the rename of its video; before, only the subtitle kept its old name and the video was renamed.
 

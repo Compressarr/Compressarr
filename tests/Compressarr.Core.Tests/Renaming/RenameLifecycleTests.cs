@@ -299,6 +299,104 @@ public class RenameLifecycleTests : AppDataTestBase
         Assert.Equal(b, Assert.Single(journal.Pending(_dir)).Intent.OldPath);
     }
 
+    // ---- a path that cannot be examined is neither there nor gone (fixes-1 review F1) ----
+
+    /// <summary>A folder name that is a FILE for now: every path beneath it cannot be examined (what a dropped share or an offline mount looks like). <see cref="Reach"/> makes it a real folder.</summary>
+    private string Unreachable(string name = "share")
+    {
+        var path = Path.Combine(_dir, name);
+        File.WriteAllText(path, "not a folder");
+        return path;
+    }
+
+    private string Reach(string unreachable)
+    {
+        File.Delete(unreachable);
+        Directory.CreateDirectory(unreachable);
+        return unreachable;
+    }
+
+    [Fact]
+    public void VideoPathsThatCannotBeExamined_KeepTheRecord_HoldBothNames_AndAreReconciledOnceTheyCanBe()
+    {
+        var (reconciler, journal, log) = Reconciler();
+        var share = Unreachable();
+        var old = Path.Combine(share, "Old.mkv");
+        var renamed = Path.Combine(share, "New.mkv");
+        journal.Begin(new RenameIntent(_dir, old, renamed, Array.Empty<RenameMove>(), 949, false, null, Array.Empty<int>(), RenameRecord.ManualSource, false));
+
+        var blind = reconciler.Reconcile(_dir, new RenamingTestLogger());
+
+        Assert.Empty(blind.Close);                                            // not closed: nobody knows what happened
+        Assert.Empty(blind.Completed);
+        Assert.Contains(old, blind.Unresolved);
+        Assert.Contains(renamed, blind.Unresolved);
+        Assert.Single(journal.Pending(_dir));
+
+        File.WriteAllText(Path.Combine(Reach(share), "New.mkv"), "x");        // access is back: the video had moved
+
+        var seen = reconciler.Reconcile(_dir, new RenamingTestLogger());
+
+        Assert.Equal(renamed, seen.Completed[old]);
+        Assert.Empty(seen.Unresolved);
+        Assert.Single(seen.Close);
+        Assert.NotNull(log.Find(renamed));
+    }
+
+    [Fact]
+    public void AnOldCompanionThatCannotBeExamined_IsNotTakenForDone_TheVideoIsHeld_AndTheQueueStillFollowsTheVideo()
+    {
+        var (reconciler, journal, _) = Reconciler();
+        var video = Put("Old.mkv");
+        var moves = RenameApplier.Plan(video, "New.mkv", Video);
+        File.Move(moves[0].From, moves[0].To);                                // the video moved ...
+        var share = Unreachable();
+        var companion = new RenameMove(Path.Combine(share, "Old.en.srt"), Path.Combine(share, "New.en.srt"));   // ... and a companion's place cannot be examined
+        journal.Begin(new RenameIntent(_dir, video, P("New.mkv"), new[] { companion }, 949, false, null, Array.Empty<int>(), RenameRecord.ManualSource, false));
+
+        var blind = reconciler.Reconcile(_dir, new RenamingTestLogger());
+
+        Assert.Equal(P("New.mkv"), blind.Completed[video]);                   // the queue entry follows the video that definitely moved
+        Assert.Empty(blind.Close);                                            // but the record stays: the companion has not been reconciled
+        Assert.Contains(P("New.mkv"), blind.Unresolved);
+
+        File.WriteAllText(Path.Combine(Reach(share), "Old.en.srt"), "subtitle");   // access is back: the subtitle is still under the old name
+
+        var seen = reconciler.Reconcile(_dir, new RenamingTestLogger());
+
+        Assert.Empty(seen.Unresolved);
+        Assert.Single(seen.Close);
+        Assert.Equal("subtitle", File.ReadAllText(Path.Combine(share, "New.en.srt")));
+        Assert.False(File.Exists(Path.Combine(share, "Old.en.srt")));
+    }
+
+    [Fact]
+    public void ACompanionThatCannotBeExamined_WhenTheVideoNeverMoved_HoldsTheFile_AndKeepsTheRecord()
+    {
+        var (reconciler, journal, _) = Reconciler();
+        var video = Put("Old.mkv");
+        var share = Unreachable();
+        var companion = new RenameMove(Path.Combine(share, "Old.en.srt"), Path.Combine(share, "New.en.srt"));
+        journal.Begin(new RenameIntent(_dir, video, P("New.mkv"), new[] { companion }, 949, false, null, Array.Empty<int>(), RenameRecord.ManualSource, false));
+
+        var blind = reconciler.Reconcile(_dir, new RenamingTestLogger());
+
+        Assert.Empty(blind.Close);
+        Assert.Contains(video, blind.Unresolved);
+        Assert.Single(journal.Pending(_dir));
+        Assert.True(File.Exists(video));
+    }
+
+    [Fact]
+    public void AnUndoNeverMovesBackOverAnOldNameThatCannotBeExamined()
+    {
+        var share = Unreachable();
+        var stranded = RenameApplier.Undo(new[] { new RenameMove(Path.Combine(share, "Old.mkv"), Put("New.mkv")) });
+
+        Assert.Single(stranded);
+        Assert.True(File.Exists(P("New.mkv")));
+    }
+
     // ---- reservations ----
 
     [Fact]

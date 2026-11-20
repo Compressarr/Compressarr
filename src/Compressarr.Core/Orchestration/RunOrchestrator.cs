@@ -404,6 +404,21 @@ public sealed class RunOrchestrator : IRunOrchestrator
             // is highest priority regardless of which lane it belongs to. The picking rule itself
             // (QueueRules.SelectNext) is the very same one the Monitor page's queue display
             // (QueueRules.BuildUpNext) sorts by, so the two can never disagree about "what's next."
+            // The one picking rule, used both to choose the next file and to confirm the choice once the file is reserved (a skip, a remove or a re-order can arrive in between).
+            ResumeEntry? SelectEligible() => QueueRules.SelectNext(
+                resumeState,
+                laneOrderIndex,
+                (laneId, fullName) => laneContexts[laneId].NaturalOrderIndex.TryGetValue(fullName, out var idx) ? idx : int.MaxValue,
+                // "Do not process unmatched files": an Unmatched file waits (like a skipped one) until it is matched or left as it is; so does one the renamer could not ask TMDB about this pass.
+                e => (config.HoldUnmatchedFiles && (e.FileBotUnmatched || laneContexts[e.LaneId].UndeterminedPaths.Contains(e.FullName)))
+                     // A file whose rename could not be finished waits for the next pass whatever that setting says: its subtitles are split from it.
+                     || laneContexts[e.LaneId].UnresolvedRenamePaths.Contains(e.FullName));
+
+            // An in-memory entry whose file was renamed (a Match moved its queue entry to the new name on disk) is stale: its file is verifiably gone and the disk no longer has a waiting entry under that name.
+            bool IsStale(ResumeEntry entry) =>
+                FileOutcomeHelpers.PresenceOf(entry.FullName) == FileOutcomeHelpers.FilePresence.Absent
+                && !_resumeStore.Load(resumeFilePath).Any(d => d.LaneId == entry.LaneId && d.Status == ResumeStatus.Pending && string.Equals(d.FullName, entry.FullName, StringComparison.OrdinalIgnoreCase));
+
             while (true)
             {
                 token.ThrowIfCancellationRequested();
@@ -414,14 +429,7 @@ public sealed class RunOrchestrator : IRunOrchestrator
 
                 _conversionOrchestrator.RefreshResumeState(resumeState, resumeFilePath);
 
-                var next = QueueRules.SelectNext(
-                    resumeState,
-                    laneOrderIndex,
-                    (laneId, fullName) => laneContexts[laneId].NaturalOrderIndex.TryGetValue(fullName, out var idx) ? idx : int.MaxValue,
-                    // "Do not process unmatched files": an Unmatched file waits (like a skipped one) until it is matched or left as it is; so does one the renamer could not ask TMDB about this pass.
-                    e => (config.HoldUnmatchedFiles && (e.FileBotUnmatched || laneContexts[e.LaneId].UndeterminedPaths.Contains(e.FullName)))
-                         // A file whose rename could not be finished waits for the next pass whatever that setting says: its subtitles are split from it.
-                         || laneContexts[e.LaneId].UnresolvedRenamePaths.Contains(e.FullName));
+                var next = SelectEligible();
 
                 if (next is null) break;
 
@@ -453,22 +461,42 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 var context = laneContexts[next.LaneId];
 
                 // The file is reserved while it is worked on, so a rename (Match, Fix match, Restore, the automatic renamer) never touches it, and the encoder never starts on a file that is in the middle of
-                // being renamed. If it had to wait for one, the file may have moved (or its queue entry changed) meanwhile: look again before starting on a name that may be gone.
+                // being renamed. The pick was made before the reservation (which may have had to wait for a rename), so once the file is ours the whole decision is made again on the queue as it is NOW:
+                // a skip, a remove, a hold, a re-order, a new profile or destination, the schedule and a stop request that arrived meanwhile all count. The file starts only if it still owns the pick (with
+                // the refreshed choices); otherwise the reservation is released and the loop picks again.
                 IDisposable? reservation = null;
                 if (_reservations is not null)
                 {
-                    var (lease, waited) = await _reservations.ReserveAsync(next.FullName, token);
-                    reservation = lease;
-                    if (waited)
+                    var (lease, _) = await _reservations.ReserveAsync(next.FullName, token);
+                    try
                     {
+                        stopToken.ThrowIfCancellationRequested();
                         _conversionOrchestrator.RefreshResumeState(resumeState, resumeFilePath);
-                        if (!File.Exists(next.FullName))
+                        if (IsStale(next))
                         {
-                            reservation.Dispose();
-                            resumeState.Remove(next);       // its entry now lives under the new name (the refresh above brought it in); this is the stale copy
+                            resumeState.Remove(next);       // its queue entry now lives under the new name (the refresh above brought it in); this is the stale copy
+                            lease.Dispose();
+                            continue;
+                        }
+
+                        // The refresh carries skip, remove, order, profile and destination; the Unmatched flag is set and cleared by Match, Restore and Leave as is, so it is taken from the queue as it is now.
+                        // (Not part of the general refresh: the renamer's own pass sets it in memory first, and only this file is being confirmed here.)
+                        var current = _resumeStore.Load(resumeFilePath).FirstOrDefault(d => d.LaneId == next.LaneId && string.Equals(d.FullName, next.FullName, StringComparison.OrdinalIgnoreCase));
+                        if (current is not null) next.FileBotUnmatched = current.FileBotUnmatched;
+
+                        if (!ReferenceEquals(SelectEligible(), next) || _schedule.GetStatus().IsHeld)
+                        {
+                            lease.Dispose();
                             continue;
                         }
                     }
+                    catch
+                    {
+                        lease.Dispose();
+                        throw;
+                    }
+
+                    reservation = lease;
                 }
 
                 try

@@ -38,7 +38,7 @@ public sealed record QueueItem(
 
 public sealed record StatusDto(List<QueueItem> UpNext);
 
-public sealed record LaneSpec(string Id, string Name, bool Enabled = true);
+public sealed record LaneSpec(string Id, string Name, bool Enabled = true, LaneKind Kind = LaneKind.Standard);
 
 /// <summary>
 /// Runs the REAL Compressarr web endpoints (the same AddCompressarrCore/AddCompressarrWeb/
@@ -156,6 +156,7 @@ public sealed class QueueHost : IAsyncDisposable
                 Id = spec.Id,
                 DisplayName = spec.Name,
                 Enabled = spec.Enabled,
+                Kind = spec.Kind,
                 Input = Path.Combine(root, spec.Id, "Input"),
                 Output = Path.Combine(root, spec.Id, "Output"),
                 TvPreset = "Lane TV Preset",
