@@ -394,7 +394,7 @@ public sealed class UpdateCheckSettings
     /// <summary>What an install with no saved choice uses: Stable, real releases only. A pre-release build (a beta or release candidate) defaults to Beta
     /// instead so its testers are offered each new one - a test (UpdateChannelDefaultTests) keeps this in step with the version, so a pre-release build
     /// must set it to Beta again. An install that has saved a choice keeps it.</summary>
-    public const UpdateChannel DefaultChannel = UpdateChannel.Beta;
+    public const UpdateChannel DefaultChannel = UpdateChannel.Stable;
 
     public UpdateChannel Channel { get; set; } = DefaultChannel;
 }

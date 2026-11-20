@@ -9,92 +9,64 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
-## [Unreleased]
+## [3.2.0] - 2026-11-20
 
-Fixes from an independent review of 3.2.0-beta.2: a rename is now one unit (the video and its subtitles together), a file is looked at again after TMDB answers, and every rename is written down before it is made.
-
-### Fixed
-
-- **A video and its subtitles are renamed together or not at all.** The renamer used to move the video first and leave any subtitle whose new name was taken (or that was locked by another program) under the old name,
-  still reporting success. Compressarr finds a video's subtitles by the video's own name, so the old subtitle no longer belonged to the renamed video, and with **Delete** and **Delete unmatched companions** the
-  folder cleanup after the encode could remove it for good. The whole set is now checked before anything is changed: if any file cannot take its new name, nothing is renamed, the log says which, and the file is tried again
-  on the next pass (the automatic renamer) or the dialog says why (Match, Fix match, Restore). Nothing is ever overwritten.
-- **Match, Fix match and Restore look at the file again after TMDB has answered.** The check was made once, before the (network) lookup, so a file that became *Completed*, started encoding, was replaced or was
-  renamed in the meantime could still be renamed on the strength of the old look - and then be found again under its new name and converted a second time. The file is now reserved for the moment it is renamed, and
-  checked again under that reservation: still waiting in the queue, still the same file (size and time), still in the lane's Input folder. The encoder holds the file it is working on in the same way, so a rename
-  never touches an encode and an encode never starts on a file in the middle of a rename. The queue's answer is no longer ignored: a rename the queue did not take is undone. "Apply to the other episodes" does
-  all of this for each episode on its own.
-- **A stop in the middle of a rename no longer loses the file's place.** The plan (the video, its subtitles, what it was matched to) is written to a journal before the first file moves. If the program stops at any
-  point - after the video, between two subtitles, before the rename log or the queue caught up - the next pass starts by finishing it: the subtitles follow, the queue entry keeps its position, skip, profile and
-  destination, and **Restore original name** still knows the first name. Before, the waiting entry for a file that had vanished under its old name was dropped and the new name arrived as brand-new work with none of that.
-  A rename that cannot be finished (a subtitle is locked, or something now stands in its way) keeps its record and is tried again each pass; meanwhile that file is not started, whatever **Do not process unmatched
-  files** says, so it is never filed and cleaned up around a half-renamed set. The log says what to do by hand.
-- **A file that cannot be examined is neither there nor gone.** Finishing an interrupted rename used to read a video or subtitle it could not look at (a share that dropped, an offline mount, access denied) as
-  missing, and could close the record - and with it the queue entry's place, skip and profile and the subtitle's way across. Every file of the rename is now looked at three ways (there, verifiably gone, cannot be
-  told); anything that cannot be told keeps the record, holds the file for the pass and is looked at again on the next. The same applies to the check that a new name is free and to an undo.
-- **The encoder starts a file only if it still owns the pick once the file is reserved.** A file's reservation may have to wait for a rename, and a skip, a remove, a re-order, a new profile or destination, a Match,
-  a Restore, "Do not process unmatched files", the schedule or a stop request can arrive in the meantime; the pick was made before. The decision is now made again on the queue as it is then: the file starts (with its
-  refreshed choices) only if it is still the one to start, otherwise the reservation is released and the next file is picked.
-- A file moved to another lane's destination while it waited keeps that destination when the renamer renames it.
-
-### Changed
-
-- **Match and Fix match are on every waiting video, not only an Unmatched one or one Compressarr renamed.** A name that already looked right to the renamer (or a file you chose to Leave as is) could still be the wrong film
-  or show, and had no way to be corrected. The ⋮ menu now shows **Match…** on an Unmatched file and **Fix match…** on any other waiting video (not a Videos-lane file, not one held after a failed encode), with the TMDB key saved.
-  A file that was never renamed starts the dialog from the name it has; **Restore original name** appears only where there is an original name to go back to, and **Leave as is** only on an Unmatched file.
-- **The queue database gains one table** (schema version 13): the rename journal. A new step, nothing existing changes; as with every database change, installing 3.1 or an earlier 3.2 beta over it again cannot read it.
-- A subtitle (or other file that follows a video) whose new name is taken now stops the rename of its video; before, only the subtitle kept its old name and the video was renamed.
-
-## [3.2.0-beta.2] - 2026-11-17
-
-Fixes to holding unmatched files; nothing else changed. If you installed beta.1, this replaces it.
-
-### Fixed
-
-- **"Do not process unmatched files" no longer misses files already in the queue.** The Unmatched flag used to be set only on a file added to the queue in that pass, so a file that was already waiting (tracked before the
-  renamer or the switch was turned on, or left over from an earlier pass) was encoded as though it were matched even though the renamer could not place it. Such a file is now flagged, and held, like any other.
-- **A file you have dealt with stays dealt with.** A file matched by hand, restored or left as it is no longer gets the Unmatched badge back when FileBot, which does not read Compressarr's rename record,
-  reports it unmatched again. **Leave as is** now writes that record too, so the next pass does not flag the file and hold it a second time.
-- **A renamed file is no longer held for good.** When a waiting file is renamed, its Unmatched flag is cleared with the old name; a stale flag used to keep the renamed file held.
-
-## [3.2.0-beta.1] - 2026-11-15
-
-> The first 3.2 pre-release (beta), built on 3.1.0-rc.2. Everything below is new since then.
+The 3.2 release, built on 3.1.0. (Two 3.2 betas were built along the way and never released; everything below is new since 3.1.0.)
 
 > [!TIP]
-> **What's new in 3.2:** a built-in **TMDB renamer** that does what FileBot does for people without Sonarr or Radarr, with nothing to buy; **Match** and **Fix match** on the queue to put a file right
-> yourself; and a switch to **hold unmatched files** instead of compressing them under a messy name. Nothing changes until you turn something on: with the renamer and the switch off, 3.2 behaves as 3.1.
+> **What's new in 3.2:** a built-in **TMDB renamer** that does what FileBot does for people without Sonarr or Radarr, with nothing to buy; **Match** and **Fix match** on the queue to put any file right
+> yourself; and a switch to **hold unmatched files** instead of compressing them under a messy name. Renames are made safe to interrupt: a video and its subtitles move together or not at all, and a stop in the
+> middle of a rename is finished or undone on the next start. Nothing changes until you turn something on: with the renamer and the switch off, 3.2 behaves as 3.1.
 
 ### Added
 
 - **Rename with TMDB** (Settings). Looks each video in a lane's Input folder up on [The Movie Database](https://www.themoviedb.org/) and renames it in place, at the same point in each pass where FileBot runs.
   It is an alternative to FileBot, never used with it: turning one on turns the other off (if a hand-edited settings file has both on, FileBot runs). It uses the TMDB key already entered under Queue Posters.
   A movie becomes `Title (Year)`; an episode `Show (Year) - S01E02 - Episode Title` (`S01E01-E02` for two in one file; `1x02` numbering if you prefer). Options: the language of the titles, the numbering
-  style, and Plex's `{tmdb-123}` tag on movie names. **Preview Renames** shows what the first 40 files of each lane would be called without renaming anything.
+  style, and Plex's `{tmdb-123}` tag on movie names. **Preview Renames** shows what the first 40 files of each lane would be called without renaming anything (and says so when a subtitle could not follow its video).
   - **Strict by design.** A title is accepted only when it is clearly the one: each result is scored on title (exact, or equal once a leading "The" is ignored) and year (the same year, or one out), and the best
     wins only if it stands alone. A movie with no year is never guessed at; a `US` / `UK` tag picks between shows of one name; a tie, an unknown title or an episode TMDB does not have leaves the file as it is and
     marks it **Unmatched**. Release noise (`1080p`, `BluRay`, `x265`, `[group]`) is ignored, and a show or year missing from the file name is taken from its folder when that is the same film or show.
-  - **Safe.** Nothing is ever overwritten (a taken name leaves the file alone), a file is renamed in its own folder, and **subtitles and other companion files are renamed with their video**, because Compressarr finds
-    them by the video's name. A colon is dropped from a title, a slash or TMDB's `·` becomes a hyphen (`WALL-E`), and a Plex edition tag already on the name is kept. If TMDB cannot be reached nothing is renamed and
-    nothing is flagged; a rejected key is a standing problem in the log; with no key the lane runs as before and the report shows the new **ERROR 115**.
+  - **Safe.** Nothing is ever overwritten, a file is renamed in its own folder, and a video and the files that belong to it (subtitles, `.nfo`) are **one unit**: Compressarr finds a video's subtitles by the video's
+    name, so the whole set is checked first and moved together. If any file cannot take its new name (it is taken, or locked by another program) nothing is renamed, the log says which, and the file is tried again
+    on the next pass - a subtitle is never left under the old name to be swept away as a leftover when the video is done. A colon is dropped from a title, a slash or TMDB's `·` becomes a hyphen (`WALL-E`), and a
+    Plex edition tag already on the name is kept. If TMDB cannot be reached nothing is renamed and nothing is flagged; a rejected key is a standing problem in the log; with no key the lane runs as before and the
+    report shows the new **ERROR 115**.
   - Only the title, year and season read from a name are sent to TMDB, never a path. Lookups are remembered for six hours while Compressarr runs. A Videos lane is never renamed.
-- **Match, Fix match, Restore original name and Leave as is** on the queue (the row's ⋮ menu). **Match…** on an Unmatched file opens a dialog that searches TMDB (poster, year, description), starting from what
-  the file name says; pick the right film or show (and, for a show, the season and episode) and the file is renamed, keeping its place in the queue, its skip and its profile. For a show it can carry your choice to the
-  other waiting episodes in one go, and the choice is remembered so later episodes follow it. **Fix match…** on a file that was renamed (by the renamer, by a Match, or by FileBot) opens the same dialog from the
-  file's **original** name with the current match marked, and can correct a whole show matched wrongly; **Restore original name** puts the name (and the subtitles) back and leaves the file Unmatched, and the
-  automatic renamer never overrules a match made by hand. **Leave as is** clears the badge without renaming; it is also its own menu item because it needs no TMDB key. Match and Fix match need the TMDB key and work
-  for FileBot users too; they apply to waiting files only (not the one being encoded, not one already filed). The dialog never trusts a title sent by the page: it sends a TMDB id and the name comes from TMDB, and the
-  pictures come through Compressarr so the browser never talks to TMDB.
+- **Match, Fix match, Restore original name and Leave as is** on the queue (the row's ⋮ menu), with the TMDB key saved. **Match…** on an Unmatched file opens a dialog that searches TMDB (poster, year, description),
+  starting from what the file name says; pick the right film or show (and, for a show, the season and episode) and the file is renamed, keeping its place in the queue, its skip and its profile. For a show it can
+  carry your choice to the other waiting episodes in one go, and the choice is remembered so later episodes follow it. **Fix match…** is on every other waiting file in an ordinary lane (not a Videos lane, not one
+  held after a failed encode), because a name that already looks right - or a file you chose to Leave as is - can still be the wrong film or show: for a file that was renamed (by the renamer, by a Match, or by
+  FileBot) it opens the same dialog from the file's **original** name with the current match marked, and can correct a whole show matched wrongly; for any other it starts from the name the file has. **Restore
+  original name** puts the name (and the subtitles) back and leaves the file Unmatched, and the automatic renamer never overrules a match made by hand. **Leave as is** clears the badge without renaming; it is also
+  its own menu item because it needs no TMDB key. Match and Fix match work for FileBot users too; they apply to waiting files only (not the one being encoded, not one already filed). The dialog never trusts a title
+  sent by the page: it sends a TMDB id and the name comes from TMDB, and the pictures come through Compressarr so the browser never talks to TMDB.
 - **Do not process unmatched files** (Settings, one switch for both FileBot and TMDB). An Unmatched file stays in the queue, dimmed and marked **Held**, and is passed over like a skipped one until it is matched or left as
-  it is; the rest of the queue carries on. A file TMDB could not be asked about because it was unreachable also waits that one pass, without being flagged. Off by default, which keeps today's behaviour.
-  The queue's ETA, and the API's `pending` and `skipped` counts, treat a held file as skipped.
+  it is; the rest of the queue carries on, and a file that was already waiting when the renamer or the switch was turned on is held like any other. A file TMDB could not be asked about because it was unreachable also
+  waits that one pass, without being flagged. Off by default, which keeps today's behaviour. The queue's ETA, and the API's `pending` and `skipped` counts, treat a held file as skipped.
+- **Renames are safe to interrupt and safe against the queue.** Every rename is written to a journal before its first file moves. If the program stops at any point - after the video, between two subtitles, before
+  the rename log or the queue caught up - the next pass starts by finishing it: the subtitles follow, the queue entry keeps its position, skip, profile and destination, and **Restore original name** still knows the
+  first name. A file the program cannot examine (a share that dropped, an offline mount) is neither there nor gone: its record is kept and the file waits. A rename that cannot be finished keeps its record, is
+  tried again each pass, and its file is not started in the meantime, whatever **Do not process unmatched files** says. A file is reserved while it is renamed and while it is encoded: a rename never touches an encode,
+  and the encoder starts a file only if, once the file is reserved, it is still the one to start (a skip, remove, re-order, new profile, Match, Restore, hold, the schedule or a stop request can arrive meanwhile). Match,
+  Fix match and Restore look at the file again after TMDB has answered (still waiting, still the same file, still in Input) and undo a rename the queue did not take.
 
 ### Changed
 
-- **The queue database gains two tables** (schema version 12): the record of what the renamer and Match did to each file (so a match can be fixed or undone) and the matches you chose (so the rest of a show follows).
-  Nothing in the existing queue changes, and a 3.1 queue upgrades with its entries and edits intact; installing 3.0 or 3.1 over it again cannot read it, as with every database change.
+- **The queue database gains three tables** (schema version 13): the record of what the renamer and Match did to each file (so a match can be fixed or undone), the matches you chose (so the rest of a show follows),
+  and the rename journal. Nothing in the existing queue changes, and a 3.1 queue upgrades with its entries and edits intact; installing 3.0 or 3.1 over it again cannot read it, as with every database change.
+- A file moved to another lane's destination while it waited keeps that destination when the renamer renames it.
 - While renaming, the Monitor page's status line reads "Renaming files in Lane ..." (it used to name FileBot, which is no longer the only renamer).
 - The queue's JSON gains `canMatch` (a TMDB key is saved), and each row `isRenamed` and `isHeld`; the Settings JSON gains `tmdbRename` and `holdUnmatchedFiles`. An older page that does not send them leaves them as they are.
+
+## [3.1.0] - 2026-11-20
+
+The final 3.1 release. It is 3.1.0-rc.2 with only the version, and the update channel new installs start on (Stable), changed. The entries below for 3.1.0-rc.1 and 3.1.0-rc.2 hold the full detail of each change.
+
+> [!TIP]
+> **What's new in 3.1, compared with 3.0.0:** a **Videos lane** for home videos, a **Track in History** choice per lane, **processing settings per lane**, **priority rules** for the queue and a **Change all** button for it,
+> **Save and Share** on reports (with a copy that has no file names), a **trash can** that removes a file's name from History, and a **crash journal** so a power cut while a file is being filed no longer
+> loses its place. Nothing changes until you use them: a lane that follows the global settings, tracks everything and has no priority rule behaves exactly as in 3.0.
 
 ## [3.1.0-rc.2] - 2026-11-13
 
