@@ -9,6 +9,33 @@ for that full history.
 > and renaming all run on plain, inspectable regex pattern matching - the same deterministic
 > logic every time, nothing generative involved.
 
+## [Unreleased]
+
+Fixes from an independent review of 3.2.0-beta.2: a rename is now one unit (the video and its subtitles together), a file is looked at again after TMDB answers, and every rename is written down before it is made.
+
+### Fixed
+
+- **A video and its subtitles are renamed together or not at all.** The renamer used to move the video first and leave any subtitle whose new name was taken (or that was locked by another program) under the old name,
+  still reporting success. Compressarr finds a video's subtitles by the video's own name, so the old subtitle no longer belonged to the renamed video, and with **Delete** and **Delete unmatched companions** the
+  folder cleanup after the encode could remove it for good. The whole set is now checked before anything is changed: if any file cannot take its new name, nothing is renamed, the log says which, and the file is tried again
+  on the next pass (the automatic renamer) or the dialog says why (Match, Fix match, Restore). Nothing is ever overwritten.
+- **Match, Fix match and Restore look at the file again after TMDB has answered.** The check was made once, before the (network) lookup, so a file that became *Completed*, started encoding, was replaced or was
+  renamed in the meantime could still be renamed on the strength of the old look - and then be found again under its new name and converted a second time. The file is now reserved for the moment it is renamed, and
+  checked again under that reservation: still waiting in the queue, still the same file (size and time), still in the lane's Input folder. The encoder holds the file it is working on in the same way, so a rename
+  never touches an encode and an encode never starts on a file in the middle of a rename. The queue's answer is no longer ignored: a rename the queue did not take is undone. "Apply to the other episodes" does
+  all of this for each episode on its own.
+- **A stop in the middle of a rename no longer loses the file's place.** The plan (the video, its subtitles, what it was matched to) is written to a journal before the first file moves. If the program stops at any
+  point - after the video, between two subtitles, before the rename log or the queue caught up - the next pass starts by finishing it: the subtitles follow, the queue entry keeps its position, skip, profile and
+  destination, and **Restore original name** still knows the first name. Before, the waiting entry for a file that had vanished under its old name was dropped and the new name arrived as brand-new work with none of that.
+  A rename that cannot be finished (a subtitle is locked, or something now stands in its way) keeps its record and is tried again each pass; meanwhile that file is not started, whatever **Do not process unmatched
+  files** says, so it is never filed and cleaned up around a half-renamed set. The log says what to do by hand.
+- A file moved to another lane's destination while it waited keeps that destination when the renamer renames it.
+
+### Changed
+
+- **The queue database gains one table** (schema version 13): the rename journal. A new step, nothing existing changes; as with every database change, installing 3.1 or an earlier 3.2 beta over it again cannot read it.
+- A subtitle (or other file that follows a video) whose new name is taken now stops the rename of its video; before, only the subtitle kept its old name and the video was renamed.
+
 ## [3.2.0-beta.2] - 2026-11-17
 
 Fixes to holding unmatched files; nothing else changed. If you installed beta.1, this replaces it.

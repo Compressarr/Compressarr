@@ -36,6 +36,10 @@ public sealed class LaneProcessingContext
     /// remembered about them, so the next pass asks again.</summary>
     public IReadOnlySet<string> UndeterminedPaths { get; init; } = new HashSet<string>();
 
+    /// <summary>Files whose rename was begun and could not be finished or undone (a subtitle was locked, or something now stands in the way): the video and its subtitles are split between two names.
+    /// They are not started this pass whatever "Do not process unmatched files" says, because filing the video would sweep the stranded subtitle away as a leftover. The next pass finishes the rename first.</summary>
+    public IReadOnlySet<string> UnresolvedRenamePaths { get; init; } = new HashSet<string>();
+
     public int FileIndex { get; set; }
     public int FileTotal { get; set; }
     public int PadSize { get; set; }
@@ -153,6 +157,9 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
 
     /// <summary>Where renames are kept so a wrong match can be fixed or undone. The TMDB renamer writes its own; the ones FileBot made are noted here (names only).</summary>
     private readonly Compressarr.Core.Renaming.IRenameLog? _renameLog;
+
+    /// <summary>Finishes renames a stop left half done (journalled before their first file moved) at the start of each lane's pass, and closes the journal's records once the queue has caught up.</summary>
+    private readonly Compressarr.Core.Renaming.RenameReconciler? _renameReconciler;
     private readonly IEncoderPresetService _presets;
     private readonly IMetadataService _metadata;
     private readonly IEncoderRunner _processRunner;
@@ -195,11 +202,13 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         IConfigStore configStore,
         IEncoderResolver? encoders = null,
         Compressarr.Core.Renaming.ITmdbRenamer? tmdbRenamer = null,
-        Compressarr.Core.Renaming.IRenameLog? renameLog = null)
+        Compressarr.Core.Renaming.IRenameLog? renameLog = null,
+        Compressarr.Core.Renaming.RenameReconciler? renameReconciler = null)
     {
         _encoders = encoders;
         _tmdbRenamer = tmdbRenamer;
         _renameLog = renameLog;
+        _renameReconciler = renameReconciler;
         _pathExpander = pathExpander;
         _scanner = scanner;
         _fileBotRunner = fileBotRunner;
@@ -264,6 +273,38 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
         // A lane whose History is not fully tracked (3.1) leaves no file name behind for work it finishes cleanly, and that includes finishing an earlier file: the recovery's log lines are held
         // like a file's own (an error keeps them), and a recovered file is not counted - the count is what keeps a run's log and makes a retry-only pass write a report.
         var trackedLane = lane.Tracking == LaneTracking.Full;
+
+        // A rename a stop interrupted (its plan is in the journal) is finished first - before recovery below, which drops a waiting entry whose file is gone - so the file keeps its place, its skip and its
+        // profile, its subtitles follow it, and Restore still knows its first name. What cannot be finished is held back from this pass.
+        var unresolvedRenames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (_renameReconciler is not null)
+        {
+            // Its log lines name files, so for a lane whose History is not fully tracked they are held like the recovery's below (an error keeps them).
+            if (!trackedLane) _logger.BeginFileScope();
+            Compressarr.Core.Renaming.RenameReconciliation reconciled;
+            try { reconciled = _renameReconciler.Reconcile(inputPath, _logger); }
+            finally { if (!trackedLane) _logger.EndFileScope(discard: true); }
+
+            unresolvedRenames.UnionWith(reconciled.Unresolved);
+            if (reconciled.Completed.Count > 0)
+            {
+                RefreshResumeState(resumeState, resumeFilePath);
+                var beforeReconcile = ResumeResults.Snapshot(resumeState);
+                if (QueueRules.RemapRenamedFiles(resumeState, lane.Id, reconciled.Completed))
+                {
+                    foreach (var (from, to) in reconciled.Completed)
+                    {
+                        var moved = resumeState.FirstOrDefault(e => e.LaneId == lane.Id && e.Status == ResumeStatus.Pending && string.Equals(e.FullName, to, StringComparison.OrdinalIgnoreCase));
+                        if (moved is not null) moved.FileBotUnmatched = reconciled.UnmatchedAfter.TryGetValue(from, out var unmatchedAfter) && unmatchedAfter;
+                    }
+
+                    ResumeResults.SaveChanges(_resumeStore, beforeReconcile, resumeState, resumeFilePath, reconciled.Completed);
+                }
+            }
+
+            _renameReconciler.Close(reconciled.Close);
+        }
+
         if (!trackedLane) _logger.BeginFileScope();
         try
         {
@@ -400,6 +441,10 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             ResumeResults.SaveChanges(_resumeStore, persisted, resumeState, resumeFilePath, fileBotResult.Renames);
         }
 
+        // The queue has taken this pass's renames (or never had the files): their journal records are done.
+        _renameReconciler?.CloseApplied(inputPath, fileBotResult.Renames);
+        if (fileBotResult.Unresolved is { Count: > 0 }) unresolvedRenames.UnionWith(fileBotResult.Unresolved);
+
         var fileCount = videoFiles.Count;
         var padSize = fileCount.ToString().Length;
 
@@ -417,6 +462,7 @@ public sealed class ConversionOrchestrator : IConversionOrchestrator
             PadSize = padSize,
             NaturalOrderIndex = naturalOrderIndex,
             UndeterminedPaths = fileBotResult.Undetermined ?? new HashSet<string>(),
+            UnresolvedRenamePaths = unresolvedRenames,
             RetriesSucceeded = retriesSucceeded
         };
     }

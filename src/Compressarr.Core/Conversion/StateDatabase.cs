@@ -8,7 +8,7 @@ namespace Compressarr.Core.Conversion;
 /// statements are shared with <see cref="HistoryDatabase"/>.</summary>
 internal static class StateDatabase
 {
-    public const int CurrentVersion = 12;
+    public const int CurrentVersion = 13;
     public const string FileName = "compressarr.state.db";
 
     /// <summary>The database that goes with a resume-file path: the app's own <c>compressarr.resume.json</c> maps to <c>compressarr.state.db</c> in the
@@ -136,7 +136,36 @@ internal static class StateDatabase
             HistoryDatabase.Execute(connection, "PRAGMA user_version = 12;", transaction);
             transaction.Commit();
         }
+
+        if (version < 13)
+        {
+            using var transaction = connection.BeginTransaction();
+            HistoryDatabase.Execute(connection, SchemaV13, transaction);
+            HistoryDatabase.Execute(connection, "PRAGMA user_version = 13;", transaction);
+            transaction.Commit();
+        }
     }
+
+    // v13 (3.2): the rename journal. A rename moves a video and the files that belong to it, and its queue entry and rename-log row follow; the plan is written HERE before the first move and removed
+    // once everything has followed, so a stop in between is finished (or undone) on the next start instead of leaving a file under a new name with its queue choices, its way back and its
+    // subtitles behind. A step of its own: version 12 was already carried by an earlier build. One new table only; nothing else changes.
+    private const string SchemaV13 = """
+        CREATE TABLE IF NOT EXISTS rename_journal (
+            id         INTEGER PRIMARY KEY,
+            old_key    TEXT    NOT NULL UNIQUE,   -- the video's path before the rename, in upper case: one open rename per file
+            input_path TEXT    NOT NULL,          -- the lane's Input folder (what finds the lane again)
+            old_path   TEXT    NOT NULL,
+            new_path   TEXT    NOT NULL,
+            companions TEXT    NOT NULL,          -- JSON: [{"from": ..., "to": ...}, ...] the files that follow the video
+            tmdb_id    INTEGER NULL,
+            is_tv      INTEGER NOT NULL DEFAULT 0,
+            season     INTEGER NULL,
+            episodes   TEXT    NULL,              -- comma separated
+            source     TEXT    NOT NULL,          -- tmdb | manual | restored
+            unmatched  INTEGER NOT NULL DEFAULT 0,-- the queue row is Unmatched afterwards (a restored name)
+            created_at TEXT    NOT NULL
+        );
+        """;
 
     // v12 (3.2): what the TMDB renamer and the queue's Match / Fix match did to a file name, so a wrong match can be put right or undone, and the matches a person chose by hand, so the
     // rest of a show follows them. IF NOT EXISTS because the migration tests set an old version on a database that already has them. Two new tables only: nothing in 'queue' changes.

@@ -236,7 +236,7 @@ public class TmdbMatchServiceTests : AppDataTestBase
         var result = await _service.ApplyAsync(_config, Movie(path, 949), null, CancellationToken.None);
 
         Assert.False(result.Success);
-        Assert.Contains("already there", result.Message);
+        Assert.Contains("already exists", result.Message);
         Assert.True(File.Exists(path));
         Assert.Equal("the one already there", File.ReadAllText(Path.Combine(_input, "Heat (1995).mkv")));
         Assert.True(EntryOf(path)!.FileBotUnmatched);                  // nothing changed
@@ -473,6 +473,225 @@ public class TmdbMatchServiceTests : AppDataTestBase
 
         Assert.True(_log.Find(path) is { IsHandled: true });
         Assert.DoesNotContain(Path.GetFullPath(path).ToUpperInvariant(), _log.CurrentPaths());   // not shown as renamed: there is nothing to fix or restore
+    }
+
+    // ---- the rename is one unit, looked at again after TMDB answers, and journalled (3.2 beta 2 review: B1, B2, B3) ----
+
+    /// <summary>The service as the app wires it: with the rename journal and the file reservations.</summary>
+    private TmdbMatchService Wired(out SqliteRenameJournal journal, out FileReservations reservations, IQueueService? queue = null)
+    {
+        journal = new SqliteRenameJournal(_store);
+        reservations = new FileReservations();
+        return new TmdbMatchService(_tmdb, _log, queue ?? _queue, _store, new IdentityExpander(), journal, reservations);
+    }
+
+    [Fact]
+    public async Task AMatchWhoseSubtitleCannotTakeTheNewName_RenamesNothing_SoNoSubtitleIsLeftUnderTheOldName()
+    {
+        // The reviewer's probe, through Match: Heat.mkv + a subtitle of its own + a different subtitle already called "Heat (1995).en.srt". The video used to be renamed regardless, leaving
+        // Heat.en.srt behind to be swept up (and deleted) as a leftover once the renamed video was done.
+        var service = Wired(out var journal, out _);
+        var path = Touch("Heat.mkv");
+        File.WriteAllText(Path.Combine(_input, "Heat.en.srt"), "the only copy of this subtitle");
+        File.WriteAllText(Path.Combine(_input, "Heat (1995).en.srt"), "somebody else's");
+
+        var result = await service.ApplyAsync(_config, Movie(path, 949), null, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("Heat (1995).en.srt", result.Message);
+        Assert.True(File.Exists(path));
+        Assert.False(File.Exists(Path.Combine(_input, "Heat (1995).mkv")));
+        Assert.Equal("the only copy of this subtitle", File.ReadAllText(Path.Combine(_input, "Heat.en.srt")));
+        Assert.True(EntryOf(path)!.FileBotUnmatched);
+        Assert.Empty(journal.Pending(_input));
+    }
+
+    [Fact]
+    public async Task ALockedSubtitle_PutsTheWholeSetBack_AndLeavesTheQueueEntryAlone()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var service = Wired(out var journal, out _);
+        var path = Touch("Heat.mkv", order: 7);
+        var subtitle = Path.Combine(_input, "Heat.en.srt");
+        File.WriteAllText(subtitle, "subtitle");
+
+        MatchApplyResult result;
+        using (new FileStream(subtitle, FileMode.Open, FileAccess.Read, FileShare.None)) result = await service.ApplyAsync(_config, Movie(path, 949), null, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.True(File.Exists(path));
+        Assert.False(File.Exists(Path.Combine(_input, "Heat (1995).mkv")));
+        Assert.Equal(7, EntryOf(path)!.Order);
+        Assert.Empty(journal.Pending(_input));
+    }
+
+    [Fact]
+    public async Task AFileThatCompletesWhileTmdbIsBeingAsked_IsNotRenamed()
+    {
+        // The reviewer's second probe: the entry became Completed (a kept source) during the details request; Match still renamed the source and the Completed row kept the missing old path,
+        // so the next scan found the new name as fresh work and converted it again.
+        var service = Wired(out var journal, out _);
+        var path = Touch("Heat.mkv");
+        _tmdb.OnDetails = () => _store.Update(AppPaths.GetResumeFilePath(), state =>
+        {
+            state.Single().Status = ResumeStatus.Completed;
+            return true;
+        });
+
+        var result = await service.ApplyAsync(_config, Movie(path, 949), null, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("no longer waiting", result.Message);
+        Assert.True(File.Exists(path));
+        Assert.False(File.Exists(Path.Combine(_input, "Heat (1995).mkv")));
+        Assert.Equal(ResumeStatus.Completed, EntryOf(path)!.Status);
+        Assert.Empty(journal.Pending(_input));
+    }
+
+    [Fact]
+    public async Task AFileThatChangesWhileTmdbIsBeingAsked_IsNotRenamedOnTheStrengthOfTheOldLook()
+    {
+        var service = Wired(out _, out _);
+        var path = Touch("Heat.mkv");
+        _tmdb.OnDetails = () => File.WriteAllText(path, "a different, longer file now");
+
+        var result = await service.ApplyAsync(_config, Movie(path, 949), null, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("changed", result.Message);
+        Assert.True(File.Exists(path));
+    }
+
+    [Fact]
+    public async Task AFileTheEncoderHolds_IsNeverRenamed_AndIsRenamedOnceItIsReleased()
+    {
+        var service = Wired(out _, out var reservations);
+        var path = Touch("Heat.mkv");
+
+        var held = reservations.TryReserve(path);
+        var refused = await service.ApplyAsync(_config, Movie(path, 949), null, CancellationToken.None);
+
+        Assert.False(refused.Success);
+        Assert.Contains("being encoded", refused.Message);
+        Assert.True(File.Exists(path));
+
+        held!.Dispose();
+        var done = await service.ApplyAsync(_config, Movie(path, 949), null, CancellationToken.None);
+
+        Assert.True(done.Success);
+        Assert.True(File.Exists(Path.Combine(_input, "Heat (1995).mkv")));
+    }
+
+    [Fact]
+    public async Task AQueueThatCannotTakeTheRename_GetsTheFilesBack()
+    {
+        var failing = new FailingUpdateStore(_store);
+        var queue = new QueueService(failing, new IdentityExpander(), new RenamingFolderScanner());
+        var service = Wired(out var journal, out _, queue);
+        var path = Touch("Heat.mkv");
+        File.WriteAllText(Path.Combine(_input, "Heat.en.srt"), "subtitle");
+        failing.FailUpdates = true;
+
+        var result = await service.ApplyAsync(_config, Movie(path, 949), null, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("undone", result.Message);
+        Assert.True(File.Exists(path));
+        Assert.Equal("subtitle", File.ReadAllText(Path.Combine(_input, "Heat.en.srt")));
+        Assert.False(File.Exists(Path.Combine(_input, "Heat (1995).mkv")));
+        Assert.Empty(journal.Pending(_input));
+        Assert.Null(_log.Find(Path.Combine(_input, "Heat (1995).mkv")));            // and nothing is on record for a rename that did not stand
+    }
+
+    [Fact]
+    public async Task AMatch_LeavesNoOpenJournalRecord_AndTheSubtitlesAndQueueChoicesFollow()
+    {
+        var service = Wired(out var journal, out _);
+        var path = Touch("Heat.mkv", order: 3);
+        File.WriteAllText(Path.Combine(_input, "Heat.en.srt"), "subtitle");
+        _store.Update(AppPaths.GetResumeFilePath(), state =>
+        {
+            state.Single().Skipped = true;
+            state.Single().PresetOverride = "My preset";
+            return true;
+        });
+
+        var result = await service.ApplyAsync(_config, Movie(path, 949), null, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var renamed = Path.Combine(_input, "Heat (1995).mkv");
+        Assert.Equal("subtitle", File.ReadAllText(Path.Combine(_input, "Heat (1995).en.srt")));
+        var entry = EntryOf(renamed)!;
+        Assert.True(entry.Skipped);
+        Assert.Equal("My preset", entry.PresetOverride);
+        Assert.Equal(3, entry.Order);
+        Assert.Equal(Path.GetFullPath(path), _log.Find(renamed)!.OriginalPath, ignoreCase: true);
+        Assert.Empty(journal.Pending(_input));
+    }
+
+    [Fact]
+    public async Task ARestore_GoesThroughTheSameSteps_AndTheSubtitleComesBackWithTheVideo()
+    {
+        var service = Wired(out var journal, out _);
+        var path = Touch("Heat.mkv");
+        File.WriteAllText(Path.Combine(_input, "Heat.en.srt"), "subtitle");
+        var matched = await service.ApplyAsync(_config, Movie(path, 949), null, CancellationToken.None);
+        Assert.True(matched.Success);
+        var renamed = Path.Combine(_input, "Heat (1995).mkv");
+
+        var restored = service.Restore(_config, "lane1", renamed, null);
+
+        Assert.True(restored.Success);
+        Assert.True(File.Exists(path));
+        Assert.Equal("subtitle", File.ReadAllText(Path.Combine(_input, "Heat.en.srt")));
+        Assert.True(EntryOf(path)!.FileBotUnmatched);
+        Assert.True(_log.Find(path) is { Source: RenameRecord.RestoredSource });
+        Assert.Empty(journal.Pending(_input));
+    }
+
+    [Fact]
+    public async Task AnOtherEpisodeThatCompletesWhileTheSeasonIsBeingLookedUp_IsLeftAlone_AndTheRestFollow()
+    {
+        var service = Wired(out _, out _);
+        var e1 = Touch("Doctor.Who.S01E01.mkv");
+        var e2 = Touch("Doctor.Who.S01E02.mkv");
+        var e3 = Touch("Doctor.Who.S01E03.mkv");
+        // On the second season lookup (the one made for the other episodes) episode 3 finishes.
+        _tmdb.OnSeason = call =>
+        {
+            if (call != 2) return;
+            _store.Update(AppPaths.GetResumeFilePath(), state =>
+            {
+                state.Single(e => e.FullName == e3).Status = ResumeStatus.Completed;
+                return true;
+            });
+        };
+
+        var result = await service.ApplyAsync(_config, Episode(e1, 57243, 1, new[] { 1 }, others: true), null, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.True(File.Exists(Path.Combine(_input, "Doctor Who (2005) - S01E01 - Rose.mkv")));
+        Assert.True(File.Exists(e3));                                                 // finished meanwhile: never touched
+        Assert.Equal(ResumeStatus.Completed, EntryOf(e3)!.Status);
+        Assert.Contains(result.Problems!, p => p.Contains("no longer waiting"));
+        Assert.True(File.Exists(Path.Combine(_input, "Doctor Who (2005) - S01E02 - The End of the World.mkv")));
+    }
+
+    /// <summary>A queue store whose writes can be made to fail, to see what a rename does when the queue cannot take it.</summary>
+    private sealed class FailingUpdateStore : IResumeStateStore
+    {
+        private readonly IResumeStateStore _inner;
+        public bool FailUpdates { get; set; }
+
+        public FailingUpdateStore(IResumeStateStore inner) => _inner = inner;
+
+        public List<ResumeEntry> Load(string path) => _inner.Load(path);
+        public void Save(List<ResumeEntry> state, string path) => _inner.Save(state, path);
+        public void DeleteIfComplete(List<ResumeEntry> state, string path) => _inner.DeleteIfComplete(state, path);
+
+        public T Update<T>(string path, Func<List<ResumeEntry>, T> mutate) =>
+            FailUpdates ? throw new InvalidOperationException("the queue database is locked") : _inner.Update(path, mutate);
     }
 
     /// <summary>Renames the file the way the automatic renamer would have, and records it.</summary>

@@ -54,6 +54,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IFileBotRunner, FileBotRunner>();
         services.AddSingleton<Compressarr.Core.Renaming.ITmdbRenameClient, Compressarr.Core.Renaming.TmdbRenameClient>();
         services.AddSingleton<Compressarr.Core.Renaming.IRenameLog, Compressarr.Core.Renaming.SqliteRenameLog>();
+        services.AddSingleton<Compressarr.Core.Renaming.IRenameJournal, Compressarr.Core.Renaming.SqliteRenameJournal>();
+        services.AddSingleton<Compressarr.Core.Renaming.RenameReconciler>();
+        services.AddSingleton<Compressarr.Core.Queue.IFileReservations, Compressarr.Core.Queue.FileReservations>();
         services.AddSingleton<Compressarr.Core.Renaming.ITmdbRenamer, Compressarr.Core.Renaming.TmdbRenamer>();
         services.AddSingleton<Compressarr.Core.Renaming.ITmdbMatchService, Compressarr.Core.Renaming.TmdbMatchService>();
         services.AddSingleton<IActiveEncodeProcess, ActiveEncodeProcess>();

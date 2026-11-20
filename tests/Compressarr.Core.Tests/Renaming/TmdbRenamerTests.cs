@@ -43,9 +43,15 @@ internal sealed class FakeTmdbClient : ITmdbRenameClient
     public int SearchCalls { get; private set; }
     public int SeasonCalls { get; private set; }
 
+    /// <summary>Runs while an answer is "on its way" (the real client is a network call): what the queue and the files do in the meantime.</summary>
+    public Action? OnSearch { get; set; }
+    public Action? OnDetails { get; set; }
+    public Action<int>? OnSeason { get; set; }
+
     public Task<IReadOnlyList<TmdbCandidate>> SearchAsync(string apiKey, bool tv, string title, int? year, string language, CancellationToken cancellationToken)
     {
         SearchCalls++;
+        OnSearch?.Invoke();
         if (Fail is not null) throw Fail;
 
         var source = tv ? Shows : Films;
@@ -54,6 +60,7 @@ internal sealed class FakeTmdbClient : ITmdbRenameClient
 
     public Task<TmdbCandidate?> GetDetailsAsync(string apiKey, bool tv, int id, string language, CancellationToken cancellationToken)
     {
+        OnDetails?.Invoke();
         if (Fail is not null) throw Fail;
         return Task.FromResult(Details.TryGetValue((tv, id), out var details) ? details : null);
     }
@@ -61,6 +68,7 @@ internal sealed class FakeTmdbClient : ITmdbRenameClient
     public Task<IReadOnlyDictionary<int, string>> GetSeasonAsync(string apiKey, int showId, int season, string language, CancellationToken cancellationToken)
     {
         SeasonCalls++;
+        OnSeason?.Invoke(SeasonCalls);
         if (Fail is not null) throw Fail;
 
         return Task.FromResult<IReadOnlyDictionary<int, string>>(Seasons.TryGetValue((showId, season), out var episodes) ? episodes : new Dictionary<int, string>());
@@ -156,18 +164,22 @@ public class TmdbRenamerTests : IDisposable
     }
 
     [Fact]
-    public async Task ACompanionWhoseNewNameIsTakenKeepsItsOwn_AndTheVideoIsStillRenamed()
+    public async Task ACompanionWhoseNewNameIsTaken_StopsTheWholeRename_SoNoSubtitleIsLeftUnderTheOldName()
     {
+        // The video used to be renamed anyway and its subtitle left under the old name, where the folder sweep after the encode no longer recognised it as the video's and deleted it.
+        // The video and its subtitles are one unit: if one of them cannot take the new name, nothing is renamed.
         Touch("Heat.1995.720p.mkv");
-        Touch("Heat.1995.720p.en.srt");
+        var unique = Touch("Heat.1995.720p.en.srt");
         Touch("Heat (1995).en.srt");
 
         var logger = new RenamingTestLogger();
-        await Run(Renamer(KnownTmdb()), logger);
+        var result = await Run(Renamer(KnownTmdb()), logger);
 
-        Assert.True(File.Exists(Path.Combine(_root, "Heat (1995).mkv")));
-        Assert.True(File.Exists(Path.Combine(_root, "Heat.1995.720p.en.srt")));
-        Assert.Contains(logger.Logs, l => l.Severity == LogSeverity.Error && l.Message.Contains("already exists"));
+        Assert.True(File.Exists(Path.Combine(_root, "Heat.1995.720p.mkv")));
+        Assert.False(File.Exists(Path.Combine(_root, "Heat (1995).mkv")));
+        Assert.True(File.Exists(unique));
+        Assert.Empty(result.Renames);
+        Assert.Contains(logger.Logs, l => l.Message.Contains("already exists") && l.Message.Contains("Nothing was changed"));
     }
 
     [Fact]

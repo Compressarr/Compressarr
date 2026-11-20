@@ -503,8 +503,8 @@ public class SqliteResumeStateStoreTests : IDisposable
         using var connection = new SqliteConnection($"Data Source={StateDatabase.PathFor(other)};Pooling=False");
         connection.Open();
         Assert.Equal(StateDatabase.CurrentVersion, (int)HistoryDatabase.Scalar(connection, "PRAGMA user_version;"));
-        Assert.Equal(12, StateDatabase.CurrentVersion);
-        Assert.Equal(2, (long)HistoryDatabase.Scalar(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('rename_log', 'rename_memory');"));
+        Assert.Equal(13, StateDatabase.CurrentVersion);
+        Assert.Equal(3, (long)HistoryDatabase.Scalar(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('rename_log', 'rename_memory', 'rename_journal');"));
 
         // And the upgraded queue takes the new fields.
         var store = new SqliteResumeStateStore();

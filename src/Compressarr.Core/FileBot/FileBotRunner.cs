@@ -13,7 +13,9 @@ namespace Compressarr.Core.FileBot;
 /// preset override) over to its new name instead of treating the renamed file as a new arrival.</param>
 /// <param name="Undetermined">Files the renamer could not give an answer for this pass (the TMDB renamer could not reach TMDB). Not unmatched, and nothing is remembered about them; with "Do not process
 /// unmatched files" on they simply wait this pass.</param>
-public sealed record FileBotRunResult(HashSet<string> Unmatched, IReadOnlyDictionary<string, string> Renames, IReadOnlySet<string>? Undetermined = null)
+/// <param name="Unresolved">Files whose rename was begun and could not be finished or undone (a subtitle is locked, say): the set of files is split between two names. They are not started this pass, with
+/// or without "Do not process unmatched files": filing and cleaning up around a half-renamed set is how a subtitle gets lost. The next pass finishes the rename first.</param>
+public sealed record FileBotRunResult(HashSet<string> Unmatched, IReadOnlyDictionary<string, string> Renames, IReadOnlySet<string>? Undetermined = null, IReadOnlySet<string>? Unresolved = null)
 {
     public static FileBotRunResult Empty => new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
 }

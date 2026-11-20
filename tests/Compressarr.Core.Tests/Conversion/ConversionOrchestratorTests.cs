@@ -3398,6 +3398,100 @@ public class ConversionOrchestratorTests : IDisposable
         Assert.True(unmatchedEntry.FileBotUnmatched);
     }
 
+    // ---- a rename a stop interrupted is finished before anything else looks at the queue (3.2 beta 2 review, B3) ----
+
+    private (ConversionOrchestrator Orchestrator, SqliteResumeStateStore Store, SqliteRenameJournal Journal, SqliteRenameLog Log, string ResumePath) OrchestratorWithJournal(CompressarrConfig config)
+    {
+        var resumePath = Path.Combine(_tempDir, "resume.json");
+        var store = new SqliteResumeStateStore();
+        var journal = new SqliteRenameJournal(store, () => resumePath);
+        var log = new SqliteRenameLog(store, () => resumePath);
+        var orchestrator = new ConversionOrchestrator(
+            new PassThroughPathExpander(), new RealFolderScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), new MetadataService(), new FakeProcessRunner(), new FileRouter(),
+            new NoOpCompanionFileService(), new NoOpArrUnmonitorService(), new RecordingTrashService(), new NoOpRunLogger(), store, new NoOpProgressReporter(),
+            new SwitchingConfigStore(config, config, switchOnCall: int.MaxValue), encoders: null, tmdbRenamer: null, renameLog: log, renameReconciler: new RenameReconciler(journal, log));
+        return (orchestrator, store, journal, log, resumePath);
+    }
+
+    [Fact]
+    public async Task PrepareLane_AStopAfterTheVideoMoved_IsFinishedFirst_SoTheEntryKeepsItsSkipPresetAndPlace_AndTheSubtitleFollows()
+    {
+        var (lane, config, inputDir) = TmdbLane(tmdbOn: false);
+        var (orchestrator, store, journal, log, resumePath) = OrchestratorWithJournal(config);
+        var old = Path.Combine(inputDir, "Old.mkv");
+        var renamed = Path.Combine(inputDir, "Heat (1995).mkv");
+        File.WriteAllText(old, "video");
+        File.WriteAllText(Path.Combine(inputDir, "Old.en.srt"), "subtitle");
+        store.Save(new List<ResumeEntry> { new() { LaneId = "lane1", FullName = old, Status = ResumeStatus.Pending, Order = 4, Skipped = true, PresetOverride = "Fast 1080p30" } }, resumePath);
+
+        // The rename was planned (journalled), the video moved, and then the program stopped: the queue still says Old.mkv, the subtitle is still under the old name, nothing is on record.
+        var moves = RenameApplier.Plan(old, "Heat (1995).mkv", new[] { "mkv" });
+        Assert.NotNull(journal.Begin(RenameIntent.From(inputDir, moves, 949, false, null, null, RenameRecord.ManualSource, unmatched: false)));
+        File.Move(moves[0].From, moves[0].To);
+
+        var resumeState = store.Load(resumePath);
+        var context = await orchestrator.PrepareLaneAsync(lane, config, resumeState, resumePath);
+
+        Assert.NotNull(context);
+        var after = store.Load(resumePath);
+        Assert.DoesNotContain(after, e => e.FullName == old);                        // without the journal, recovery drops this entry (its file is gone) and the new name arrives as fresh work
+        var entry = Assert.Single(after, e => e.FullName == renamed);
+        Assert.True(entry.Skipped);
+        Assert.Equal("Fast 1080p30", entry.PresetOverride);
+        Assert.Equal(4, entry.Order);
+        Assert.Equal("subtitle", File.ReadAllText(Path.Combine(inputDir, "Heat (1995).en.srt")));
+        Assert.False(File.Exists(Path.Combine(inputDir, "Old.en.srt")));
+        Assert.Equal(old, log.Find(renamed)!.OriginalPath);                           // and Restore original name still knows where it came from
+        Assert.Empty(journal.Pending(inputDir));
+        Assert.Empty(context!.UnresolvedRenamePaths);
+    }
+
+    [Fact]
+    public async Task PrepareLane_AnInterruptedRenameThatCannotBeFinished_HoldsTheFile_KeepsTheRecord_AndStillMovesTheEntryWithTheVideo()
+    {
+        var (lane, config, inputDir) = TmdbLane(tmdbOn: false);
+        var (orchestrator, store, journal, _, resumePath) = OrchestratorWithJournal(config);
+        var old = Path.Combine(inputDir, "Old.mkv");
+        var renamed = Path.Combine(inputDir, "Heat (1995).mkv");
+        File.WriteAllText(old, "video");
+        File.WriteAllText(Path.Combine(inputDir, "Old.en.srt"), "the only copy of this subtitle");
+        store.Save(new List<ResumeEntry> { new() { LaneId = "lane1", FullName = old, Status = ResumeStatus.Pending, Order = 0, Skipped = true } }, resumePath);
+        var moves = RenameApplier.Plan(old, "Heat (1995).mkv", new[] { "mkv" });
+        journal.Begin(RenameIntent.From(inputDir, moves, 949, false, null, null, RenameRecord.ManualSource, unmatched: false));
+        File.Move(moves[0].From, moves[0].To);
+        File.WriteAllText(Path.Combine(inputDir, "Heat (1995).en.srt"), "put there afterwards by somebody");     // now stands in the subtitle's way
+
+        var context = await orchestrator.PrepareLaneAsync(lane, config, store.Load(resumePath), resumePath);
+
+        Assert.Contains(renamed, context!.UnresolvedRenamePaths);                    // not started this pass: filing the video would sweep the old subtitle away as a leftover
+        Assert.Single(journal.Pending(inputDir));
+        Assert.Equal("the only copy of this subtitle", File.ReadAllText(Path.Combine(inputDir, "Old.en.srt")));
+        var entry = Assert.Single(store.Load(resumePath), e => e.FullName == renamed);   // the entry followed the video: its skip is not lost while the subtitle waits
+        Assert.True(entry.Skipped);
+    }
+
+    [Fact]
+    public async Task PrepareLane_ARestoreInterruptedAfterTheVideoMoved_LeavesTheFileUnmatchedAgain()
+    {
+        var (lane, config, inputDir) = TmdbLane(tmdbOn: false);
+        var (orchestrator, store, journal, log, resumePath) = OrchestratorWithJournal(config);
+        var matched = Path.Combine(inputDir, "Heat (1995).mkv");
+        var original = Path.Combine(inputDir, "video1.mkv");
+        File.WriteAllText(matched, "video");
+        store.Save(new List<ResumeEntry> { new() { LaneId = "lane1", FullName = matched, Status = ResumeStatus.Pending, Order = 0, FileBotUnmatched = false } }, resumePath);
+        log.Record(original, matched, 949, false, null, null, RenameRecord.ManualSource);
+        var moves = RenameApplier.Plan(matched, "video1.mkv", new[] { "mkv" });
+        journal.Begin(RenameIntent.From(inputDir, moves, null, false, null, null, RenameRecord.RestoredSource, unmatched: true));
+        File.Move(moves[0].From, moves[0].To);
+
+        await orchestrator.PrepareLaneAsync(lane, config, store.Load(resumePath), resumePath);
+
+        var entry = Assert.Single(store.Load(resumePath), e => e.FullName == original);
+        Assert.True(entry.FileBotUnmatched);
+        Assert.True(log.Find(original) is { Source: RenameRecord.RestoredSource });
+        Assert.Empty(journal.Pending(inputDir));
+    }
+
     private ConversionOrchestrator OrchestratorWithTmdb(ITmdbRenamer tmdb, CompressarrConfig config, IFileBotRunner? fileBot = null) => new(
         new PassThroughPathExpander(), new RealFolderScanner(), fileBot ?? new NoOpFileBotRunner(),
         new FixedExtensionPresetService(), new MetadataService(), new FakeProcessRunner(), new FileRouter(),

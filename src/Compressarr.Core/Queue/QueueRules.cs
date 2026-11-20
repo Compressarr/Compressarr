@@ -503,6 +503,7 @@ public static class QueueRules
                 target.Skipped = old.Skipped;
                 target.Removed = old.Removed;
                 target.PresetOverride = old.PresetOverride;
+                target.DestinationLaneId = old.DestinationLaneId;
                 resumeState.Remove(old);
                 changed = true;
             }

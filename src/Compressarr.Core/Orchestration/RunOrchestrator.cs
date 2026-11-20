@@ -93,6 +93,9 @@ public sealed class RunOrchestrator : IRunOrchestrator
     /// <summary>Per-lane encoder choice (2.2); null = HandBrake only, as before.</summary>
     private readonly IEncoderResolver? _encoders;
 
+    /// <summary>Who may act on a file right now: the encoder holds the file it works on, and a rename holds the file it changes (3.2). Null in the tests that build this class directly and do not use it.</summary>
+    private readonly Compressarr.Core.Queue.IFileReservations? _reservations;
+
     /// <summary>The run archive (3.0), when the history store is one: runs are recorded with their files and the report is built on demand. Null (a plain
     /// store, as in tests) keeps the earlier behaviour of writing a report file for every run.</summary>
     private readonly IRunArchive? _archive;
@@ -115,10 +118,11 @@ public sealed class RunOrchestrator : IRunOrchestrator
         IActiveRunController activeRunController,
         IEncodeSchedule schedule,
         IEncoderResolver? encoders = null,
-        IRunArchive? archive = null)
+        IRunArchive? archive = null,
+        Compressarr.Core.Queue.IFileReservations? reservations = null)
         : this(pathExpander, presets, conversionOrchestrator, metadata, resumeStore, logger, historyStore,
               rollupCalculator, reportGenerator, reportLauncher, notifications, notificationDispatcher, trash,
-              progress, activeRunController, schedule, DefaultPostExecTimeout, encoders, archive)
+              progress, activeRunController, schedule, DefaultPostExecTimeout, encoders, archive, reservations)
     {
     }
 
@@ -147,8 +151,10 @@ public sealed class RunOrchestrator : IRunOrchestrator
         IEncodeSchedule schedule,
         TimeSpan postExecTimeout,
         IEncoderResolver? encoders = null,
-        IRunArchive? archive = null)
+        IRunArchive? archive = null,
+        Compressarr.Core.Queue.IFileReservations? reservations = null)
     {
+        _reservations = reservations;
         _encoders = encoders;
         // Only when it really is the history store in use: a test that swaps in its own store must see its own AppendRun calls.
         _archive = archive is not null && ReferenceEquals(archive, historyStore) ? archive : null;
@@ -413,7 +419,9 @@ public sealed class RunOrchestrator : IRunOrchestrator
                     laneOrderIndex,
                     (laneId, fullName) => laneContexts[laneId].NaturalOrderIndex.TryGetValue(fullName, out var idx) ? idx : int.MaxValue,
                     // "Do not process unmatched files": an Unmatched file waits (like a skipped one) until it is matched or left as it is; so does one the renamer could not ask TMDB about this pass.
-                    e => config.HoldUnmatchedFiles && (e.FileBotUnmatched || laneContexts[e.LaneId].UndeterminedPaths.Contains(e.FullName)));
+                    e => (config.HoldUnmatchedFiles && (e.FileBotUnmatched || laneContexts[e.LaneId].UndeterminedPaths.Contains(e.FullName)))
+                         // A file whose rename could not be finished waits for the next pass whatever that setting says: its subtitles are split from it.
+                         || laneContexts[e.LaneId].UnresolvedRenamePaths.Contains(e.FullName));
 
                 if (next is null) break;
 
@@ -443,8 +451,35 @@ public sealed class RunOrchestrator : IRunOrchestrator
                 }
 
                 var context = laneContexts[next.LaneId];
-                var result = await _conversionOrchestrator.ProcessOneFileAsync(context, next, logFilePath, timestamp, resumeState, resumeFilePath, token);
-                laneResults[next.LaneId].Add(result);
+
+                // The file is reserved while it is worked on, so a rename (Match, Fix match, Restore, the automatic renamer) never touches it, and the encoder never starts on a file that is in the middle of
+                // being renamed. If it had to wait for one, the file may have moved (or its queue entry changed) meanwhile: look again before starting on a name that may be gone.
+                IDisposable? reservation = null;
+                if (_reservations is not null)
+                {
+                    var (lease, waited) = await _reservations.ReserveAsync(next.FullName, token);
+                    reservation = lease;
+                    if (waited)
+                    {
+                        _conversionOrchestrator.RefreshResumeState(resumeState, resumeFilePath);
+                        if (!File.Exists(next.FullName))
+                        {
+                            reservation.Dispose();
+                            resumeState.Remove(next);       // its entry now lives under the new name (the refresh above brought it in); this is the stale copy
+                            continue;
+                        }
+                    }
+                }
+
+                try
+                {
+                    var result = await _conversionOrchestrator.ProcessOneFileAsync(context, next, logFilePath, timestamp, resumeState, resumeFilePath, token);
+                    laneResults[next.LaneId].Add(result);
+                }
+                finally
+                {
+                    reservation?.Dispose();
+                }
             }
         }
         catch (OperationCanceledException)

@@ -45,17 +45,26 @@ public sealed class TmdbMatchService : ITmdbMatchService
     private readonly IQueueService _queue;
     private readonly IResumeStateStore _resumeStore;
     private readonly IPathExpander _pathExpander;
+    private readonly IRenameJournal? _journal;
+    private readonly IFileReservations? _reservations;
 
-    public TmdbMatchService(ITmdbRenameClient client, IRenameLog log, IQueueService queue, IResumeStateStore resumeStore, IPathExpander pathExpander)
+    public TmdbMatchService(ITmdbRenameClient client, IRenameLog log, IQueueService queue, IResumeStateStore resumeStore, IPathExpander pathExpander,
+        IRenameJournal? journal = null, IFileReservations? reservations = null)
     {
         _client = client;
         _log = log;
         _queue = queue;
         _resumeStore = resumeStore;
         _pathExpander = pathExpander;
+        _journal = journal;
+        _reservations = reservations;
     }
 
-    private sealed record Target(LaneConfig Lane, string Input, IReadOnlyList<string> VidTypes, FileInfo File);
+    /// <summary>The file a choice is about, as it was when it was checked: <see cref="Length"/> and <see cref="ModifiedUtc"/> are what it looked like then, so a file that was replaced or is still being
+    /// written while TMDB was being asked about is not renamed on the strength of an old look.</summary>
+    private sealed record OtherFile(string Path, ParsedName Parsed, long Length, DateTime ModifiedUtc);
+
+    private sealed record Target(LaneConfig Lane, string Input, IReadOnlyList<string> VidTypes, FileInfo File, long Length, DateTime ModifiedUtc);
 
     private static bool Same(string? a, string? b) => a is not null && b is not null && string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
 
@@ -78,7 +87,18 @@ public sealed class TmdbMatchService : ITmdbMatchService
         var entry = _resumeStore.Load(AppPaths.GetResumeFilePath()).FirstOrDefault(e => e.LaneId == lane.Id && Same(e.FullName, file.FullName));
         if (entry is not null && entry.Status != ResumeStatus.Pending) return (null, "That file is no longer waiting in the queue.");
 
-        return (new Target(lane, input, vidTypes, file), null);
+        return (new Target(lane, input, vidTypes, file, file.Length, file.LastWriteTimeUtc), null);
+    }
+
+    /// <summary>Looks at the file once more, now that TMDB has answered and the file is reserved: it must still be a waiting video in the lane's Input folder, in the queue as waiting (or not in it yet), and
+    /// the same file (same size and time) that the choice was made about. Anything else is refused, because the queue and the file may have moved on while the answer was on its way.</summary>
+    private string? Recheck(CompressarrConfig config, string laneId, string path, long length, DateTime modifiedUtc)
+    {
+        var (fresh, error) = Check(config, laneId, path, currentFile: null);
+        if (fresh is null) return error;
+        if (fresh.Length != length || fresh.ModifiedUtc != modifiedUtc) return "That file changed while TMDB was being asked. Try again.";
+
+        return null;
     }
 
     private static string? KeyOf(CompressarrConfig config) => string.IsNullOrWhiteSpace(config.Posters.TmdbApiKey) ? null : config.Posters.TmdbApiKey.Trim();
@@ -155,10 +175,10 @@ public sealed class TmdbMatchService : ITmdbMatchService
             if (named.Error is not null) return new MatchApplyResult(false, named.Error);
 
             // Who else follows is worked out first: once this file is renamed, what it was matched to before is no longer on record under its old name.
-            var others = request.ApplyToOthers && request.IsTv && parsedOriginal is not null ? FindOthers(target, parsedOriginal, currentFileFullName) : new List<(string Path, ParsedName Parsed)>();
+            var others = request.ApplyToOthers && request.IsTv && parsedOriginal is not null ? FindOthers(target, parsedOriginal, currentFileFullName) : new List<OtherFile>();
 
             var problems = new List<string>();
-            var finished = Finish(config, target, target.File.FullName, named.Name!, details, season, episodes, problems, out var failure);
+            var finished = Finish(config, target, target.File.FullName, target.Length, target.ModifiedUtc, named.Name!, details, season, episodes, problems, out var failure);
             if (failure is not null) return new MatchApplyResult(false, failure);
 
             // The choice is remembered, so the rest of this show (and its next episodes) follow it instead of being guessed again.
@@ -170,11 +190,12 @@ public sealed class TmdbMatchService : ITmdbMatchService
                 var seasons = new Dictionary<int, IReadOnlyDictionary<int, string>>();
                 foreach (var other in others)
                 {
-                    var otherTarget = new Target(target.Lane, target.Input, target.VidTypes, new FileInfo(other.Path));
+                    var otherTarget = new Target(target.Lane, target.Input, target.VidTypes, new FileInfo(other.Path), other.Length, other.ModifiedUtc);
                     var otherNamed = await NameAsync(config, apiKey, details, true, other.Parsed.Season, other.Parsed.Episodes.ToList(), other.Parsed.Tags, null, otherTarget.File.Extension, cancellationToken, seasons);
                     if (otherNamed.Error is not null) { problems.Add($"{otherTarget.File.Name}: {otherNamed.Error}"); continue; }
 
-                    Finish(config, otherTarget, other.Path, otherNamed.Name!, details, other.Parsed.Season, other.Parsed.Episodes.ToList(), problems, out var otherFailure);
+                    // Each file is looked at again on its own, under its own reservation: the list was made before TMDB was asked, and a file on it may have started encoding, finished, or been renamed since.
+                    Finish(config, otherTarget, other.Path, other.Length, other.ModifiedUtc, otherNamed.Name!, details, other.Parsed.Season, other.Parsed.Episodes.ToList(), problems, out var otherFailure);
                     if (otherFailure is not null) problems.Add($"{otherTarget.File.Name}: {otherFailure}");
                     else renamedOthers++;
                 }
@@ -222,7 +243,7 @@ public sealed class TmdbMatchService : ITmdbMatchService
 
     /// <summary>Renames one file to <paramref name="newName"/>, records it (as a hand-made match) and carries its queue entry over. <paramref name="failure"/> says why nothing was done.
     /// Returns the file's new full path.</summary>
-    private string Finish(CompressarrConfig config, Target target, string path, string newName, TmdbCandidate details, int? season, List<int>? episodes, List<string> problems, out string? failure)
+    private string Finish(CompressarrConfig config, Target target, string path, long length, DateTime modifiedUtc, string newName, TmdbCandidate details, int? season, List<int>? episodes, List<string> problems, out string? failure)
     {
         failure = null;
         var current = Path.GetFileName(path);
@@ -233,27 +254,110 @@ public sealed class TmdbMatchService : ITmdbMatchService
             return path;
         }
 
-        var wanted = Path.Combine(Path.GetDirectoryName(path)!, newName);
-        if (File.Exists(wanted))
+        var renamed = CommitRename(config, target, path, length, modifiedUtc, newName, details.Id, details.IsTv, season, episodes, RenameRecord.ManualSource, unmatched: false, out failure);
+        return renamed ?? path;
+    }
+
+    /// <summary>The one way a file changes its name here (Match, apply to the others, Restore). The file is reserved (the encoder holds the one it is working on), then looked at again - the answer from
+    /// TMDB may have taken a while and the queue moves on meanwhile -, the whole set of files that belong to the video is checked against the new name, the plan is written to the journal, and then the
+    /// files are moved all or none. The queue entry follows, and its result is checked: a rename the queue did not take is undone, so a file is never left under a name its queue entry does not know.
+    /// Returns the video's new path, or null with <paramref name="failure"/> set.</summary>
+    private string? CommitRename(CompressarrConfig config, Target target, string path, long length, DateTime modifiedUtc, string newName, int? tmdbId, bool isTv, int? season, List<int>? episodes,
+        string source, bool unmatched, out string? failure)
+    {
+        failure = null;
+        using var lease = _reservations?.TryReserve(path);
+        if (_reservations is not null && lease is null)
         {
-            failure = $"A file named \"{newName}\" is already there, and nothing is ever overwritten.";
-            return path;
+            failure = "That file is being encoded (or renamed) right now. Try again when it has finished.";
+            return null;
         }
 
-        string renamed;
+        var stale = Recheck(config, target.Lane.Id, path, length, modifiedUtc);
+        if (stale is not null)
+        {
+            failure = stale;
+            return null;
+        }
+
+        var tracked = _resumeStore.Load(AppPaths.GetResumeFilePath()).Any(e => e.LaneId == target.Lane.Id && Same(e.FullName, path));
+
+        IReadOnlyList<RenameMove> moves;
         try
         {
-            renamed = RenameApplier.Rename(path, newName, target.VidTypes, problems.Add);
+            moves = RenameApplier.Plan(path, newName, target.VidTypes);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (IOException ex)
         {
-            failure = $"It could not be renamed: {ex.Message}";
-            return path;
+            failure = $"It could not be renamed: {ex.Message}. Nothing was changed, and nothing is ever overwritten.";
+            return null;
         }
 
-        _log.Record(path, renamed, details.Id, details.IsTv, season, episodes, RenameRecord.ManualSource);
-        _queue.ApplyRename(config, target.Lane.Id, path, renamed, unmatched: false);
+        long? journalId = null;
+        if (_journal is not null)
+        {
+            journalId = _journal.Begin(RenameIntent.From(target.Input, moves, tmdbId, isTv, season, episodes, source, unmatched));
+            if (journalId is null)
+            {
+                failure = "The rename could not be recorded first, so nothing was changed. Try again.";
+                return null;
+            }
+        }
+
+        try
+        {
+            RenameApplier.Execute(moves);
+        }
+        catch (RenameFailedException ex)
+        {
+            if (ex.RolledBack)
+            {
+                if (journalId is not null) _journal!.End(journalId.Value);
+                failure = $"It could not be renamed: {ex.Message}. Nothing was changed.";
+            }
+            else
+            {
+                failure = $"It could not be renamed: {ex.Message}, and \"{Path.GetFileName(ex.Stranded[0].To)}\" could not be put back. The rename is finished or undone when the next pass starts, and the file waits until then.";
+            }
+
+            return null;
+        }
+
+        var renamed = moves[0].To;
+
+        // The queue entry follows the file. Its answer is not ignored: a queue that did not take the new name is undone, so the file never sits under a name its entry does not know.
+        QueueEditResult committed;
+        try
+        {
+            committed = _queue.ApplyRename(config, target.Lane.Id, path, renamed, unmatched);
+        }
+        catch (Exception ex)
+        {
+            return Undone(moves, journalId, $"The queue could not be updated ({ex.Message})", out failure);
+        }
+
+        if (committed is not QueueEditResult.Ok && (tracked || committed is QueueEditResult.UnknownLane)) return Undone(moves, journalId, "The queue no longer has that file waiting", out failure);
+
+        _log.Record(path, renamed, tmdbId, isTv, season, episodes, source);
+        if (journalId is not null) _journal!.End(journalId.Value);
         return renamed;
+    }
+
+    /// <summary>Puts a rename back after the queue refused it. Whatever could not be put back stays in the journal, to be finished on the next pass.</summary>
+    private string? Undone(IReadOnlyList<RenameMove> moves, long? journalId, string why, out string? failure)
+    {
+        var stranded = RenameApplier.Undo(moves);
+        if (stranded.Count == 0)
+        {
+            if (journalId is not null) _journal!.End(journalId.Value);
+            failure = $"{why}, so the rename was undone and nothing was changed.";
+        }
+        else
+        {
+            failure = $"{why}, and \"{Path.GetFileName(stranded[0].To)}\" could not be put back. The rename is finished or undone when the next pass starts.";
+        }
+
+        return null;
     }
 
     public MatchApplyResult Restore(CompressarrConfig config, string laneId, string fullName, string? currentFileFullName)
@@ -272,22 +376,12 @@ public sealed class TmdbMatchService : ITmdbMatchService
 
         if (File.Exists(record.OriginalPath)) return new MatchApplyResult(false, $"A file named \"{originalName}\" is already there, and nothing is ever overwritten.");
 
-        var problems = new List<string>();
-        string restored;
-        try
-        {
-            restored = RenameApplier.Rename(target.File.FullName, originalName, target.VidTypes, problems.Add);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return new MatchApplyResult(false, $"It could not be renamed: {ex.Message}");
-        }
+        var restored = CommitRename(config, target, target.File.FullName, target.Length, target.ModifiedUtc, originalName, tmdbId: null, isTv: false, season: null, episodes: null, RenameRecord.RestoredSource, unmatched: true, out var failure);
+        if (restored is null) return new MatchApplyResult(false, failure!);
 
-        // What was remembered about this show goes too: the choice that led here is undone. And the automatic renamer leaves the file alone from now on.
+        // What was remembered about this show goes too: the choice that led here is undone. And the automatic renamer leaves the file alone from now on (the record above says so).
         if (ReleaseNameParser.Parse(restored, target.Input) is { } parsed) _log.ForgetMemory(RenameMemoryKey.For(parsed));
-        _log.Record(target.File.FullName, restored, null, false, null, null, RenameRecord.RestoredSource);
-        _queue.ApplyRename(config, target.Lane.Id, target.File.FullName, restored, unmatched: true);
-        return new MatchApplyResult(true, $"Put back to {originalName}.", originalName, 0, problems);
+        return new MatchApplyResult(true, $"Put back to {originalName}.", originalName, 0, new List<string>());
     }
 
     public MatchApplyResult LeaveAsIs(CompressarrConfig config, string laneId, string fullName, string? currentFileFullName)
@@ -306,11 +400,11 @@ public sealed class TmdbMatchService : ITmdbMatchService
     /// <summary>The other waiting episodes of the same show (the same name once read) that a choice could carry to: files left Unmatched or put back by hand, files renamed by Compressarr or FileBot (they may be wrong
     /// along with this one), and files chosen by hand to the very same title as this one (a batch that is being fixed). A file a person matched to a DIFFERENT title is never listed: their choice is not overruled.
     /// Shows only: a film has no "others".</summary>
-    private List<(string Path, ParsedName Parsed)> FindOthers(Target target, ParsedName thisFile, string? currentFile)
+    private List<OtherFile> FindOthers(Target target, ParsedName thisFile, string? currentFile)
     {
         var key = RenameMemoryKey.For(thisFile);
         var thisMatch = _log.Find(target.File.FullName)?.TmdbId;
-        var others = new List<(string, ParsedName)>();
+        var others = new List<OtherFile>();
         foreach (var entry in _resumeStore.Load(AppPaths.GetResumeFilePath()).Where(e => e.LaneId == target.Lane.Id && e.Status == ResumeStatus.Pending && !e.Removed))
         {
             if (Same(entry.FullName, target.File.FullName) || Same(entry.FullName, currentFile) || !File.Exists(entry.FullName)) continue;
@@ -328,7 +422,11 @@ public sealed class TmdbMatchService : ITmdbMatchService
 
             var original = record is null ? entry.FullName : Path.Combine(Path.GetDirectoryName(entry.FullName)!, Path.GetFileName(record.OriginalPath));
             var parsed = ReleaseNameParser.Parse(original, target.Input);
-            if (parsed is { IsTv: true, Season: not null } && RenameMemoryKey.For(parsed) == key) others.Add((entry.FullName, parsed));
+            if (parsed is { IsTv: true, Season: not null } && RenameMemoryKey.For(parsed) == key)
+            {
+                var info = new FileInfo(entry.FullName);
+                others.Add(new OtherFile(entry.FullName, parsed, info.Length, info.LastWriteTimeUtc));
+            }
         }
 
         return others;

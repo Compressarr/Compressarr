@@ -299,7 +299,8 @@ public class RunOrchestratorTests : IDisposable
     private (RunOrchestrator Orchestrator, string ResumeFilePath) BuildOrchestrator(
         CompressarrConfig config, IEncoderRunner processRunner, IResumeStateStore? resumeStore = null,
         IRunLogger? logger = null, TimeSpan? postExecTimeout = null, IEncodeSchedule? schedule = null, IRunHistoryStore? historyStore = null,
-        IEncoderResolver? encoders = null, IRunArchive? archive = null, ITmdbRenamer? tmdbRenamer = null, IRenameLog? renameLog = null)
+        IEncoderResolver? encoders = null, IRunArchive? archive = null, ITmdbRenamer? tmdbRenamer = null, IRenameLog? renameLog = null,
+        Compressarr.Core.Queue.IFileReservations? reservations = null, RenameReconciler? reconciler = null)
     {
         // HandBrakeCLI/presets "paths" just need to exist on disk for PathExists to pass -
         // PassThroughPathExpander does no real expansion, and FixedExtensionPresetService never
@@ -325,7 +326,7 @@ public class RunOrchestratorTests : IDisposable
             new PassThroughPathExpander(), new RealFolderScanner(), new NoOpFileBotRunner(), new FixedExtensionPresetService(), new MetadataService(),
             processRunner, new FileRouter(), new NoOpCompanionFileService(), new NoOpArrUnmonitorService(),
             new NoOpTrashService(), effectiveLogger, effectiveResumeStore, new NoOpProgressReporter(),
-            new StaticConfigStore(config), encoders, tmdbRenamer, renameLog);
+            new StaticConfigStore(config), encoders, tmdbRenamer, renameLog, reconciler);
 
         // postExecTimeout only ever non-null in the PostExec timeout test below - resolves the
         // internal test-only constructor overload; every other test keeps using the real
@@ -340,7 +341,7 @@ public class RunOrchestratorTests : IDisposable
                 new PassThroughPathExpander(), new FixedExtensionPresetService(), conversionOrchestrator, new MetadataService(),
                 effectiveResumeStore, effectiveLogger, effectiveHistory, new NoOpHistoryRollupCalculator(),
                 new Compressarr.Core.Reporting.HtmlReportGenerator(), new NoOpReportLauncher(), new NoOpNotificationService(), new NoOpNotificationDispatcher(),
-                new NoOpTrashService(), new NoOpProgressReporter(), new ActiveRunController(), effectiveSchedule, encoders, archive);
+                new NoOpTrashService(), new NoOpProgressReporter(), new ActiveRunController(), effectiveSchedule, encoders, archive, reservations);
 
         return (runOrchestrator, resumeFilePath);
     }
@@ -458,6 +459,80 @@ public class RunOrchestratorTests : IDisposable
         Assert.Equal("a.mkv", Path.GetFileName(left.FullName));
         Assert.True(left.FileBotUnmatched);
         Assert.True(File.Exists(Path.Combine(input, "a.mkv")));            // untouched
+    }
+
+    // ---- a file is reserved while it is encoded or renamed (3.2 beta 2 review, B2/B3) ----
+
+    [Fact]
+    public async Task RunOnceAsync_AFileThatIsBeingRenamed_IsNotStartedUntilTheRenameIsDone()
+    {
+        var (config, input) = MakeSingleLaneConfig("a.mkv", "b.mkv");
+        var processRunner = new RecordingProcessRunner();
+        var reservations = new Compressarr.Core.Queue.FileReservations();
+        var (orchestrator, _) = BuildOrchestrator(config, processRunner, reservations: reservations);
+
+        // A Match holds a.mkv, the first in line, for the moment it takes to rename it and update the queue.
+        var rename = reservations.TryReserve(Path.Combine(input, "a.mkv"));
+        Assert.NotNull(rename);
+        var run = orchestrator.RunOnceAsync(config);
+
+        await Task.Delay(500);
+        Assert.Empty(processRunner.ProcessedInOrder);                         // the encoder waits for it, and does not skip ahead or start on a file mid-rename
+        Assert.False(run.IsCompleted);
+
+        rename!.Dispose();
+        await run.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(new[] { "a.mkv", "b.mkv" }, processRunner.ProcessedInOrder);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_AFileRenamedWhileTheEncoderWaited_IsStartedUnderItsNewName_NotTheOldOne()
+    {
+        var (config, input) = MakeSingleLaneConfig("a.mkv");
+        var processRunner = new RecordingProcessRunner();
+        var reservations = new Compressarr.Core.Queue.FileReservations();
+        var (orchestrator, resumeFilePath) = BuildOrchestrator(config, processRunner, reservations: reservations);
+        var old = Path.Combine(input, "a.mkv");
+        var renamed = Path.Combine(input, "Heat (1995).mkv");
+
+        var rename = reservations.TryReserve(old);
+        var run = orchestrator.RunOnceAsync(config);
+        await Task.Delay(500);                                                // the pass has tracked a.mkv and is waiting for the file
+
+        // The rename (what Match does): the file moves, and the queue entry follows it, then the file is released.
+        File.Move(old, renamed);
+        new JsonResumeStateStore().Update(resumeFilePath, state => { state.Single(e => e.FullName == old).FullName = renamed; return true; });
+        rename!.Dispose();
+        await run.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.Equal(new[] { "Heat (1995).mkv" }, processRunner.ProcessedInOrder);
+    }
+
+    [Fact]
+    public async Task RunOnceAsync_AFileWhoseInterruptedRenameCannotBeFinished_IsHeldWhateverTheSetting_AndTheRestCarryOn()
+    {
+        var (config, input) = MakeSingleLaneConfig("Heat (1995).mkv", "b.mkv");
+        var store = new SqliteResumeStateStore();
+        var journal = new SqliteRenameJournal(store);
+        var log = new SqliteRenameLog(store);
+        var processRunner = new RecordingProcessRunner();
+        var (orchestrator, _) = BuildOrchestrator(config, processRunner, resumeStore: store, renameLog: log, reconciler: new RenameReconciler(journal, log));
+
+        // A rename of Old.mkv was interrupted after the video moved; its subtitle cannot follow because something now stands in its way.
+        var old = Path.Combine(input, "Old.mkv");
+        var moves = new[] { new RenameMove(old, Path.Combine(input, "Heat (1995).mkv")), new RenameMove(Path.Combine(input, "Old.en.srt"), Path.Combine(input, "Heat (1995).en.srt")) };
+        File.WriteAllText(moves[1].From, "the only copy of this subtitle");
+        File.WriteAllText(moves[1].To, "in the way");
+        journal.Begin(RenameIntent.From(input, moves, 949, false, null, null, RenameRecord.ManualSource, unmatched: false));
+
+        await orchestrator.RunOnceAsync(config);
+
+        // (This test's scanner stand-in lists every file as a video, subtitles included, so only the video is looked at here.)
+        Assert.DoesNotContain("Heat (1995).mkv", processRunner.ProcessedInOrder);    // the half-renamed set is not filed (and cleaned up around)
+        Assert.Contains("b.mkv", processRunner.ProcessedInOrder);                    // the rest of the queue carries on
+        Assert.True(File.Exists(moves[0].To));                                     // still there, not encoded, not deleted
+        Assert.Single(journal.Pending(input));
     }
 
     [Fact]
