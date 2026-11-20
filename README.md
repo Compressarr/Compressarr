@@ -20,9 +20,24 @@ fraction of the space.
 
 *The media shown is test data only. Your own results (speed, file size, savings) depend on your source files, hardware and profile.*
 
-## What's new in 3.0
+## What's new
 
-Compressarr 3.0 is the work that was first called 2.2, grown into a new generation. Compared with 2.1.10 (the last 2.x release) it adds:
+### 3.2
+
+- **A built-in TMDB renamer.** With a free TMDB key, Compressarr renames each file to `Title (Year)` or `Show (Year) - S01E02 - Episode Title` before it is scanned: nothing to buy, an alternative to FileBot. It is strict (it renames only when it is sure; anything else is left as it is and marked **Unmatched**), and a video and its subtitles are renamed together or not at all.
+- **Match and Fix match on the queue.** Search TMDB from a row's menu, pick the right film or show, and the file is renamed, keeping its place in line, its skip and its profile. It works on any waiting file, not only an Unmatched one, can correct a whole show at once, and can put the original name back.
+- **Hold unmatched files** (optional): files TMDB could not place wait for you instead of being compressed under a messy name.
+- **Renames that survive a crash.** Every rename is journalled before it starts, so a power cut or a crash is finished or undone on the next start, with the file's queue place and its way back kept.
+
+### 3.1
+
+- A **Videos lane** for home videos and other clips that are not movies or shows, **processing settings per lane**, and a choice of **what each lane records in History**.
+- **Priority rules** for the queue, and a **Change all** button to edit many waiting files at once.
+- **Save and Share** on reports (including a copy without file names), a **trash can** that removes a file's name from History, and a **crash journal** so a power cut while a file is being filed no longer loses its place.
+
+### 3.0
+
+Compressarr 3.0 is the work that was first called 2.2, grown into a new generation. Compared with 2.1.10 (the last 2.x release) it added:
 
 - **A second encoder: ffmpeg**, chosen per lane, with a profile editor, a preview of what a profile will do to a real file, hardware encoders (NVENC) and AV1. HandBrake stays the default.
 - **Your own profiles and a preset catalog.** Create, edit, duplicate and import encoding profiles, or install extra ones from the official catalog without waiting for a new release.
@@ -33,7 +48,7 @@ Compressarr 3.0 is the work that was first called 2.2, grown into a new generati
 - **Posters** on the queue (TMDb or OMDb), **Plex editions**, and a **TV / movie / video icon** on every queued file.
 - **Everything is signed**, so Windows 11 Smart App Control no longer blocks Compressarr itself.
 
-The full list is in the [changelog](CHANGELOG.md). Upgrading from 2.1? See [Upgrading](#upgrading-from-2x).
+The full list is in the [changelog](CHANGELOG.md). Upgrading? See [Upgrading](#upgrading).
 
 ## How it works
 
@@ -59,7 +74,7 @@ Watch folder → Detect TV / Movie → Compress → File into library
 ### Lanes: as many as you need
 
 A **lane** is one Input folder to watch, where finished files go, and the profiles to use. Add, duplicate, rename, enable and disable lanes freely; give one lane ffmpeg and another HandBrake,
-or send a stray file to a different lane's library from the queue. Libraries are never created for you, so a missing drive is reported, not quietly replaced by an empty folder.
+or send a stray file to a different lane's library from the queue. A **Videos lane** takes home videos and other clips that are not movies or shows, files them under their own names and never sends them to FileBot, Sonarr, Radarr or TMDB, and any lane can have its own delete, move and collision settings. Libraries are never created for you, so a missing drive is reported, not quietly replaced by an empty folder.
 
 <img src="Assets/Screenshots/lanes-page.png" alt="The Lanes page with two configured lanes" width="800">
 
@@ -100,7 +115,7 @@ the web interface needs the sign-in you set up in Settings > Security, and saved
 
 ### And more
 
-Optional renaming before a scan, with **FileBot** or the built-in **TMDB renamer** (no program to buy), and **Match** / **Fix match** on the queue to put a file right yourself; **Plex edition** tags (`{edition-Name}`) filed the way Plex expects; **queue posters** from TMDb or OMDb; scheduled and downloadable **backups** that
+Optional renaming before a scan, with **FileBot** or the built-in **TMDB renamer** (no program to buy), and **Match** / **Fix match** on any waiting file to put it right yourself, with an optional hold for files that could not be matched; **Plex edition** tags (`{edition-Name}`) filed the way Plex expects; **queue posters** from TMDb or OMDb; scheduled and downloadable **backups** that
 carry your settings, profiles, queue and history; a start-up window; and an installer where every program file is signed.
 
 ## Installation
@@ -146,9 +161,11 @@ Everything else is in the **[wiki](https://github.com/Compressarr/Compressarr/wi
 
 Found a bug or have an idea? Open an [issue](https://github.com/Compressarr/Compressarr/issues).
 
-## Upgrading from 2.x
+## Upgrading
 
-Install 3.0 over your 2.1 install. Your settings, lanes and queue carry over, and **the first start moves your run history into a database by itself** (the old file is kept as
+**From 3.0 or 3.1.** Install 3.2 over it. Your settings, lanes, queue and history carry over, and the first start upgrades the queue database (it gains the records the renamer and Match keep). Going back to 3.1 or 3.0 afterwards is not supported, because they cannot read the upgraded database, so take a backup (Settings > Backup & Restore) first if you want a way back.
+
+**From 2.x.** Install the current release over your 2.1 install. Your settings, lanes and queue carry over, and **the first start moves your run history into a database by itself** (the old file is kept as
 `Compressarr_History.csv.imported`). Going back to 2.1 afterwards is not supported, because 2.1 cannot read the new databases, so take a backup (Settings > Backup & Restore) first if you want a way
 back. One behaviour changes: **anyone outside your own network now needs a login**; on your own network and on the computer Compressarr runs on nothing changes. See the
 [changelog](CHANGELOG.md) for details. 2.1.10 is the last 2.x release.
